@@ -17,7 +17,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { PlusCircle, Trash2, Dices, ShieldCheck, Swords, ChevronUp, ChevronDown } from 'lucide-react';
+import { PlusCircle, Trash2, Dices, ShieldCheck, Swords, ChevronUp, ChevronDown, BedDouble, BedSingle, HeartPulse } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import {
     getCharacterClasses,
@@ -25,16 +25,25 @@ import {
     getCumulativeClassFeatures,
     getRaceTraitsDetails,
     getAvailableEquipmentItems,
-    getLevelUpOptions, // Import getLevelUpOptions
+    getLevelUpOptions,
 } from '@/services/dnd-api';
-import type { CharacterClass, CharacterRace, Feature, EquipmentItem, CharacterLevel } from '@/services/dnd-api';
+import type { CharacterClass, CharacterRace, Feature, EquipmentItem, CharacterLevel, HitPoints } from '@/services/dnd-api'; // Added HitPoints
 import { AddEquipmentDialog } from './add-equipment-dialog';
+import { ShortRestDialog } from './short-rest-dialog'; // Import ShortRestDialog
 
 // Helper function for dice rolling
 const rollDice = (diceString: string): number => {
     if (!diceString || !diceString.includes('d')) return 0;
     try {
-        const [numDice, numSides] = diceString.toLowerCase().split('d').map(Number);
+        const [numDiceStr, numSidesStr] = diceString.toLowerCase().split('d');
+        const numDice = parseInt(numDiceStr, 10);
+        const numSides = parseInt(numSidesStr, 10);
+
+        if (isNaN(numDice) || isNaN(numSides) || numDice <= 0 || numSides <= 0) {
+            console.error("Invalid dice string:", diceString);
+            return 0;
+        }
+
         let total = 0;
         for (let i = 0; i < numDice; i++) {
             total += Math.floor(Math.random() * numSides) + 1;
@@ -46,6 +55,7 @@ const rollDice = (diceString: string): number => {
     }
 };
 
+
 export function CharacterSheet() {
     const { toast } = useToast();
     // Basic character info state
@@ -56,6 +66,36 @@ export function CharacterSheet() {
     const [alignment, setAlignment] = useState('');
     const [background, setBackground] = useState('');
     const [playerName, setPlayerName] = useState('');
+
+    // Stats state
+    const [stats, setStats] = useState({
+        strength: 15,
+        dexterity: 14,
+        constitution: 13,
+        intelligence: 12,
+        wisdom: 10,
+        charisma: 8,
+    });
+
+    // Calculate modifiers based on stats (MUST be declared before useEffects/renders that use it)
+    const modifiers = useMemo(() => ({
+        strength: Math.floor((stats.strength - 10) / 2),
+        dexterity: Math.floor((stats.dexterity - 10) / 2),
+        constitution: Math.floor((stats.constitution - 10) / 2),
+        intelligence: Math.floor((stats.intelligence - 10) / 2),
+        wisdom: Math.floor((stats.wisdom - 10) / 2),
+        charisma: Math.floor((stats.charisma - 10) / 2),
+    }), [stats]);
+
+    // Hit Points and Hit Dice State
+    const [hitPoints, setHitPoints] = useState<HitPoints>({
+        current: 10,
+        max: 10,
+        temporary: 0,
+        currentHitDice: 1,
+        maxHitDice: 1,
+        hitDieType: null,
+    });
 
     // Data Fetching with React Query
     const { data: availableClasses = [], isLoading: isLoadingClasses } = useQuery<CharacterClass[], Error>({
@@ -84,12 +124,81 @@ export function CharacterSheet() {
     });
 
     // Fetch Cumulative Class Features based on selected class and level
-    const { data: classFeatures = [], isLoading: isLoadingClassFeatures, error: errorClassFeatures } = useQuery<Feature[], Error>({
+    const { data: classFeaturesRaw = [], isLoading: isLoadingClassFeatures, error: errorClassFeatures } = useQuery<Feature[], Error>({
         queryKey: ['classFeatures', selectedClass, level],
         queryFn: () => getCumulativeClassFeatures(selectedClass!, level),
         enabled: !!selectedClass && level > 0, // Only run query if class and level are selected
         staleTime: 5 * 60 * 1000, // Refetch class features every 5 mins or on change
     });
+
+    // State for tracking feature uses
+    const [featureUses, setFeatureUses] = useState<Record<string, number>>({});
+
+    // Combine features and traits and add current uses
+    const allFeaturesAndTraits = useMemo(() => {
+        const combined = [...raceTraits, ...classFeaturesRaw];
+        return combined.map(feature => ({
+            ...feature,
+            currentUses: featureUses[feature.name] ?? feature.maxUses ?? undefined, // Get uses from state, default to maxUses
+        }));
+    }, [raceTraits, classFeaturesRaw, featureUses]);
+
+
+    // Initialize or update featureUses state when features/traits change
+    useEffect(() => {
+        const initialUses: Record<string, number> = {};
+        [...raceTraits, ...classFeaturesRaw].forEach(feature => {
+            if (feature.maxUses !== null && feature.maxUses !== undefined) {
+                 // Only initialize if not already present in featureUses or if maxUses changed
+                 // This prevents resetting uses unnecessarily on data refetch
+                 if (featureUses[feature.name] === undefined) {
+                    initialUses[feature.name] = feature.maxUses;
+                } else {
+                     // Keep existing uses if feature is already tracked
+                     initialUses[feature.name] = featureUses[feature.name];
+                }
+            }
+        });
+         // Update state only if there are changes needed
+         if (Object.keys(initialUses).length > 0 || Object.keys(featureUses).length !== Object.keys(initialUses).length) {
+              // Merge existing uses with newly initialized ones
+              setFeatureUses(prevUses => ({ ...prevUses, ...initialUses }));
+         }
+
+    }, [raceTraits, classFeaturesRaw]); // Dependency on raw data
+
+
+    // Update Max HP and Hit Dice when level or class changes (Depends on modifiers.constitution)
+    useEffect(() => {
+        if (selectedClassData && level > 0) {
+            // Simple Max HP Calculation (Con mod per level, first level is max die roll)
+            const conModifier = modifiers.constitution; // Safe to access now
+            const hitDieSides = selectedClassData.hitDie ? parseInt(selectedClassData.hitDie.substring(1), 10) : 0;
+
+            let maxHp = hitDieSides + conModifier; // First level
+             if (level > 1) {
+                 // Average roll (rounded up) + CON mod for subsequent levels
+                 const averageRoll = Math.ceil((hitDieSides + 1) / 2);
+                 maxHp += (level - 1) * (averageRoll + conModifier);
+             }
+
+            setHitPoints(prev => ({
+                ...prev,
+                max: Math.max(1, maxHp), // Ensure HP is at least 1
+                // Reset current HP to new max if current exceeds new max or if it's the initial load
+                 current: prev.max === 10 && prev.current === 10 ? Math.max(1, maxHp) : Math.min(prev.current, Math.max(1, maxHp)), // Keep current HP if possible
+                maxHitDice: level,
+                currentHitDice: Math.min(prev.currentHitDice, level), // Cap current HD at new level
+                hitDieType: selectedClassData.hitDie,
+            }));
+        } else {
+            // Reset if no class/level selected
+            setHitPoints({
+                current: 1, max: 1, temporary: 0, currentHitDice: 0, maxHitDice: 0, hitDieType: null
+            });
+        }
+    }, [selectedClassData, level, modifiers.constitution]); // Dependency includes modifier now
+
 
     // Fetch Proficiency Bonus for the current level
     const { data: levelData } = useQuery<CharacterLevel, Error>({
@@ -100,28 +209,6 @@ export function CharacterSheet() {
     });
     const proficiencyBonus = useMemo(() => levelData?.proficiencyBonus ?? 0, [levelData]);
 
-     // Combine features and traits
-    const allFeaturesAndTraits = useMemo(() => [...raceTraits, ...classFeatures], [raceTraits, classFeatures]);
-
-    // Stats state
-    const [stats, setStats] = useState({
-        strength: 15,
-        dexterity: 14,
-        constitution: 13,
-        intelligence: 12,
-        wisdom: 10,
-        charisma: 8,
-    });
-
-    // Calculate modifiers based on stats
-    const modifiers = useMemo(() => ({
-        strength: Math.floor((stats.strength - 10) / 2),
-        dexterity: Math.floor((stats.dexterity - 10) / 2),
-        constitution: Math.floor((stats.constitution - 10) / 2),
-        intelligence: Math.floor((stats.intelligence - 10) / 2),
-        wisdom: Math.floor((stats.wisdom - 10) / 2),
-        charisma: Math.floor((stats.charisma - 10) / 2),
-    }), [stats]);
 
     // Skills state (simplified proficiency tracking)
     const [skills, setSkills] = useState({
@@ -175,6 +262,27 @@ export function CharacterSheet() {
         }
     };
 
+    const handleHitPointChange = (type: 'current' | 'max' | 'temporary', value: string) => {
+         const numValue = parseInt(value, 10);
+         if (!isNaN(numValue)) {
+             setHitPoints(prev => {
+                 const newHp = { ...prev };
+                 if (type === 'current') {
+                     newHp.current = Math.max(0, Math.min(numValue, newHp.max)); // Clamp between 0 and max
+                 } else if (type === 'max') {
+                     newHp.max = Math.max(1, numValue); // Max HP >= 1
+                     newHp.current = Math.min(newHp.current, newHp.max); // Adjust current if max decreased
+                 } else { // temporary
+                     newHp.temporary = Math.max(0, numValue);
+                 }
+                 return newHp;
+             });
+         } else if (value === '') { // Allow clearing the input
+             setHitPoints(prev => ({ ...prev, [type]: type === 'temporary' ? 0 : (type === 'max' ? 1 : 0) }));
+         }
+     };
+
+
     const getModifier = useCallback((statValue: number): number => {
         return Math.floor((statValue - 10) / 2);
     }, []);
@@ -226,10 +334,10 @@ export function CharacterSheet() {
         );
     }
 
-    // Calculate Armor Class (AC)
+    // Calculate Armor Class (AC) - Depends on modifiers.dexterity
     const armorClass = useMemo(() => {
         let baseAC = 10;
-        let dexMod = modifiers.dexterity;
+        let dexMod = modifiers.dexterity; // Safe to access now
         let maxDex: number | null = null;
         let hasShield = false;
         let armorEquipped = false;
@@ -241,9 +349,9 @@ export function CharacterSheet() {
                     hasShield = true;
                 } else {
                     // Assume only one body armor can be effectively equipped
-                    if (!armorEquipped) {
-                        baseAC = item.baseAC ?? baseAC; // Use armor's base AC
-                        if (!item.addDexModifier) {
+                    if (!armorEquipped && item.baseAC !== undefined) {
+                        baseAC = item.baseAC; // Use armor's base AC
+                        if (item.addDexModifier === false) { // Explicitly check for false
                             dexMod = 0; // Heavy armor typically doesn't add Dex
                         }
                         maxDex = item.maxDexBonus ?? null; // Check for Medium armor Dex cap
@@ -252,18 +360,28 @@ export function CharacterSheet() {
                 }
             });
 
+        // If no armor equipped, AC is 10 + Dex modifier
+        if (!armorEquipped) {
+           baseAC = 10;
+        }
+
+
         // Apply Dex modifier cap if applicable
         if (maxDex !== null) {
             dexMod = Math.min(dexMod, maxDex);
         }
 
         // Base AC + Dex Modifier + Shield Bonus
-        return baseAC + dexMod + (hasShield ? 2 : 0);
-    }, [characterEquipment, modifiers.dexterity]);
+        // Shield bonus is usually +2, check item details if variable shields exist
+        const shieldBonus = hasShield ? (characterEquipment.find(i => i.isEquipped && i.armorCategory === 'Shield')?.baseAC ?? 2) : 0;
+
+        return baseAC + dexMod + shieldBonus;
+    }, [characterEquipment, modifiers.dexterity]); // Dependency includes modifier
 
 
     // Determine equipped weapons and actionable features
     const equippedWeapons = useMemo(() => characterEquipment.filter(item => item.isEquipped && item.type === 'Weapon'), [characterEquipment]);
+    // Use the memoized 'allFeaturesAndTraits' which includes 'currentUses'
     const actionableFeatures = useMemo(() => allFeaturesAndTraits.filter(f => f.isActionable), [allFeaturesAndTraits]);
 
      // Function to check proficiency
@@ -290,7 +408,7 @@ export function CharacterSheet() {
     }, [selectedClassData, characterProficiencies]);
 
 
-    // Calculate Hit Bonus for a weapon
+    // Calculate Hit Bonus for a weapon - Depends on modifiers
     const getHitBonus = useCallback((weapon: EquipmentItem): number => {
         if (!proficiencyBonus) return 0;
 
@@ -309,9 +427,9 @@ export function CharacterSheet() {
         const proficiencyMod = isProficientWith(weapon) ? proficiencyBonus : 0;
 
         return abilityMod + proficiencyMod;
-    }, [modifiers, proficiencyBonus, isProficientWith]);
+    }, [modifiers, proficiencyBonus, isProficientWith]); // Dependency includes modifier
 
-    // Calculate Damage Bonus for a weapon
+    // Calculate Damage Bonus for a weapon - Depends on modifiers
     const getDamageBonus = useCallback((weapon: EquipmentItem): number => {
          let abilityMod = modifiers.strength; // Default to Strength
          const isFinesse = weapon.properties?.includes('Finesse');
@@ -332,7 +450,8 @@ export function CharacterSheet() {
 
 
          return abilityMod + fightingStyleBonus;
-    }, [modifiers, isProficientWith /* fightingStyle, hasShieldEquipped */]); // Add dependencies if fighting style is implemented
+    }, [modifiers /* fightingStyle, hasShieldEquipped */]); // Dependency includes modifier
+
 
     // --- Action Handlers ---
     const handleAttackRoll = (weaponName: string, hitBonus: number) => {
@@ -357,14 +476,102 @@ export function CharacterSheet() {
         });
     };
 
-    const handleFeatureAction = (featureName: string) => {
-         // TODO: Implement logic for specific feature actions (e.g., Second Wind, Action Surge)
-         // This might involve tracking uses, rolling dice, applying effects, etc.
+    const handleUseFeature = (featureName: string) => {
+         const feature = allFeaturesAndTraits.find(f => f.name === featureName);
+         if (!feature || feature.currentUses === undefined || feature.currentUses === null) {
+             // Handle features without uses (like passive traits marked actionable or unlimited use actions)
+             toast({
+                 title: `Used ${featureName}`,
+                 description: feature?.description.split('.')[0] + '.' || "Feature action executed.",
+             });
+             // TODO: Implement logic for specific feature actions (e.g., Cunning Action choice)
+             return;
+         }
+
+         if (feature.currentUses > 0) {
+             setFeatureUses(prev => ({
+                 ...prev,
+                 [featureName]: prev[featureName] - 1,
+             }));
+             toast({
+                 title: `Used ${featureName}`,
+                 description: `${feature.currentUses - 1} uses remaining. ${feature.description.split('.')[0]}.`,
+             });
+             // TODO: Implement specific effect of using the feature (e.g., Second Wind healing)
+             if (featureName === 'Second Wind') {
+                  const healing = rollDice('1d10') + level;
+                  setHitPoints(prev => ({
+                      ...prev,
+                      current: Math.min(prev.max, prev.current + healing)
+                  }));
+                   toast({ title: 'Second Wind Healing', description: `Regained ${healing} hit points.` });
+             }
+         } else {
+             toast({
+                 variant: "destructive",
+                 title: `Cannot Use ${featureName}`,
+                 description: "No uses remaining.",
+             });
+         }
+     };
+
+
+    // --- Rest Handlers ---
+    const [isShortRestDialogOpen, setIsShortRestDialogOpen] = useState(false);
+
+    const handleShortRest = (hitDiceSpent: number, hpRecovered: number) => {
+         setHitPoints(prev => ({
+             ...prev,
+             current: Math.min(prev.max, prev.current + hpRecovered),
+             currentHitDice: Math.max(0, prev.currentHitDice - hitDiceSpent),
+         }));
+
+         // Reset features that refresh on short rest
+         const usesReset: Record<string, number> = {};
+         allFeaturesAndTraits.forEach(feature => {
+             if (feature.usesResetOn === 'short-rest' && feature.maxUses !== null && feature.maxUses !== undefined) {
+                 usesReset[feature.name] = feature.maxUses;
+             }
+         });
+          setFeatureUses(prev => ({ ...prev, ...usesReset }));
+
+
          toast({
-             title: `Used ${featureName}`,
-             description: "Feature action executed (implementation pending).",
+             title: "Short Rest Complete",
+             description: `Recovered ${hpRecovered} HP. Spent ${hitDiceSpent} Hit Dice. Short rest features refreshed.`,
          });
      };
+
+    const handleLongRest = () => {
+        // Reset HP to max
+        // Reset Hit Dice (regain up to half max HD, min 1)
+        // Reset all feature uses
+        const hitDiceToRegain = Math.max(1, Math.floor(hitPoints.maxHitDice / 2));
+        const newCurrentHitDice = Math.min(hitPoints.maxHitDice, hitPoints.currentHitDice + hitDiceToRegain);
+
+        setHitPoints(prev => ({
+            ...prev,
+            current: prev.max,
+            temporary: 0, // Temp HP always goes away on long rest
+            currentHitDice: newCurrentHitDice,
+        }));
+
+        // Reset all features that have uses
+        const usesReset: Record<string, number> = {};
+         allFeaturesAndTraits.forEach(feature => {
+             if (feature.maxUses !== null && feature.maxUses !== undefined) {
+                 usesReset[feature.name] = feature.maxUses;
+             }
+         });
+        setFeatureUses(usesReset); // Completely replace with reset values
+
+
+        toast({
+            title: "Long Rest Complete",
+            description: `HP fully restored. Regained ${hitDiceToRegain} Hit Dice. All features refreshed.`,
+        });
+    };
+
 
   return (
     <>
@@ -383,7 +590,7 @@ export function CharacterSheet() {
                         />
                         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-sm text-muted-foreground">
                             {/* Class Selection */}
-                            <Select value={selectedClass} onValueChange={setSelectedClass}>
+                            <Select value={selectedClass} onValueChange={(value) => {setSelectedClass(value); setFeatureUses({})}}> {/* Reset uses on class change */}
                                <SelectTrigger className="w-full" aria-label="Select Class">
                                    <SelectValue placeholder={isLoadingClasses ? "Loading..." : "Class"} />
                                </SelectTrigger>
@@ -398,7 +605,7 @@ export function CharacterSheet() {
                            </Select>
 
                             {/* Race Selection */}
-                            <Select value={selectedRace} onValueChange={setSelectedRace}>
+                            <Select value={selectedRace} onValueChange={(value) => {setSelectedRace(value); setFeatureUses({})}}> {/* Reset uses on race change */}
                                  <SelectTrigger className="w-full" aria-label="Select Race">
                                      <SelectValue placeholder={isLoadingRaces ? "Loading..." : "Race"} />
                                  </SelectTrigger>
@@ -412,12 +619,21 @@ export function CharacterSheet() {
                                  </SelectContent>
                              </Select>
 
-                             <Input placeholder="Level" type="number" value={level} onChange={(e) => setLevel(Math.max(1, parseInt(e.target.value) || 1))} aria-label="Level"/>
+                             <Input placeholder="Level" type="number" value={level} onChange={(e) => {setLevel(Math.max(1, parseInt(e.target.value) || 1)); setFeatureUses({})}} aria-label="Level"/> {/* Reset uses on level change */}
                              <Input placeholder="Background" value={background} onChange={(e) => setBackground(e.target.value)} aria-label="Background" />
                              <Input placeholder="Player Name" value={playerName} onChange={(e) => setPlayerName(e.target.value)} aria-label="Player Name"/>
                              <Input placeholder="Alignment" value={alignment} onChange={(e) => setAlignment(e.target.value)} aria-label="Alignment"/>
                          </div>
                      </div>
+                      {/* Rest Buttons */}
+                    <div className="flex justify-end gap-2 mt-4">
+                         <Button variant="outline" size="sm" onClick={() => setIsShortRestDialogOpen(true)}>
+                             <BedSingle className="mr-2 h-4 w-4" /> Short Rest
+                         </Button>
+                         <Button variant="default" size="sm" onClick={handleLongRest}>
+                              <BedDouble className="mr-2 h-4 w-4" /> Long Rest
+                         </Button>
+                    </div>
                 </CardHeader>
             </Card>
 
@@ -441,8 +657,8 @@ export function CharacterSheet() {
                            </CardHeader>
                            <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                              {Object.entries(stats).map(([name, value]) => (
-                               <div key={name} className="text-center p-3 border rounded-md bg-secondary/30 relative">
-                                 <Label htmlFor={name} className="uppercase text-xs font-semibold tracking-wider text-muted-foreground">{name}</Label>
+                               <div key={name} className="text-center p-3 border rounded-md bg-secondary/30 relative pt-6"> {/* Added pt-6 */}
+                                 <Label htmlFor={name} className="uppercase text-xs font-semibold tracking-wider text-muted-foreground absolute top-1 left-1/2 transform -translate-x-1/2">{name}</Label> {/* Adjusted label position */}
                                   <div className="relative mt-1">
                                      <Input
                                          id={name}
@@ -528,12 +744,18 @@ export function CharacterSheet() {
                                          <ScrollArea className="h-[400px]">
                                              <Accordion type="multiple" className="w-full">
                                                  {allFeaturesAndTraits.map((feature, index) => (
-                                                     <AccordionItem value={`item-${index}`} key={index}>
+                                                     <AccordionItem value={`item-${index}-${feature.name}`} key={`${index}-${feature.name}`}>
                                                          <AccordionTrigger className="text-sm font-medium hover:no-underline">
                                                              <span className='text-left'>{feature.name} <span className="text-xs text-muted-foreground">({feature.source})</span></span>
                                                          </AccordionTrigger>
                                                          <AccordionContent className="text-sm text-muted-foreground">
                                                              {feature.description}
+                                                              {/* Display uses if applicable */}
+                                                              {(feature.maxUses !== null && feature.maxUses !== undefined) && (
+                                                                 <p className="text-xs mt-1 text-primary">
+                                                                     Uses: {feature.currentUses ?? 'N/A'} / {feature.maxUses} (Resets on {feature.usesResetOn || 'N/A'})
+                                                                 </p>
+                                                              )}
                                                          </AccordionContent>
                                                      </AccordionItem>
                                                  ))}
@@ -571,16 +793,32 @@ export function CharacterSheet() {
                                          {/* TODO: Get base speed from race */}
                                          <div className="text-3xl font-bold mt-1">30 ft</div> {/* Placeholder */}
                                      </div>
+                                     {/* Hit Points */}
                                     <div className="col-span-3 border rounded-md p-3 bg-secondary/30">
-                                        <Label className="text-xs uppercase text-muted-foreground">Hit Points</Label>
-                                        <div className="flex justify-center items-center gap-2 mt-1">
-                                            {/* TODO: Add state for current/max HP */}
-                                            <Input type="number" placeholder="Current" className="w-20 text-center" aria-label="Current Hit Points"/>
-                                             <span className="text-muted-foreground">/</span>
-                                            <Input type="number" placeholder="Max" className="w-20 text-center" aria-label="Maximum Hit Points"/>
-                                         </div>
+                                          <Label className="text-xs uppercase text-muted-foreground flex items-center justify-center gap-1"><HeartPulse className='inline h-3 w-3' /> Hit Points</Label>
+                                          <div className="flex justify-center items-center gap-2 mt-1">
+                                               <Input
+                                                   type="number"
+                                                   value={hitPoints.current}
+                                                   onChange={(e) => handleHitPointChange('current', e.target.value)}
+                                                   className="w-20 text-center text-lg font-semibold"
+                                                   aria-label="Current Hit Points"
+                                                   max={hitPoints.max}
+                                                   min={0}
+                                               />
+                                               <span className="text-muted-foreground">/</span>
+                                                <span className="w-20 text-center text-lg font-semibold">{hitPoints.max}</span> {/* Display Max HP */}
+                                          </div>
+                                           {hitPoints.temporary > 0 && (
+                                              <p className="text-xs text-blue-400 mt-1">+{hitPoints.temporary} Temporary HP</p>
+                                          )}
+                                           {/* Hit Dice */}
+                                           <div className="mt-2 pt-2 border-t border-border/50">
+                                                <Label className="text-xs uppercase text-muted-foreground">Hit Dice</Label>
+                                                <p className='text-sm font-medium'>{hitPoints.currentHitDice} / {hitPoints.maxHitDice} ({hitPoints.hitDieType || 'N/A'})</p>
+                                           </div>
                                      </div>
-                                     {/* TODO: Add Hit Dice, Death Saves */}
+                                     {/* TODO: Add Death Saves */}
                                  </CardContent>
                              </Card>
                          </div>
@@ -636,9 +874,21 @@ export function CharacterSheet() {
                                                        <Badge variant="outline" className='text-xs'>{feature.source}</Badge>
                                                    </p>
                                                    <p className='text-xs text-muted-foreground pl-6'>{feature.description.split('.')[0] + '.'} {/* Show first sentence */} </p>
+                                                    {/* Display uses remaining */}
+                                                    {(feature.maxUses !== null && feature.maxUses !== undefined) && (
+                                                        <p className="text-xs text-primary pl-6 mt-1">
+                                                             Uses: {feature.currentUses ?? 'N/A'} / {feature.maxUses}
+                                                        </p>
+                                                     )}
                                                </div>
                                               <div className="flex gap-2 flex-shrink-0 mt-2 sm:mt-0">
-                                                  <Button size="sm" variant="default" onClick={() => handleFeatureAction(feature.name)}>
+                                                  <Button
+                                                     size="sm"
+                                                     variant="default"
+                                                     onClick={() => handleUseFeature(feature.name)}
+                                                      disabled={feature.maxUses !== null && feature.maxUses !== undefined && (feature.currentUses ?? 0) <= 0} // Disable if uses are 0
+                                                     title={feature.maxUses !== null && feature.maxUses !== undefined && (feature.currentUses ?? 0) <= 0 ? 'No uses remaining' : `Use ${feature.name}`}
+                                                   >
                                                       Use Feature
                                                   </Button>
                                               </div>
@@ -693,22 +943,22 @@ export function CharacterSheet() {
                                                     {(item.type === 'Weapon' || item.type === 'Armor') && (
                                                       <Button
                                                            variant={item.isEquipped ? "secondary" : "outline"}
-                                                           size="sm"
-                                                           className='h-7 px-2 text-xs'
+                                                           size="xs" // Make button smaller
+                                                           className='h-6 px-1.5 text-xs' // Adjust padding and height
                                                            onClick={() => handleToggleEquip(item.name)}
                                                            title={item.isEquipped ? `Unequip ${item.name}` : `Equip ${item.name}`}
                                                        >
-                                                           {item.isEquipped ? <ChevronDown className="h-4 w-4"/> : <ChevronUp className="h-4 w-4"/>}
+                                                           {item.isEquipped ? <ChevronDown className="h-3 w-3"/> : <ChevronUp className="h-3 w-3"/>}
                                                        </Button>
                                                     )}
                                                    <Button
                                                        variant="ghost"
                                                        size="icon"
-                                                       className="h-7 w-7 opacity-0 group-hover:opacity-100 text-destructive hover:text-destructive"
+                                                       className="h-6 w-6 opacity-0 group-hover:opacity-100 text-destructive hover:text-destructive" // Adjust size
                                                        onClick={() => handleRemoveEquipment(item.name)}
                                                        aria-label={`Remove ${item.name}`}
                                                    >
-                                                       <Trash2 className="h-4 w-4" />
+                                                       <Trash2 className="h-3.5 w-3.5" /> {/* Adjust icon size */}
                                                    </Button>
                                                </div>
                                            </li>
@@ -751,6 +1001,22 @@ export function CharacterSheet() {
             onAddItem={handleAddEquipment}
             isLoadingItems={isLoadingEquipment}
         />
+
+         {/* Short Rest Dialog */}
+         <ShortRestDialog
+             isOpen={isShortRestDialogOpen}
+             onOpenChange={setIsShortRestDialogOpen}
+             maxHitDice={hitPoints.maxHitDice}
+             currentHitDice={hitPoints.currentHitDice}
+             hitDieType={hitPoints.hitDieType}
+             constitutionModifier={modifiers.constitution}
+             maxHp={hitPoints.max}
+             currentHp={hitPoints.current}
+             onConfirm={handleShortRest}
+             rollDiceFn={rollDice} // Pass the rollDice helper
+         />
     </>
   );
 }
+
+    

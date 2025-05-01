@@ -12,9 +12,9 @@ export interface CharacterClass {
    */
   description: string;
   /**
-   * Hit die type for the class (e.g., d8, d10).
+   * Hit die type for the class (e.g., d8, d10). String representation like 'd6', 'd8', 'd10', 'd12'.
    */
-  hitDie: string;
+  hitDie: `d${6 | 8 | 10 | 12}`;
    /**
     * Proficiencies granted by the class.
     */
@@ -65,6 +65,19 @@ export interface Feature {
    * Indicates if this feature provides an actionable ability.
    */
   isActionable?: boolean; // Optional flag for features usable as actions
+   /**
+    * Maximum number of uses (optional, null/undefined means unlimited or not applicable).
+    */
+   maxUses?: number | null;
+   /**
+    * How uses are reset (e.g., short rest, long rest, daily).
+    */
+   usesResetOn?: 'short-rest' | 'long-rest' | 'daily' | null;
+   /**
+    * Current number of uses remaining (managed by character sheet state, not API directly usually).
+    * Included here for type consistency if needed, but primarily a state concern.
+    */
+   currentUses?: number;
 }
 
 
@@ -163,6 +176,24 @@ export interface EquipmentItem {
       * Whether wearing this armor imposes disadvantage on Stealth checks.
       */
      stealthDisadvantage?: boolean;
+}
+
+/**
+ * Represents character Hit Points and Hit Dice.
+ */
+export interface HitPoints {
+    /** Current Hit Points */
+    current: number;
+    /** Maximum Hit Points */
+    max: number;
+    /** Temporary Hit Points */
+    temporary: number;
+    /** Current available Hit Dice */
+    currentHitDice: number;
+    /** Maximum number of Hit Dice (usually equal to level) */
+    maxHitDice: number;
+    /** The type of hit die the character uses (e.g., d8) */
+    hitDieType: `d${6 | 8 | 10 | 12}` | null;
 }
 
 
@@ -266,7 +297,7 @@ export async function getLevelUpOptions(className: string, targetLevel: number):
   // TODO: Implement this by calling a real API based on className and targetLevel.
   // This is placeholder data simulating features gained *at* targetLevel.
   console.log(`Fetching level up options for ${className} to level ${targetLevel}`);
-  await new Promise(resolve => setTimeout(resolve, 500)); // Simulate network delay
+  await new Promise(resolve => setTimeout(resolve, 50)); // Simulate network delay (reduced for cumulative fetch)
 
   let features: Feature[] = [];
   let proficiencyBonus: number | undefined = undefined;
@@ -284,11 +315,11 @@ export async function getLevelUpOptions(className: string, targetLevel: number):
       if (targetLevel === 1) {
         features = [
           { name: 'Fighting Style', description: 'You adopt a particular style of fighting as your specialty (e.g., Archery, Dueling). Choose one.', source: 'Fighter Class' },
-          { name: 'Second Wind', description: 'On your turn, you can use a bonus action to regain hit points equal to 1d10 + your fighter level.', source: 'Fighter Class', isActionable: true }, // Mark as actionable
+          { name: 'Second Wind', description: 'On your turn, you can use a bonus action to regain hit points equal to 1d10 + your fighter level. Once you use this feature, you must finish a short or long rest before you can use it again.', source: 'Fighter Class', isActionable: true, maxUses: 1, usesResetOn: 'short-rest' }, // Add usage info
         ];
       } else if (targetLevel === 2) {
         features = [
-          { name: 'Action Surge', description: 'On your turn, you can take one additional action. Once you use this feature, you must finish a short or long rest before you can use it again.', source: 'Fighter Class', isActionable: true }, // Mark as actionable
+          { name: 'Action Surge', description: 'On your turn, you can take one additional action. Once you use this feature, you must finish a short or long rest before you can use it again.', source: 'Fighter Class', isActionable: true, maxUses: 1, usesResetOn: 'short-rest' }, // Add usage info (Reset can vary based on level)
         ];
       } else if (targetLevel === 3) {
         features = [
@@ -302,7 +333,7 @@ export async function getLevelUpOptions(className: string, targetLevel: number):
        if (targetLevel === 1) {
          features = [
            { name: 'Spellcasting', description: 'You have learned to untangle and reshape the fabric of reality in harmony with your wishes and expectations.', source: 'Wizard Class' }, // Not directly an action, but enables spell actions
-           { name: 'Arcane Recovery', description: 'You have learned to regain some of your magical energy by studying your spellbook. Once per day when you finish a short rest, you can choose expended spell slots to recover.', source: 'Wizard Class' }, // Typically used during rest
+           { name: 'Arcane Recovery', description: 'You have learned to regain some of your magical energy by studying your spellbook. Once per day when you finish a short rest, you can choose expended spell slots to recover.', source: 'Wizard Class', maxUses: 1, usesResetOn: 'long-rest' }, // Typically used during rest, once per long rest
          ];
        } else if (targetLevel === 2) {
          features = [
@@ -321,7 +352,7 @@ export async function getLevelUpOptions(className: string, targetLevel: number):
             ];
         } else if (targetLevel === 2) {
             features = [
-                { name: 'Cunning Action', description: 'Your quick thinking and agility allow you to move and act quickly. You can take a bonus action on each of your turns in combat. This action can be used only to take the Dash, Disengage, or Hide action.', source: 'Rogue Class', isActionable: true }, // Provides bonus actions
+                { name: 'Cunning Action', description: 'Your quick thinking and agility allow you to move and act quickly. You can take a bonus action on each of your turns in combat. This action can be used only to take the Dash, Disengage, or Hide action.', source: 'Rogue Class', isActionable: true }, // Provides bonus actions, no "uses"
             ];
         }
         // Add more levels...
@@ -335,8 +366,8 @@ export async function getLevelUpOptions(className: string, targetLevel: number):
             ];
         } else if (targetLevel === 2) {
             features = [
-                 { name: 'Channel Divinity (Turn Undead)', description: 'As an action, you present your holy symbol and speak a prayer censuring the undead. Each undead that can see or hear you within 30 feet of you must make a Wisdom saving throw. If the creature fails its saving throw, it is turned for 1 minute or until it takes any damage.', source: 'Cleric Class', isActionable: true }, // Actionable Channel Divinity
-                 // Note: Domains grant another use of Channel Divinity here.
+                 { name: 'Channel Divinity', description: 'You gain the ability to channel divine energy directly from your deity, using that energy to fuel magical effects. You start with two such effects: Turn Undead and an effect determined by your domain. Some domains grant you additional effects as you advance in levels. When you use your Channel Divinity, you choose which effect to create. You must then finish a short or long rest to use your Channel Divinity again.', source: 'Cleric Class', isActionable: true, maxUses: 1, usesResetOn: 'short-rest' }, // Combined description, usage tied to the overall feature
+                 // Individual effects like Turn Undead aren't separate use-limited features, they consume the main Channel Divinity use.
             ];
         }
         // Add more levels...
@@ -369,7 +400,7 @@ export async function getRaceTraitsDetails(traitNames: string[]): Promise<Featur
     // TODO: Implement this by calling a real API based on traitNames.
     // This is placeholder data.
     console.log(`Fetching details for traits: ${traitNames.join(', ')}`);
-    await new Promise(resolve => setTimeout(resolve, 300)); // Simulate network delay
+    await new Promise(resolve => setTimeout(resolve, 50)); // Simulate network delay
 
     // Mark some traits as potentially actionable if they grant specific actions/abilities
     const allTraitDetails: Record<string, Feature> = {
@@ -380,7 +411,7 @@ export async function getRaceTraitsDetails(traitNames: string[]): Promise<Featur
         'Trance': { name: 'Trance', description: 'Elves don’t need to sleep. Instead, they meditate deeply, remaining semiconscious, for 4 hours a day.', source: 'Elf Race' }, // Affects rest
         'Dwarven Resilience': { name: 'Dwarven Resilience', description: 'You have advantage on saving throws against poison, and you have resistance against poison damage.', source: 'Dwarf Race' }, // Passive resistance
         'Stonecunning': { name: 'Stonecunning', description: 'Whenever you make an Intelligence (History) check related to the origin of stonework, you are considered proficient in the History skill and add double your proficiency bonus to the check, instead of your normal proficiency bonus.', source: 'Dwarf Race' }, // Affects skill checks
-        'Lucky': { name: 'Lucky', description: 'When you roll a 1 on an attack roll, ability check, or saving throw, you can reroll the die and must use the new roll.', source: 'Halfling Race', isActionable: true }, // Reaction/Triggered ability
+        'Lucky': { name: 'Lucky', description: 'When you roll a 1 on an attack roll, ability check, or saving throw, you can reroll the die and must use the new roll.', source: 'Halfling Race', isActionable: true, maxUses: null, usesResetOn: null }, // Actionable, but uses are situational/reaction based, not tracked numerically like class features. Set maxUses/usesResetOn to null.
         'Brave': { name: 'Brave', description: 'You have advantage on saving throws against being frightened.', source: 'Halfling Race' }, // Passive resistance
         'Halfling Nimbleness': { name: 'Halfling Nimbleness', description: 'You can move through the space of any creature that is of a size larger than yours.', source: 'Halfling Race' }, // Affects movement
     };
@@ -401,16 +432,23 @@ export async function getCumulativeClassFeatures(className: string, maxLevel: nu
     let allFeatures: Feature[] = [];
     if (!className || maxLevel < 1) return []; // Guard clause
 
+    // Use Promise.all for potentially faster fetching if the API supports concurrent requests
+    const levelPromises: Promise<CharacterLevel>[] = [];
     for (let level = 1; level <= maxLevel; level++) {
-        try {
-            const levelData = await getLevelUpOptions(className, level);
-            allFeatures = allFeatures.concat(levelData.features);
-        } catch (error) {
-            console.error(`Error fetching features for ${className} level ${level}:`, error);
-            // Decide how to handle partial failures - stop, continue, return partial?
-            // For now, let's just log and continue.
-        }
+        levelPromises.push(getLevelUpOptions(className, level));
     }
+
+    try {
+        const levelResults = await Promise.all(levelPromises);
+        levelResults.forEach(levelData => {
+            allFeatures = allFeatures.concat(levelData.features);
+        });
+    } catch (error) {
+        console.error(`Error fetching cumulative features for ${className} up to level ${maxLevel}:`, error);
+        // Handle the error appropriately - maybe return partial data or throw
+        throw new Error(`Failed to fetch all features for ${className}.`);
+    }
+
     return allFeatures;
 }
 
@@ -421,7 +459,7 @@ export async function getCumulativeClassFeatures(className: string, maxLevel: nu
 export async function getAvailableEquipmentItems(): Promise<EquipmentItem[]> {
   // TODO: Implement this by calling a real API or database. Using placeholder data.
   console.log('Fetching available equipment items...');
-  await new Promise(resolve => setTimeout(resolve, 400)); // Simulate network delay
+  await new Promise(resolve => setTimeout(resolve, 100)); // Simulate network delay
 
   return [
     { name: 'Backpack', description: 'Holds adventuring gear', weight: 5, cost: '2 gp', type: 'Adventuring Gear' },
@@ -444,3 +482,5 @@ export async function getAvailableEquipmentItems(): Promise<EquipmentItem[]> {
     { name: 'Thieves\' Tools', description: 'Tools for disarming traps and opening locks', weight: 1, cost: '25 gp', type: 'Tool' },
   ].sort((a, b) => a.name.localeCompare(b.name)); // Sort alphabetically
 }
+
+    

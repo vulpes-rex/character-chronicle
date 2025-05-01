@@ -15,6 +15,16 @@ export interface CharacterClass {
    * Hit die type for the class (e.g., d8, d10).
    */
   hitDie: string;
+   /**
+    * Proficiencies granted by the class.
+    */
+   proficiencies: {
+     armor: string[]; // e.g., ['Light', 'Medium', 'Shields']
+     weapons: string[]; // e.g., ['Simple', 'Martial']
+     tools?: string[];
+     savingThrows: string[]; // e.g., ['Strength', 'Constitution']
+     skills?: { choose: number; options: string[] }; // e.g., { choose: 2, options: ['Acrobatics', 'Athletics', ...] }
+   };
 }
 
 /**
@@ -51,6 +61,10 @@ export interface Feature {
    * The source of the feature (e.g., Class, Race, Feat).
    */
   source: string;
+  /**
+   * Indicates if this feature provides an actionable ability.
+   */
+  isActionable?: boolean; // Optional flag for features usable as actions
 }
 
 
@@ -104,8 +118,51 @@ export interface EquipmentItem {
      /**
       * The type of item (e.g., 'Weapon', 'Armor', 'Adventuring Gear').
       */
-     type?: string;
-     // Add other relevant fields like damage, AC, properties etc. if needed
+     type?: 'Weapon' | 'Armor' | 'Adventuring Gear' | 'Tool' | 'Potion' | string; // More specific types
+     /**
+      * Indicates if the item is currently equipped.
+      */
+     isEquipped?: boolean;
+     /**
+      * Category of the weapon (e.g., 'Simple Melee', 'Martial Ranged'). Relevant if type is 'Weapon'.
+      */
+     weaponCategory?: 'Simple Melee' | 'Simple Ranged' | 'Martial Melee' | 'Martial Ranged' | string;
+     /**
+      * Damage dice string (e.g., '1d8', '2d6'). Relevant if type is 'Weapon'.
+      */
+     damageDice?: string;
+     /**
+      * Type of damage dealt (e.g., 'Slashing', 'Piercing', 'Bludgeoning'). Relevant if type is 'Weapon'.
+      */
+     damageType?: string;
+     /**
+      * Weapon properties (e.g., ['Finesse', 'Light', 'Versatile (1d10)']). Relevant if type is 'Weapon'.
+      */
+     properties?: string[];
+     /**
+      * Category of the armor (e.g., 'Light', 'Medium', 'Heavy', 'Shield'). Relevant if type is 'Armor'.
+      */
+     armorCategory?: 'Light' | 'Medium' | 'Heavy' | 'Shield';
+     /**
+      * Base Armor Class provided by the armor. Relevant if type is 'Armor'.
+      */
+     baseAC?: number;
+     /**
+      * Whether the Dexterity modifier is added to AC. Relevant if type is 'Armor'.
+      */
+     addDexModifier?: boolean;
+     /**
+      * Maximum Dexterity bonus allowed for AC. Relevant for Medium Armor. Null means no limit.
+      */
+     maxDexBonus?: number | null;
+     /**
+      * Strength requirement to wear the armor without speed penalty. Relevant for Heavy Armor.
+      */
+     strengthRequirement?: number | null;
+     /**
+      * Whether wearing this armor imposes disadvantage on Stealth checks.
+      */
+     stealthDisadvantage?: boolean;
 }
 
 
@@ -121,21 +178,48 @@ export async function getCharacterClasses(): Promise<CharacterClass[]> {
       name: 'Fighter',
       description: 'A master of martial combat, skilled with a variety of weapons and armor.',
       hitDie: 'd10',
+      proficiencies: {
+        armor: ['Light', 'Medium', 'Heavy', 'Shields'],
+        weapons: ['Simple', 'Martial'],
+        savingThrows: ['Strength', 'Constitution'],
+        skills: { choose: 2, options: ['Acrobatics', 'Animal Handling', 'Athletics', 'History', 'Insight', 'Intimidation', 'Perception', 'Survival'] },
+      },
     },
     {
       name: 'Wizard',
       description: 'A scholarly magic-user capable of manipulating the structures of reality.',
       hitDie: 'd6',
+      proficiencies: {
+        armor: [],
+        weapons: ['Daggers', 'Darts', 'Slings', 'Quarterstaffs', 'Light Crossbows'], // Specific weapons
+        savingThrows: ['Intelligence', 'Wisdom'],
+        skills: { choose: 2, options: ['Arcana', 'History', 'Insight', 'Investigation', 'Medicine', 'Religion'] },
+        tools: [],
+      },
     },
     {
       name: 'Rogue',
       description: 'Master of stealth and subtlety.',
       hitDie: 'd8',
+       proficiencies: {
+         armor: ['Light'],
+         weapons: ['Simple', 'Hand Crossbows', 'Longswords', 'Rapiers', 'Shortswords'],
+         tools: ["Thieves' Tools"],
+         savingThrows: ['Dexterity', 'Intelligence'],
+         skills: { choose: 4, options: ['Acrobatics', 'Athletics', 'Deception', 'Insight', 'Intimidation', 'Investigation', 'Perception', 'Performance', 'Persuasion', 'Sleight of Hand', 'Stealth'] },
+       },
     },
     {
       name: 'Cleric',
       description: 'Wielder of divine magic.',
       hitDie: 'd8',
+       proficiencies: {
+         armor: ['Light', 'Medium', 'Shields'],
+         weapons: ['Simple'],
+         savingThrows: ['Wisdom', 'Charisma'],
+         skills: { choose: 2, options: ['History', 'Insight', 'Medicine', 'Persuasion', 'Religion'] },
+         tools: [],
+       },
     },
   ];
 }
@@ -190,18 +274,21 @@ export async function getLevelUpOptions(className: string, targetLevel: number):
   // Basic proficiency bonus progression
   if (targetLevel >= 1 && targetLevel <= 4) proficiencyBonus = 2;
   else if (targetLevel >= 5 && targetLevel <= 8) proficiencyBonus = 3;
-  // ... and so on
+  else if (targetLevel >= 9 && targetLevel <= 12) proficiencyBonus = 4;
+  else if (targetLevel >= 13 && targetLevel <= 16) proficiencyBonus = 5;
+  else if (targetLevel >= 17 && targetLevel <= 20) proficiencyBonus = 6;
+
 
   switch (className) {
     case 'Fighter':
       if (targetLevel === 1) {
         features = [
           { name: 'Fighting Style', description: 'You adopt a particular style of fighting as your specialty (e.g., Archery, Dueling). Choose one.', source: 'Fighter Class' },
-          { name: 'Second Wind', description: 'On your turn, you can use a bonus action to regain hit points equal to 1d10 + your fighter level.', source: 'Fighter Class' },
+          { name: 'Second Wind', description: 'On your turn, you can use a bonus action to regain hit points equal to 1d10 + your fighter level.', source: 'Fighter Class', isActionable: true }, // Mark as actionable
         ];
       } else if (targetLevel === 2) {
         features = [
-          { name: 'Action Surge', description: 'On your turn, you can take one additional action. Once you use this feature, you must finish a short or long rest before you can use it again.', source: 'Fighter Class' },
+          { name: 'Action Surge', description: 'On your turn, you can take one additional action. Once you use this feature, you must finish a short or long rest before you can use it again.', source: 'Fighter Class', isActionable: true }, // Mark as actionable
         ];
       } else if (targetLevel === 3) {
         features = [
@@ -214,18 +301,46 @@ export async function getLevelUpOptions(className: string, targetLevel: number):
     case 'Wizard':
        if (targetLevel === 1) {
          features = [
-           { name: 'Spellcasting', description: 'You have learned to untangle and reshape the fabric of reality in harmony with your wishes and expectations.', source: 'Wizard Class' },
-           { name: 'Arcane Recovery', description: 'You have learned to regain some of your magical energy by studying your spellbook. Once per day when you finish a short rest, you can choose expended spell slots to recover.', source: 'Wizard Class' },
+           { name: 'Spellcasting', description: 'You have learned to untangle and reshape the fabric of reality in harmony with your wishes and expectations.', source: 'Wizard Class' }, // Not directly an action, but enables spell actions
+           { name: 'Arcane Recovery', description: 'You have learned to regain some of your magical energy by studying your spellbook. Once per day when you finish a short rest, you can choose expended spell slots to recover.', source: 'Wizard Class' }, // Typically used during rest
          ];
        } else if (targetLevel === 2) {
          features = [
            { name: 'Arcane Tradition', description: 'You choose an arcane tradition, shaping your practice of magic (e.g., School of Evocation, School of Illusion).', source: 'Wizard Class' },
-           // Note: Specific tradition features would also be listed here.
+           // Note: Specific tradition features would also be listed here. Some might be actions.
          ];
        }
        // Add more levels...
       break;
-     // Add other classes...
+     case 'Rogue':
+        if (targetLevel === 1) {
+            features = [
+                { name: 'Expertise', description: 'Choose two of your skill proficiencies, or one skill proficiency and thieves\' tools proficiency. Your proficiency bonus is doubled for any ability check you make that uses either of the chosen proficiencies.', source: 'Rogue Class' },
+                { name: 'Sneak Attack', description: 'Once per turn, you can deal an extra 1d6 damage to one creature you hit with an attack if you have advantage on the attack roll. The attack must use a finesse or a ranged weapon. You don\'t need advantage on the attack roll if another enemy of the target is within 5 feet of it, that enemy isn\'t incapacitated, and you don\'t have disadvantage on the attack roll. The amount of the extra damage increases as you gain levels in this class.', source: 'Rogue Class' }, // This modifies attacks, not a separate action itself
+                { name: 'Thieves\' Cant', description: 'You learn thieves\' cant, a secret mix of dialect, jargon, and code that allows you to hide messages in seemingly normal conversation.', source: 'Rogue Class' },
+            ];
+        } else if (targetLevel === 2) {
+            features = [
+                { name: 'Cunning Action', description: 'Your quick thinking and agility allow you to move and act quickly. You can take a bonus action on each of your turns in combat. This action can be used only to take the Dash, Disengage, or Hide action.', source: 'Rogue Class', isActionable: true }, // Provides bonus actions
+            ];
+        }
+        // Add more levels...
+       break;
+    case 'Cleric':
+        if (targetLevel === 1) {
+            features = [
+                { name: 'Spellcasting', description: 'As a conduit for divine power, you can cast cleric spells.', source: 'Cleric Class' },
+                { name: 'Divine Domain', description: 'Choose one domain related to your deity (e.g., Life, Knowledge, War). Your choice grants you domain spells and other features.', source: 'Cleric Class' },
+                // Note: Specific domain features (like heavy armor proficiency for War) would be listed here. Some might be actions (like Channel Divinity options).
+            ];
+        } else if (targetLevel === 2) {
+            features = [
+                 { name: 'Channel Divinity (Turn Undead)', description: 'As an action, you present your holy symbol and speak a prayer censuring the undead. Each undead that can see or hear you within 30 feet of you must make a Wisdom saving throw. If the creature fails its saving throw, it is turned for 1 minute or until it takes any damage.', source: 'Cleric Class', isActionable: true }, // Actionable Channel Divinity
+                 // Note: Domains grant another use of Channel Divinity here.
+            ];
+        }
+        // Add more levels...
+       break;
     default:
       features = [{ name: `Placeholder Feature for ${className}`, description: `Feature gained at level ${targetLevel}.`, source: `${className} Class`}];
       break;
@@ -256,17 +371,18 @@ export async function getRaceTraitsDetails(traitNames: string[]): Promise<Featur
     console.log(`Fetching details for traits: ${traitNames.join(', ')}`);
     await new Promise(resolve => setTimeout(resolve, 300)); // Simulate network delay
 
+    // Mark some traits as potentially actionable if they grant specific actions/abilities
     const allTraitDetails: Record<string, Feature> = {
         'Ability Score Increase': { name: 'Ability Score Increase', description: 'Your ability scores each increase by 1.', source: 'Human Race' },
         'Extra Language': { name: 'Extra Language', description: 'You can speak, read, and write one extra language of your choice.', source: 'Human Race' },
-        'Darkvision': { name: 'Darkvision', description: 'Accustomed to twilit forests and the night sky, you have superior vision in dark and dim conditions. You can see in dim light within 60 feet of you as if it were bright light, and in darkness as if it were dim light.', source: 'Elf/Dwarf Race' },
-        'Fey Ancestry': { name: 'Fey Ancestry', description: "You have advantage on saving throws against being charmed, and magic can't put you to sleep.", source: 'Elf Race' },
-        'Trance': { name: 'Trance', description: 'Elves don’t need to sleep. Instead, they meditate deeply, remaining semiconscious, for 4 hours a day.', source: 'Elf Race' },
-        'Dwarven Resilience': { name: 'Dwarven Resilience', description: 'You have advantage on saving throws against poison, and you have resistance against poison damage.', source: 'Dwarf Race' },
-        'Stonecunning': { name: 'Stonecunning', description: 'Whenever you make an Intelligence (History) check related to the origin of stonework, you are considered proficient in the History skill and add double your proficiency bonus to the check, instead of your normal proficiency bonus.', source: 'Dwarf Race' },
-        'Lucky': { name: 'Lucky', description: 'When you roll a 1 on an attack roll, ability check, or saving throw, you can reroll the die and must use the new roll.', source: 'Halfling Race' },
-        'Brave': { name: 'Brave', description: 'You have advantage on saving throws against being frightened.', source: 'Halfling Race' },
-        'Halfling Nimbleness': { name: 'Halfling Nimbleness', description: 'You can move through the space of any creature that is of a size larger than yours.', source: 'Halfling Race' },
+        'Darkvision': { name: 'Darkvision', description: 'Accustomed to twilit forests and the night sky, you have superior vision in dark and dim conditions. You can see in dim light within 60 feet of you as if it were bright light, and in darkness as if it were dim light.', source: 'Elf/Dwarf Race' }, // Passive ability
+        'Fey Ancestry': { name: 'Fey Ancestry', description: "You have advantage on saving throws against being charmed, and magic can't put you to sleep.", source: 'Elf Race' }, // Passive resistance
+        'Trance': { name: 'Trance', description: 'Elves don’t need to sleep. Instead, they meditate deeply, remaining semiconscious, for 4 hours a day.', source: 'Elf Race' }, // Affects rest
+        'Dwarven Resilience': { name: 'Dwarven Resilience', description: 'You have advantage on saving throws against poison, and you have resistance against poison damage.', source: 'Dwarf Race' }, // Passive resistance
+        'Stonecunning': { name: 'Stonecunning', description: 'Whenever you make an Intelligence (History) check related to the origin of stonework, you are considered proficient in the History skill and add double your proficiency bonus to the check, instead of your normal proficiency bonus.', source: 'Dwarf Race' }, // Affects skill checks
+        'Lucky': { name: 'Lucky', description: 'When you roll a 1 on an attack roll, ability check, or saving throw, you can reroll the die and must use the new roll.', source: 'Halfling Race', isActionable: true }, // Reaction/Triggered ability
+        'Brave': { name: 'Brave', description: 'You have advantage on saving throws against being frightened.', source: 'Halfling Race' }, // Passive resistance
+        'Halfling Nimbleness': { name: 'Halfling Nimbleness', description: 'You can move through the space of any creature that is of a size larger than yours.', source: 'Halfling Race' }, // Affects movement
     };
 
     return traitNames
@@ -283,6 +399,8 @@ export async function getRaceTraitsDetails(traitNames: string[]): Promise<Featur
  */
 export async function getCumulativeClassFeatures(className: string, maxLevel: number): Promise<Feature[]> {
     let allFeatures: Feature[] = [];
+    if (!className || maxLevel < 1) return []; // Guard clause
+
     for (let level = 1; level <= maxLevel; level++) {
         try {
             const levelData = await getLevelUpOptions(className, level);
@@ -312,11 +430,16 @@ export async function getAvailableEquipmentItems(): Promise<EquipmentItem[]> {
     { name: 'Torch', description: 'Provides light', weight: 1, cost: '1 cp', type: 'Adventuring Gear' },
     { name: 'Rations (1 day)', description: 'Food for one day', weight: 2, cost: '5 sp', type: 'Adventuring Gear' },
     { name: 'Waterskin', description: 'Holds water (4 pints)', weight: 5, cost: '2 sp', type: 'Adventuring Gear' },
-    { name: 'Longsword', description: 'Versatile martial weapon', weight: 3, cost: '15 gp', type: 'Weapon' /* properties: 'Versatile (1d10)' */ },
-    { name: 'Dagger', description: 'Simple melee weapon', weight: 1, cost: '2 gp', type: 'Weapon' /* properties: 'Finesse, light, thrown (range 20/60)' */ },
-    { name: 'Shortbow', description: 'Simple ranged weapon', weight: 2, cost: '25 gp', type: 'Weapon' /* properties: 'Ammunition (range 80/320), two-handed' */ },
-    { name: 'Leather Armor', description: 'Light armor', weight: 10, cost: '10 gp', type: 'Armor' /* ac: 11 + Dex modifier */ },
-    { name: 'Shield', description: 'Increases AC by 2', weight: 6, cost: '10 gp', type: 'Armor' },
+    { name: 'Longsword', description: 'Versatile martial weapon', weight: 3, cost: '15 gp', type: 'Weapon', weaponCategory: 'Martial Melee', damageDice: '1d8', damageType: 'Slashing', properties: ['Versatile (1d10)'] },
+    { name: 'Dagger', description: 'Simple melee weapon', weight: 1, cost: '2 gp', type: 'Weapon', weaponCategory: 'Simple Melee', damageDice: '1d4', damageType: 'Piercing', properties: ['Finesse', 'Light', 'Thrown (range 20/60)'] },
+    { name: 'Shortsword', description: 'Simple melee weapon', weight: 2, cost: '10 gp', type: 'Weapon', weaponCategory: 'Martial Melee', damageDice: '1d6', damageType: 'Piercing', properties: ['Finesse', 'Light'] },
+    { name: 'Rapier', description: 'Martial melee weapon', weight: 2, cost: '25 gp', type: 'Weapon', weaponCategory: 'Martial Melee', damageDice: '1d8', damageType: 'Piercing', properties: ['Finesse'] },
+    { name: 'Shortbow', description: 'Simple ranged weapon', weight: 2, cost: '25 gp', type: 'Weapon', weaponCategory: 'Simple Ranged', damageDice: '1d6', damageType: 'Piercing', properties: ['Ammunition (range 80/320)', 'Two-Handed'] },
+    { name: 'Light Crossbow', description: 'Simple ranged weapon', weight: 5, cost: '25 gp', type: 'Weapon', weaponCategory: 'Simple Ranged', damageDice: '1d8', damageType: 'Piercing', properties: ['Ammunition (range 80/320)', 'Loading', 'Two-Handed'] },
+    { name: 'Leather Armor', description: 'Light armor', weight: 10, cost: '10 gp', type: 'Armor', armorCategory: 'Light', baseAC: 11, addDexModifier: true, maxDexBonus: null, strengthRequirement: null, stealthDisadvantage: false },
+    { name: 'Scale Mail', description: 'Medium armor', weight: 45, cost: '50 gp', type: 'Armor', armorCategory: 'Medium', baseAC: 14, addDexModifier: true, maxDexBonus: 2, strengthRequirement: null, stealthDisadvantage: true },
+    { name: 'Chain Mail', description: 'Heavy armor', weight: 55, cost: '75 gp', type: 'Armor', armorCategory: 'Heavy', baseAC: 16, addDexModifier: false, maxDexBonus: null, strengthRequirement: 13, stealthDisadvantage: true },
+    { name: 'Shield', description: 'Increases AC by 2', weight: 6, cost: '10 gp', type: 'Armor', armorCategory: 'Shield', baseAC: 2, addDexModifier: false, maxDexBonus: null, strengthRequirement: null, stealthDisadvantage: false }, // Shield gives a bonus, not base AC
     { name: 'Healing Potion', description: 'Regain 2d4+2 hit points', weight: 0.5, cost: '50 gp', type: 'Potion' },
     { name: 'Thieves\' Tools', description: 'Tools for disarming traps and opening locks', weight: 1, cost: '25 gp', type: 'Tool' },
   ].sort((a, b) => a.name.localeCompare(b.name)); // Sort alphabetically

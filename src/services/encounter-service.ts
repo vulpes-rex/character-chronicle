@@ -16,7 +16,7 @@ import {
   Timestamp,
   serverTimestamp,
 } from 'firebase/firestore';
-import type { Encounter } from '@/lib/types';
+import type { Encounter, NPC } from '@/lib/types'; // Added NPC type
 import { loadCampaign } from './campaign-service'; // To check permissions
 
 const encountersCollection = collection(db, 'encounters');
@@ -199,5 +199,3 @@ export async function deleteEncounter(encounterId: string, dmUserId: string): Pr
     throw new Error(`Failed to delete encounter ${encounterId}.`);
   }
 }
-
-    

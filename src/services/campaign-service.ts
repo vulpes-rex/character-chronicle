@@ -21,7 +21,7 @@ import {
   limit,
   setDoc,
 } from 'firebase/firestore';
-import type { Campaign, GameLogEntry, SourcePack, UserRole, Monster } from '@/lib/types'; // Added Monster type
+import type { Campaign, GameLogEntry, SourcePack, UserRole, Monster, NPC } from '@/lib/types'; // Added NPC type
 
 const campaignsCollection = collection(db, 'campaigns');
 const gameLogsCollection = collection(db, 'gameLogs');
@@ -449,7 +449,8 @@ export async function getCombinedContentFromPacks(packIds: string[]): Promise<So
         races: {},
         classes: {},
         items: {},
-        monsters: {}, // Initialize monsters
+        monsters: {},
+        npcs: {}, // Initialize npcs
         backgrounds: {},
     };
 
@@ -482,7 +483,8 @@ export async function getCombinedContentFromPacks(packIds: string[]): Promise<So
             combinedContent.races = { ...combinedContent.races, ...pack.content.races };
             combinedContent.classes = { ...combinedContent.classes, ...pack.content.classes };
             combinedContent.items = { ...combinedContent.items, ...pack.content.items };
-            combinedContent.monsters = { ...combinedContent.monsters, ...pack.content.monsters }; // Merge monsters
+            combinedContent.monsters = { ...combinedContent.monsters, ...pack.content.monsters };
+            combinedContent.npcs = { ...combinedContent.npcs, ...pack.content.npcs }; // Merge NPCs
             combinedContent.backgrounds = { ...combinedContent.backgrounds, ...pack.content.backgrounds };
             // Merge other content types (spells, etc.) if added
         }
@@ -490,5 +492,3 @@ export async function getCombinedContentFromPacks(packIds: string[]): Promise<So
 
     return combinedContent;
 }
-
-    

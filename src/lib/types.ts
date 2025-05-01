@@ -189,9 +189,10 @@ export interface BackgroundInfo {
  }
 
 /**
- * Represents a Monster.
+ * Represents a Monster stat block.
  */
 export interface Monster {
+  id?: string; // Added ID for internal tracking/dropdowns
   name: string;
   description?: string;
   size?: string;
@@ -219,6 +220,40 @@ export interface Monster {
   actions?: Array<{ name: string; description: string; attackBonus?: number; damageDice?: string; damageBonus?: number }>;
 }
 
+/**
+ * Represents a Non-Player Character (NPC).
+ */
+ export interface NPC {
+    id?: string; // Added ID for internal tracking/dropdowns
+    name: string;
+    description?: string; // Physical description, role in the world
+    personality?: string; // Traits, ideals, bonds, flaws
+    notes?: string; // DM notes, plot hooks, relationships
+    // Optional: Include stat block similar to Monster if they can enter combat
+    size?: string;
+    type?: string; // e.g., Humanoid (Human), Beast
+    alignment?: string;
+    armorClass?: number;
+    hitPoints?: {
+        average: number;
+        dice: string; // e.g., 2d8+2
+    };
+    speed?: string;
+    stats?: {
+        strength: number;
+        dexterity: number;
+        constitution: number;
+        intelligence: number;
+        wisdom: number;
+        charisma: number;
+    };
+    skills?: Record<string, number>; // e.g., { Persuasion: 3, Insight: 2 }
+    senses?: string;
+    languages?: string;
+    challengeRating?: string; // If applicable
+    actions?: Array<{ name: string; description: string; attackBonus?: number; damageDice?: string; damageBonus?: number }>; // Simple actions/attacks
+ }
+
 
  /**
   * Represents a content source pack (e.g., SRD, custom DM content).
@@ -232,7 +267,8 @@ export interface Monster {
         races?: Record<string, Omit<CharacterRace, 'description'>>; // Simplified for storage example
         classes?: Record<string, Omit<CharacterClass, 'description'>>;
         items?: Record<string, Omit<EquipmentItem, 'description' | 'isEquipped'>>;
-        monsters?: Record<string, Monster>; // Added monsters
+        monsters?: Record<string, Omit<Monster, 'id'>>; // Omit internal ID for storage
+        npcs?: Record<string, Omit<NPC, 'id'>>; // Added NPCs, omit internal ID
         backgrounds?: Record<string, BackgroundInfo>;
         // spells?: Record<string, any>; // Add spell structure if needed
     };
@@ -242,13 +278,13 @@ export interface Monster {
 
 
 /**
- * Represents a participant in an encounter (either a character or a monster instance).
+ * Represents a participant in an encounter (character, monster, or NPC).
  */
 export interface EncounterParticipant {
   id: string; // Unique ID for this instance in the encounter
-  sourceId: string; // ID of the Character or Monster definition
-  type: 'character' | 'monster';
-  name: string; // Character name or Monster name (potentially with index like "Goblin 1")
+  sourceId: string; // ID of the Character, Monster definition, or NPC definition
+  type: 'character' | 'monster' | 'npc'; // Added NPC type
+  name: string; // Character name, Monster name (e.g., "Goblin 1"), or NPC name
   initiative?: number | null;
   currentHp: number;
   maxHp: number;
@@ -343,16 +379,21 @@ export const ALL_SKILLS = Object.keys(SKILL_ABILITY_MAP);
 // Function to calculate skill modifier
 export const calculateSkillModifier = (
     skillName: string,
-    stats: Character['stats'],
+    stats: Character['stats'] | NPC['stats'] | Monster['stats'], // Accept different stat blocks
     proficient: boolean,
     proficiencyBonus: number
 ): number => {
-    const ability = SKILL_ABILITY_MAP[skillName.toLowerCase()];
-    if (!ability || !stats[ability]) {
+    const skillLower = skillName.toLowerCase();
+    const ability = SKILL_ABILITY_MAP[skillLower];
+    if (!ability || !stats?.[ability]) {
         console.warn(`Could not find ability score for skill: ${skillName}`);
+        // Handle Monster skill overrides (e.g., { Perception: 5 })
+         if (typeof (stats as Monster['stats'])?.[skillLower as keyof Monster['stats']] === 'number') {
+             return (stats as Monster['stats'])[skillLower as keyof Monster['stats']] as number;
+         }
         return 0;
     }
-    const abilityModifier = Math.floor((stats[ability] - 10) / 2);
+    const abilityModifier = Math.floor((stats[ability]! - 10) / 2);
     const proficiencyValue = proficient ? proficiencyBonus : 0;
     return abilityModifier + proficiencyValue;
 };

@@ -6,8 +6,8 @@ import { loadCampaign } from '@/services/campaign-service';
 import { loadCharacter } from '@/services/character-service';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { AlertCircle } from 'lucide-react';
-import type { Encounter, Campaign, Character, Monster } from '@/lib/types';
-import { getCombinedContentFromPacks } from '@/services/campaign-service'; // To get monster definitions
+import type { Encounter, Campaign, Character, Monster, NPC } from '@/lib/types'; // Added NPC type
+import { getCombinedContentFromPacks } from '@/services/campaign-service'; // To get monster and NPC definitions
 import { Skeleton } from '@/components/ui/skeleton'; // Import Skeleton for loading state
 
 interface RunEncounterPageProps {
@@ -20,6 +20,7 @@ async function getEncounterData(encounterId: string) {
     let campaign: Campaign | null = null;
     let characters: Character[] = [];
     let monsters: Array<{ instanceId: string; definition?: Monster }> = [];
+    let npcs: Array<{ instanceId: string; definition?: NPC }> = []; // Added NPCs array
 
     try {
         encounter = await loadEncounter(encounterId);
@@ -42,9 +43,11 @@ async function getEncounterData(encounterId: string) {
             throw new Error(`Failed to load character details: ${error.message}`);
         }
 
-        // Fetch monster definitions from active source packs
+        // Fetch monster and NPC definitions from active source packs
         try {
             const combinedContent = await getCombinedContentFromPacks(campaign.activeSourcePackIds || ['srd']);
+
+            // Process Monsters
             monsters = encounter.participants
                 .filter(p => p.type === 'monster')
                 .map(p => {
@@ -57,15 +60,31 @@ async function getEncounterData(encounterId: string) {
                         definition: definition // May be undefined if not found
                      };
                 });
-               // Optionally filter out monsters whose definitions weren't found, or handle them in the tracker
+
+            // Process NPCs
+             npcs = encounter.participants
+                .filter(p => p.type === 'npc')
+                .map(p => {
+                     const definition = combinedContent.npcs?.[p.sourceId];
+                     if (!definition) {
+                        console.warn(`NPC definition not found for source ID "${p.sourceId}" in active packs.`);
+                     }
+                     return {
+                        instanceId: p.id,
+                        definition: definition // May be undefined if not found
+                     };
+                });
+
+               // Optionally filter out monsters/NPCs whose definitions weren't found, or handle them in the tracker
                // monsters = monsters.filter(m => m.definition);
+               // npcs = npcs.filter(n => n.definition);
 
         } catch (error: any) {
-             console.error("Error loading combined content/monsters for encounter:", error);
-            throw new Error(`Failed to load monster definitions: ${error.message}`);
+             console.error("Error loading combined content for encounter:", error);
+            throw new Error(`Failed to load monster/NPC definitions: ${error.message}`);
         }
 
-        return { encounter, campaign, characters, monsters };
+        return { encounter, campaign, characters, monsters, npcs }; // Include NPCs in return
 
     } catch (error: any) {
         console.error("Error loading data for encounter run:", error);
@@ -101,7 +120,7 @@ export default async function RunEncounterPage({ params }: RunEncounterPageProps
   }
 
    // Data fetching successful, proceed to render CombatTracker
-   const { encounter, campaign, characters, monsters } = data;
+   const { encounter, campaign, characters, monsters, npcs } = data; // Destructure npcs
 
   return (
     <AppLayout>
@@ -111,6 +130,7 @@ export default async function RunEncounterPage({ params }: RunEncounterPageProps
             campaign={campaign}
             characters={characters}
             monsters={monsters}
+            npcs={npcs} // Pass NPCs to the tracker
         />
     </AppLayout>
   );
@@ -124,5 +144,3 @@ export default async function RunEncounterPage({ params }: RunEncounterPageProps
 //       </AppLayout>
 //    );
 // }
-
-    

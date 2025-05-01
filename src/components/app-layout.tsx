@@ -21,7 +21,7 @@ import {
   SidebarSeparator,
 } from '@/components/ui/sidebar';
 import { Button } from '@/components/ui/button';
-import { Users, UserPlus, Dices, LogIn, LogOut, Shield, ScrollText, Settings, ShieldCheck, BookOpen, Bot, Swords } from 'lucide-react'; // Added Swords icon
+import { Users, UserPlus, Dices, LogIn, LogOut, Shield, ScrollText, Settings, ShieldCheck, BookOpen, Bot, Swords, UserRoundCog } from 'lucide-react'; // Added UserRoundCog
 import { BackstoryGenerator } from './backstory-generator';
 import type { Character } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
@@ -29,6 +29,8 @@ import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar'; // For user d
 import { Skeleton } from './ui/skeleton'; // Import Skeleton component
 import { useQuery } from '@tanstack/react-query';
 import { loadCharacter } from '@/services/character-service';
+// Removed import for FloatingDiceRoller
+// import { FloatingDiceRoller } from './floating-dice-roller';
 
 export function AppLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
@@ -40,12 +42,12 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const currentCharacterId = characterIdMatch ? characterIdMatch[2] : undefined;
 
   // Pre-fetch character data if ID is present, useful for BackstoryGenerator
-  const { data: currentCharacter } = useQuery<Character | null, Error>({
-      queryKey: ['character', currentCharacterId],
-      queryFn: () => currentCharacterId ? loadCharacter(currentCharacterId) : Promise.resolve(null), // Use client-safe fetcher or wrap server action
-      enabled: !!currentCharacterId, // Only fetch if we have an ID
-      staleTime: 5 * 60 * 1000, // Cache for 5 minutes
-  });
+   const { data: currentCharacter } = useQuery<Character | null, Error>({
+       queryKey: ['character', currentCharacterId],
+       queryFn: () => currentCharacterId ? loadCharacter(currentCharacterId) : Promise.resolve(null), // Use client-safe fetcher or wrap server action
+       enabled: !!currentCharacterId && !!user, // Only fetch if we have an ID and user is logged in
+       staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+   });
 
 
   const handleLogout = async () => {
@@ -78,44 +80,49 @@ export function AppLayout({ children }: { children: ReactNode }) {
         </SidebarHeader>
         <SidebarContent className="p-2">
           <SidebarMenu>
-             {/* Character Management */}
-             <SidebarMenuItem>
-              <SidebarMenuButton
-                asChild
-                tooltip={{ children: 'Character List' }}
-                isActive={pathname === '/'}
-              >
-                <Link href="/">
-                  <Users />
-                  <span>Characters</span>
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-             <SidebarMenuItem>
-              <SidebarMenuButton
-                asChild
-                tooltip={{ children: 'Create New Character' }}
-                isActive={pathname === '/character/create'}
-              >
-                <Link href="/character/create">
-                  <UserPlus />
-                  <span>Create Character</span>
-                </Link>
-              </SidebarMenuButton>
-            </SidebarMenuItem>
-             <SidebarMenuItem>
-                  <BackstoryGenerator
-                     characterId={currentCharacterId}
-                     characterRace={currentCharacter?.race}
-                     characterClass={currentCharacter?.class}
-                     characterAlignment={currentCharacter?.alignment}
-                 />
-             </SidebarMenuItem>
+             {/* Character Management - Visible only if logged in */}
+             {user && (
+                <>
+                     <SidebarMenuItem>
+                      <SidebarMenuButton
+                        asChild
+                        tooltip={{ children: 'Character List' }}
+                        isActive={pathname === '/'}
+                      >
+                        <Link href="/">
+                          <Users />
+                          <span>Characters</span>
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                     <SidebarMenuItem>
+                      <SidebarMenuButton
+                        asChild
+                        tooltip={{ children: 'Create New Character' }}
+                        isActive={pathname === '/character/create'}
+                      >
+                        <Link href="/character/create">
+                          <UserPlus />
+                          <span>Create Character</span>
+                        </Link>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                     <SidebarMenuItem>
+                          <BackstoryGenerator
+                             characterId={currentCharacterId}
+                             characterRace={currentCharacter?.race}
+                             characterClass={currentCharacter?.class}
+                             characterAlignment={currentCharacter?.alignment}
+                         />
+                     </SidebarMenuItem>
+                     <SidebarSeparator />
+                 </>
+             )}
+
 
              {/* Campaign Management (Visible to all logged-in users, DM sees more options) */}
              {user && (
                  <>
-                     <SidebarSeparator />
                      <SidebarMenuItem>
                        <SidebarMenuButton
                          asChild
@@ -172,6 +179,18 @@ export function AppLayout({ children }: { children: ReactNode }) {
                          </Link>
                        </SidebarMenuButton>
                     </SidebarMenuItem>
+                    {/* <SidebarMenuItem>
+                        <SidebarMenuButton
+                            asChild
+                            tooltip={{ children: 'Manage NPCs' }} // Placeholder for potential dedicated NPC management page
+                            isActive={pathname.startsWith('/dm/npcs')}
+                        >
+                            <Link href="/dm/content">  Link back to content for now
+                                <UserRoundCog />
+                                <span>Manage NPCs</span>
+                            </Link>
+                        </SidebarMenuButton>
+                    </SidebarMenuItem> */}
                  </>
              )}
 
@@ -214,7 +233,11 @@ export function AppLayout({ children }: { children: ReactNode }) {
            )}
         </SidebarFooter>
       </Sidebar>
-      <SidebarInset>{children}</SidebarInset>
+      <SidebarInset>
+         {children}
+         {/* Removed FloatingDiceRoller */}
+         {/* <FloatingDiceRoller /> */}
+      </SidebarInset>
     </SidebarProvider>
   );
 }

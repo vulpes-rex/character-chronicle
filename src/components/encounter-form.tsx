@@ -16,9 +16,9 @@ import { useToast } from '@/hooks/use-toast';
 import { saveEncounter } from '@/services/encounter-service'; // New service function
 import { loadAllCampaigns, getCombinedContentFromPacks } from '@/services/campaign-service';
 import { loadAllCharacters } from '@/services/character-service';
-import type { Encounter, Campaign, Character, Monster, EncounterParticipant } from '@/lib/types';
+import type { Encounter, Campaign, Character, Monster, NPC, EncounterParticipant } from '@/lib/types'; // Added NPC type
 import { useAuth } from '@/components/auth-provider';
-import { AlertCircle, Loader2, Trash2, PlusCircle, Users, MinusCircle } from 'lucide-react';
+import { AlertCircle, Loader2, Trash2, PlusCircle, Users, MinusCircle, UserRoundCog } from 'lucide-react'; // Added UserRoundCog
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { useQuery } from '@tanstack/react-query';
 import { Skeleton } from './ui/skeleton';
@@ -27,8 +27,8 @@ import { v4 as uuidv4 } from 'uuid'; // For generating unique IDs for participan
 // Zod schema for a single participant in the form
 const participantSchema = z.object({
     id: z.string().uuid(), // Unique ID for this instance in the encounter
-    sourceId: z.string().min(1, "Source ID required"), // Character or Monster ID
-    type: z.enum(['character', 'monster']),
+    sourceId: z.string().min(1, "Source ID required"), // Character, Monster, or NPC ID
+    type: z.enum(['character', 'monster', 'npc']), // Added npc type
     name: z.string(), // Pre-filled based on source selection
     // Removed HP, AC etc. - these will be derived when running combat
 });
@@ -99,18 +99,22 @@ export function EncounterForm({ initialData }: EncounterFormProps) {
        enabled: !!selectedCampaignId && !campaignsLoading,
    });
 
-   // Fetch monsters based on selected campaign's source packs
-    const { data: monsters = [], isLoading: monstersLoading } = useQuery<Array<Monster & { id: string }>, Error>({
-       queryKey: ['monsters', 'campaign', selectedCampaignId],
+   // Fetch monsters AND NPCs based on selected campaign's source packs
+    const { data: campaignContent = { monsters: [], npcs: [] }, isLoading: contentLoading } = useQuery<{ monsters: Array<Monster & { id: string }>, npcs: Array<NPC & { id: string }> }, Error>({
+       queryKey: ['campaignContent', selectedCampaignId],
        queryFn: async () => {
-           if (!selectedCampaignId) return [];
+           if (!selectedCampaignId) return { monsters: [], npcs: [] };
            const campaign = campaigns.find(c => c.id === selectedCampaignId);
-           if (!campaign) return [];
+           if (!campaign) return { monsters: [], npcs: [] };
            const content = await getCombinedContentFromPacks(campaign.activeSourcePackIds || ['srd']);
-           return Object.entries(content.monsters || {}).map(([id, data]) => ({ id, ...data }));
+           const monsters = Object.entries(content.monsters || {}).map(([id, data]) => ({ id, ...data }));
+           const npcs = Object.entries(content.npcs || {}).map(([id, data]) => ({ id, ...data }));
+           return { monsters, npcs };
        },
        enabled: !!selectedCampaignId && !campaignsLoading,
     });
+    const monsters = campaignContent.monsters;
+    const npcs = campaignContent.npcs;
 
 
   useEffect(() => {
@@ -132,7 +136,7 @@ export function EncounterForm({ initialData }: EncounterFormProps) {
 
     // --- Derive full participant data before saving ---
     const fullParticipants: EncounterParticipant[] = data.participants.map(p => {
-        let sourceData: Character | Monster | undefined;
+        let sourceData: Character | Monster | NPC | undefined;
         let maxHp = 0;
         let armorClass = 10; // Default AC
 
@@ -141,15 +145,19 @@ export function EncounterForm({ initialData }: EncounterFormProps) {
             maxHp = sourceData?.hitPoints.max || 0;
             // AC calculation for characters is complex, might need simplification here or do it on combat start
              armorClass = sourceData ? 10 + Math.floor((sourceData.stats.dexterity - 10) / 2) : 10; // Simplified example
-        } else {
+        } else if (p.type === 'monster') {
             sourceData = monsters.find(m => m.id === p.sourceId);
             maxHp = sourceData?.hitPoints?.average || 0; // Use average HP for monsters by default
             armorClass = sourceData?.armorClass || 10;
+        } else { // NPC type
+             sourceData = npcs.find(n => n.id === p.sourceId);
+             maxHp = sourceData?.hitPoints?.average || 0; // Use average HP for NPCs if defined
+             armorClass = sourceData?.armorClass || 10;
         }
 
         return {
             ...p,
-            name: sourceData?.name || sourceData?.characterName || 'Unknown', // Use characterName for characters
+            name: sourceData?.name || (sourceData as Character)?.characterName || 'Unknown', // Use characterName for characters
             currentHp: maxHp, // Start at full HP
             maxHp: maxHp,
             armorClass: armorClass,
@@ -184,13 +192,17 @@ export function EncounterForm({ initialData }: EncounterFormProps) {
     }
   };
 
-   const handleAddParticipant = (type: 'character' | 'monster') => {
-       let availableOptions = type === 'character' ? characters : monsters;
+   const handleAddParticipant = (type: 'character' | 'monster' | 'npc') => {
+       let availableOptions: Array<Character | Monster | NPC> = [];
+       if (type === 'character') availableOptions = characters;
+       else if (type === 'monster') availableOptions = monsters;
+       else availableOptions = npcs;
+
        if (availableOptions.length > 0) {
            const firstOption = availableOptions[0];
            appendParticipant({
                id: uuidv4(), // Generate unique ID for this instance
-               sourceId: firstOption.id,
+               sourceId: firstOption.id!, // Assert non-null ID
                type: type,
                name: firstOption.name || (firstOption as Character).characterName || 'Unnamed', // Handle character name
            });
@@ -200,12 +212,14 @@ export function EncounterForm({ initialData }: EncounterFormProps) {
    };
 
    // Update participant name when sourceId changes
-    const handleParticipantSourceChange = (index: number, newSourceId: string, type: 'character' | 'monster') => {
-       let sourceData: Character | Monster | undefined;
+    const handleParticipantSourceChange = (index: number, newSourceId: string, type: 'character' | 'monster' | 'npc') => {
+       let sourceData: Character | Monster | NPC | undefined;
        if (type === 'character') {
            sourceData = characters.find(c => c.id === newSourceId);
-       } else {
+       } else if (type === 'monster') {
            sourceData = monsters.find(m => m.id === newSourceId);
+       } else {
+           sourceData = npcs.find(n => n.id === newSourceId);
        }
        form.setValue(`participants.${index}.name`, sourceData?.name || (sourceData as Character)?.characterName || 'Unknown', { shouldValidate: true });
        form.setValue(`participants.${index}.sourceId`, newSourceId, { shouldValidate: true });
@@ -213,7 +227,7 @@ export function EncounterForm({ initialData }: EncounterFormProps) {
     };
 
 
-  const dataLoading = authLoading || campaignsLoading || charactersLoading || monstersLoading;
+  const dataLoading = authLoading || campaignsLoading || charactersLoading || contentLoading;
 
   return (
     <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-8">
@@ -272,7 +286,7 @@ export function EncounterForm({ initialData }: EncounterFormProps) {
       <Card>
          <CardHeader>
             <CardTitle>Participants</CardTitle>
-             <p className="text-sm text-muted-foreground">Add characters and monsters to the encounter.</p>
+             <p className="text-sm text-muted-foreground">Add characters, monsters, and NPCs to the encounter.</p>
          </CardHeader>
           <CardContent className="space-y-4">
              {participantFields.length === 0 && (
@@ -280,21 +294,25 @@ export function EncounterForm({ initialData }: EncounterFormProps) {
              )}
              {participantFields.map((field, index) => (
                 <div key={field.id} className="flex items-center gap-2 border p-2 rounded">
-                     {/* Participant Type (implicitly set by dropdown choice) */}
                      <Controller
                          name={`participants.${index}.sourceId`}
                          control={form.control}
                          render={({ field: controllerField }) => (
                              <Select
                                  onValueChange={(value) => {
-                                     const option = [...characters, ...monsters].find(o => o.id === value);
-                                     handleParticipantSourceChange(index, value, option?.type === 'monster' ? 'monster' : 'character');
+                                     const charOption = characters.find(o => o.id === value);
+                                     const monsterOption = monsters.find(o => o.id === value);
+                                     const npcOption = npcs.find(o => o.id === value);
+                                     let type: 'character' | 'monster' | 'npc' = 'character'; // Default assumption
+                                     if (monsterOption) type = 'monster';
+                                     else if (npcOption) type = 'npc';
+                                     handleParticipantSourceChange(index, value, type);
                                  }}
                                  value={controllerField.value}
                                  disabled={dataLoading}
                              >
                                  <SelectTrigger className="flex-grow">
-                                     <SelectValue placeholder={dataLoading ? "Loading..." : "Select Character/Monster..."} />
+                                     <SelectValue placeholder={dataLoading ? "Loading..." : "Select Participant..."} />
                                  </SelectTrigger>
                                  <SelectContent>
                                       {characters.length > 0 && <Label className='px-2 py-1.5 text-xs font-semibold'>Characters</Label>}
@@ -307,6 +325,12 @@ export function EncounterForm({ initialData }: EncounterFormProps) {
                                       {monsters.map(monster => (
                                           <SelectItem key={monster.id} value={monster.id}>
                                               {monster.name} (CR {monster.challengeRating || '?'})
+                                          </SelectItem>
+                                      ))}
+                                      {npcs.length > 0 && <Label className='px-2 py-1.5 text-xs font-semibold mt-1 border-t'>NPCs</Label>}
+                                      {npcs.map(npc => (
+                                          <SelectItem key={npc.id!} value={npc.id!}>
+                                              {npc.name} ({npc.description?.substring(0, 30) || npc.type || 'NPC'}...)
                                           </SelectItem>
                                       ))}
                                  </SelectContent>
@@ -336,16 +360,25 @@ export function EncounterForm({ initialData }: EncounterFormProps) {
                     onClick={() => handleAddParticipant('character')}
                     disabled={!selectedCampaignId || charactersLoading || isLoading}
                 >
-                    <PlusCircle className="mr-2 h-4 w-4" /> Add Character
+                    <Users className="mr-2 h-4 w-4" /> Add Character
                 </Button>
                  <Button
                     type="button"
                     variant="outline"
                     size="sm"
                     onClick={() => handleAddParticipant('monster')}
-                    disabled={!selectedCampaignId || monstersLoading || isLoading}
+                    disabled={!selectedCampaignId || contentLoading || isLoading}
                 >
                     <PlusCircle className="mr-2 h-4 w-4" /> Add Monster
+                </Button>
+                <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleAddParticipant('npc')}
+                    disabled={!selectedCampaignId || contentLoading || isLoading}
+                >
+                    <UserRoundCog className="mr-2 h-4 w-4" /> Add NPC
                 </Button>
             </div>
          </CardContent>

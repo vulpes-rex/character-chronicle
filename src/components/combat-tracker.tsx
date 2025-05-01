@@ -14,19 +14,21 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { useToast } from '@/hooks/use-toast';
 import { saveEncounter } from '@/services/encounter-service'; // Assuming update logic is in saveEncounter
 import { addGameLogEntry } from '@/services/campaign-service';
-import type { Encounter, EncounterParticipant, Campaign, Character, Monster } from '@/lib/types';
+import type { Encounter, EncounterParticipant, Campaign, Character, Monster, NPC } from '@/lib/types'; // Added NPC type
 import { rollDice } from '@/lib/types';
-import { Dices, ShieldAlert, HeartPulse, ChevronRight, ChevronLeft, RotateCw, Users, X, PlusCircle } from 'lucide-react';
+import { Dices, ShieldAlert, HeartPulse, ChevronRight, ChevronLeft, RotateCw, Users, X, PlusCircle, MinusCircle } from 'lucide-react'; // Added MinusCircle
 import { useAuth } from '@/components/auth-provider';
-import { DDDiceRoller } from './dddice-roller';
+// Removed import for DDDiceRoller
+// import { DDDiceRoller } from './dddice-roller';
 import { Skeleton } from './ui/skeleton';
-
+import Link from 'next/link'; // Added Link import
 
 interface CombatTrackerProps {
     initialEncounter: Encounter;
     campaign: Campaign;
     characters: Character[]; // Full character data
     monsters: Array<{ instanceId: string; definition?: Monster }>; // Monster definitions linked by instanceId
+    npcs?: Array<{ instanceId: string; definition?: NPC }>; // Optional NPC definitions
 }
 
 // Function to sort participants by initiative (descending), breaking ties randomly or by DEX
@@ -43,7 +45,7 @@ function sortParticipantsByInitiative(participants: EncounterParticipant[]): Enc
 }
 
 
-export function CombatTracker({ initialEncounter, campaign, characters, monsters }: CombatTrackerProps) {
+export function CombatTracker({ initialEncounter, campaign, characters, monsters, npcs = [] }: CombatTrackerProps) {
     const { toast } = useToast();
     const queryClient = useQueryClient();
     const { user, userProfile } = useAuth(); // Get DM info
@@ -53,8 +55,9 @@ export function CombatTracker({ initialEncounter, campaign, characters, monsters
     const [isRollingInitiative, setIsRollingInitiative] = useState(false);
     const [editingHpId, setEditingHpId] = useState<string | null>(null);
     const [tempHpInput, setTempHpInput] = useState<string>('');
-    const [diceRollResult, setDiceRollResult] = useState<string | null>(null);
-    const [rollerKey, setRollerKey] = useState(0);
+    // Removed state for diceRollResult and rollerKey
+    // const [diceRollResult, setDiceRollResult] = useState<string | null>(null);
+    // const [rollerKey, setRollerKey] = useState(0);
 
     const isCombatRunning = useMemo(() => encounter.status === 'running', [encounter.status]);
     const currentParticipant = useMemo(() => {
@@ -106,16 +109,19 @@ export function CombatTracker({ initialEncounter, campaign, characters, monsters
         let logDetails = 'Initiative rolls: ';
         const updatedParticipants = encounter.participants.map(p => {
             let initiative = 0;
+            let dexMod = 0;
             if (p.type === 'character') {
                 const char = characters.find(c => c.id === p.sourceId);
-                const dexMod = char ? Math.floor((char.stats.dexterity - 10) / 2) : 0;
-                initiative = rollDice('1d20') + dexMod;
-            } else {
+                dexMod = char ? Math.floor((char.stats.dexterity - 10) / 2) : 0;
+            } else if (p.type === 'monster') {
                 const monsterDef = monsters.find(m => m.instanceId === p.id)?.definition;
-                const dexMod = monsterDef?.stats?.dexterity ? Math.floor((monsterDef.stats.dexterity - 10) / 2) : 0;
-                initiative = rollDice('1d20') + dexMod;
+                dexMod = monsterDef?.stats?.dexterity ? Math.floor((monsterDef.stats.dexterity - 10) / 2) : 0;
+            } else { // NPC
+                const npcDef = npcs.find(n => n.instanceId === p.id)?.definition;
+                dexMod = npcDef?.stats?.dexterity ? Math.floor((npcDef.stats.dexterity - 10) / 2) : 0;
             }
-             logDetails += `${p.name}: ${initiative}, `;
+            initiative = rollDice('1d20') + dexMod;
+            logDetails += `${p.name}: ${initiative}, `;
             return { ...p, initiative };
         });
 
@@ -255,7 +261,8 @@ export function CombatTracker({ initialEncounter, campaign, characters, monsters
     // --- Render ---
     return (
         <div className="p-4 md:p-6 space-y-6 h-full flex flex-col">
-             {diceRollResult && <DDDiceRoller key={rollerKey} resultText={diceRollResult} />}
+             {/* Removed DDDiceRoller */}
+             {/* {diceRollResult && <DDDiceRoller key={rollerKey} resultText={diceRollResult} />} */}
             {/* Header */}
             <Card>
                 <CardHeader>
@@ -315,7 +322,13 @@ export function CombatTracker({ initialEncounter, campaign, characters, monsters
                 <CardContent className="flex-grow overflow-y-auto">
                     {initiativeOrder.length === 0 && <p className="text-muted-foreground text-center">No participants yet.</p>}
                     <ul className="space-y-3">
-                        {initiativeOrder.map((p, index) => (
+                        {initiativeOrder.map((p, index) => {
+                           let participantTypeLabel = 'Unknown';
+                           if (p.type === 'character') participantTypeLabel = 'Player Character';
+                           else if (p.type === 'monster') participantTypeLabel = monsters.find(m => m.instanceId === p.id)?.definition?.type || 'Monster';
+                           else if (p.type === 'npc') participantTypeLabel = npcs.find(n => n.instanceId === p.id)?.definition?.type || 'NPC';
+
+                           return (
                             <li
                                 key={p.id}
                                 className={`border rounded-lg p-3 transition-all duration-300 ${index === encounter.currentTurnIndex && isCombatRunning ? 'ring-2 ring-primary shadow-lg scale-[1.01]' : 'opacity-80 hover:opacity-100'}`}
@@ -326,7 +339,7 @@ export function CombatTracker({ initialEncounter, campaign, characters, monsters
                                         <div className='min-w-0'>
                                             <p className="font-medium text-lg truncate" title={p.name}>{p.name}</p>
                                             <p className="text-xs text-muted-foreground">
-                                                {p.type === 'character' ? 'Player Character' : monsters.find(m => m.instanceId === p.id)?.definition?.type || 'Monster'}
+                                                {participantTypeLabel}
                                             </p>
                                         </div>
                                     </div>
@@ -371,7 +384,8 @@ export function CombatTracker({ initialEncounter, campaign, characters, monsters
                                     </div>
                                 )} */}
                             </li>
-                        ))}
+                           );
+                        })}
                     </ul>
                 </CardContent>
             </Card>
@@ -433,4 +447,3 @@ export function CombatTrackerSkeleton() {
         </div>
     );
 }
-

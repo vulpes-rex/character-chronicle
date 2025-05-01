@@ -1,0 +1,46 @@
+
+{
+  "hosting": {
+    "public": ".next",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "/_next/static/**",
+        "destination": "/_next/static/**"
+      },
+      {
+         "source": "/favicon.ico",
+         "destination": "/favicon.ico"
+      },
+       {
+         "source": "/manifest.json",
+         "destination": "/manifest.json"
+       },
+      {
+        "source": "**",
+        "function": "server" // Assuming deployment uses a Cloud Function named 'server' for SSR/ISR
+        // Alternatively, for SPA-like fallback (no SSR on Firebase Hosting without Functions/Run):
+        // "destination": "/index.html"
+      }
+    ]
+    // Framework-aware hosting might add `frameworksBackend` configuration here
+    // if initialized with `firebase init hosting`.
+  },
+  "functions": [
+    {
+      "source": "functions", // Location of Firebase Functions code (if used)
+      "codebase": "default",
+      "ignore": [
+        "node_modules",
+        ".git",
+        "firebase-debug.log",
+        "firebase-debug.*.log"
+      ],
+      "runtime": "nodejs20" // Specify runtime (e.g., nodejs20)
+    }
+  ]
+}

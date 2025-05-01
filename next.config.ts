@@ -28,6 +28,7 @@ const nextConfig: NextConfig = {
      // For client-side Firebase SDK (firebase/app, firebase/firestore), this usually isn't needed.
      // serverComponentsExternalPackages: ['@google-cloud/firestore'], // Example
    },
+   output: 'standalone', // Optimize for deployment environments
 };
 
 export default nextConfig;

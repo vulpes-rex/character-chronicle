@@ -1,4 +1,5 @@
 
+import { useState, useEffect } from 'react';
 import { CharacterForm } from '@/components/character-form';
 import { AppLayout } from '@/components/app-layout';
 import { loadCharacter } from '@/services/character-service';
@@ -9,17 +10,33 @@ interface EditCharacterPageProps {
   params: { id: string };
 }
 
-export default async function EditCharacterPage({ params }: EditCharacterPageProps) {
-  const characterId = params.id;
-  let initialCharacterData = null;
-  let errorLoading = null;
+'use client';
 
-  try {
-    initialCharacterData = await loadCharacter(characterId);
-  } catch (error) {
-    console.error("Failed to load character for editing:", error);
-    errorLoading = error instanceof Error ? error.message : 'An unknown error occurred.';
-  }
+export default  function EditCharacterPage({ params }: EditCharacterPageProps) {
+  const characterId = params.id;
+  const [initialCharacterData, setInitialCharacterData] = useState<any>(null);
+  const [errorLoading, setErrorLoading] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  
+  useEffect(() => {
+    const fetchData = async () => {
+      setLoading(true);
+      try {
+        const data = await loadCharacter(characterId);
+        setInitialCharacterData(data);
+      } catch (error) {
+        console.error("Failed to load character for editing:", error);
+        setErrorLoading(error instanceof Error ? error.message : 'An unknown error occurred.');
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchData();
+  }, [characterId]);
+  
+  if (loading) {
+      return <AppLayout>Loading...</AppLayout>
+    }
 
   return (
     <AppLayout>

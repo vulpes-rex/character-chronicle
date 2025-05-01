@@ -188,6 +188,38 @@ export interface BackgroundInfo {
     };
  }
 
+/**
+ * Represents a Monster.
+ */
+export interface Monster {
+  name: string;
+  description?: string;
+  size?: string;
+  type?: string;
+  alignment?: string;
+  armorClass?: number;
+  hitPoints?: {
+    average: number;
+    dice: string;
+  };
+  speed?: string;
+  stats?: {
+    strength: number;
+    dexterity: number;
+    constitution: number;
+    intelligence: number;
+    wisdom: number;
+    charisma: number;
+  };
+  skills?: Record<string, number>; // Skill modifier (e.g., { Perception: 5 })
+  senses?: string;
+  languages?: string;
+  challengeRating?: string; // e.g., "1/4", "5"
+  specialAbilities?: Array<{ name: string; description: string }>;
+  actions?: Array<{ name: string; description: string; attackBonus?: number; damageDice?: string; damageBonus?: number }>;
+}
+
+
  /**
   * Represents a content source pack (e.g., SRD, custom DM content).
   */
@@ -196,17 +228,50 @@ export interface BackgroundInfo {
     name: string;
     description: string;
     creatorId: string; // 'system' or DM's user ID
-    // Content can be stored directly as JSON or in subcollections
     content: {
         races?: Record<string, Omit<CharacterRace, 'description'>>; // Simplified for storage example
         classes?: Record<string, Omit<CharacterClass, 'description'>>;
         items?: Record<string, Omit<EquipmentItem, 'description' | 'isEquipped'>>;
-        // spells?: Record<string, any>; // Add spell structure if needed
+        monsters?: Record<string, Monster>; // Added monsters
         backgrounds?: Record<string, BackgroundInfo>;
+        // spells?: Record<string, any>; // Add spell structure if needed
     };
     createdAt: Date;
     updatedAt: Date;
  }
+
+
+/**
+ * Represents a participant in an encounter (either a character or a monster instance).
+ */
+export interface EncounterParticipant {
+  id: string; // Unique ID for this instance in the encounter
+  sourceId: string; // ID of the Character or Monster definition
+  type: 'character' | 'monster';
+  name: string; // Character name or Monster name (potentially with index like "Goblin 1")
+  initiative?: number | null;
+  currentHp: number;
+  maxHp: number;
+  armorClass: number;
+  conditions?: string[]; // Array of condition names
+}
+
+/**
+ * Represents a combat encounter.
+ */
+export interface Encounter {
+  id: string; // Firestore document ID
+  campaignId: string;
+  name: string;
+  description?: string;
+  participants: EncounterParticipant[];
+  status: 'setup' | 'running' | 'completed';
+  currentTurnIndex?: number | null; // Index in the participants array after sorting by initiative
+  round?: number;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
 
 // Helper function for dice rolling (moved here for potential server-side use)
 export const rollDice = (diceString: string): number => {
@@ -216,7 +281,21 @@ export const rollDice = (diceString: string): number => {
         if (diceString.startsWith('d')) {
             diceString = '1' + diceString;
         }
-        const [numDiceStr, numSidesStr] = diceString.toLowerCase().split('d');
+        // Handle simple +/- modifiers
+        let modifier = 0;
+        let dicePart = diceString;
+        if (diceString.includes('+')) {
+            [dicePart, modifier] = diceString.split('+').map(s => s.trim());
+            modifier = parseInt(modifier, 10) || 0;
+        } else if (diceString.includes('-')) {
+            const parts = diceString.split('-');
+            dicePart = parts[0].trim();
+            // Join remaining parts in case of multiple hyphens (unlikely but possible)
+            modifier = -(parseInt(parts.slice(1).join('-').trim(), 10) || 0);
+        }
+
+
+        const [numDiceStr, numSidesStr] = dicePart.toLowerCase().split('d');
         const numDice = parseInt(numDiceStr, 10);
         const numSides = parseInt(numSidesStr, 10);
 
@@ -229,7 +308,7 @@ export const rollDice = (diceString: string): number => {
         for (let i = 0; i < numDice; i++) {
             total += Math.floor(Math.random() * numSides) + 1;
         }
-        return total;
+        return total + modifier; // Add modifier at the end
     } catch (e) {
         console.error("Error rolling dice:", diceString, e);
         return 0;

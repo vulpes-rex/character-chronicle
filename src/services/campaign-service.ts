@@ -17,8 +17,11 @@ import {
   arrayUnion,
   arrayRemove,
   or,
+  orderBy,
+  limit,
+  setDoc,
 } from 'firebase/firestore';
-import type { Campaign, GameLogEntry, SourcePack, UserRole } from '@/lib/types';
+import type { Campaign, GameLogEntry, SourcePack, UserRole, Monster } from '@/lib/types'; // Added Monster type
 
 const campaignsCollection = collection(db, 'campaigns');
 const gameLogsCollection = collection(db, 'gameLogs');
@@ -33,7 +36,7 @@ const sourcePacksCollection = collection(db, 'sourcePacks');
  * @param dmId - The User ID of the Dungeon Master creating the campaign.
  * @returns The ID of the newly created campaign.
  */
-export async function createCampaign(campaignData: Pick<Campaign, 'name' | 'description'>, dmId: string): Promise<string> {
+export async function createCampaign(campaignData: Pick<Campaign, 'name' | 'description' | 'activeSourcePackIds'>, dmId: string): Promise<string> {
   if (!dmId) {
     throw new Error('Dungeon Master ID is required to create a campaign.');
   }
@@ -43,7 +46,7 @@ export async function createCampaign(campaignData: Pick<Campaign, 'name' | 'desc
       dmId: dmId,
       playerIds: [], // Starts empty
       characterIds: [], // Starts empty
-      activeSourcePackIds: ['srd'], // Default to SRD content pack ID
+      activeSourcePackIds: campaignData.activeSourcePackIds || ['srd'], // Use provided or default to SRD
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
@@ -77,8 +80,8 @@ export async function loadCampaign(campaignId: string): Promise<Campaign | null>
       return null;
     }
   } catch (e) {
-    console.error('Error getting campaign document: ', e);
-    throw new Error('Failed to load campaign.');
+    console.error(`Error getting campaign document ${campaignId}: `, e);
+    throw new Error(`Failed to load campaign ${campaignId}.`);
   }
 }
 
@@ -133,7 +136,10 @@ export async function updateCampaign(campaignId: string, campaignData: Partial<P
 
   // Permission Check (Example)
   const campaign = await loadCampaign(campaignId);
-  if (!campaign || campaign.dmId !== currentUserId) {
+  if (!campaign) {
+      throw new Error(`Campaign with ID ${campaignId} not found.`);
+  }
+  if (campaign.dmId !== currentUserId) {
       throw new Error('Permission denied: Only the DM can update the campaign.');
   }
 
@@ -161,11 +167,14 @@ export async function deleteCampaign(campaignId: string, currentUserId: string):
 
    // Permission Check (Example)
    const campaign = await loadCampaign(campaignId);
-   if (!campaign || campaign.dmId !== currentUserId) {
+    if (!campaign) {
+        throw new Error(`Campaign with ID ${campaignId} not found.`);
+    }
+   if (campaign.dmId !== currentUserId) {
        throw new Error('Permission denied: Only the DM can delete the campaign.');
    }
 
-   // TODO: Consider implications - delete associated characters? game logs?
+   // TODO: Consider implications - delete associated characters? game logs? encounters?
    // This currently only deletes the campaign document itself.
 
    try {
@@ -188,7 +197,10 @@ export async function addPlayerToCampaign(campaignId: string, playerId: string, 
 
     // Permission Check (Example)
     const campaign = await loadCampaign(campaignId);
-    if (!campaign || campaign.dmId !== currentUserId) {
+     if (!campaign) {
+        throw new Error(`Campaign with ID ${campaignId} not found.`);
+    }
+    if (campaign.dmId !== currentUserId) {
         throw new Error('Permission denied: Only the DM can add players.');
     }
     if (campaign.playerIds.includes(playerId)) {
@@ -219,7 +231,10 @@ export async function removePlayerFromCampaign(campaignId: string, playerId: str
 
     // Permission Check (Example)
     const campaign = await loadCampaign(campaignId);
-    if (!campaign || campaign.dmId !== currentUserId) {
+     if (!campaign) {
+        throw new Error(`Campaign with ID ${campaignId} not found.`);
+    }
+    if (campaign.dmId !== currentUserId) {
         throw new Error('Permission denied: Only the DM can remove players.');
     }
      if (!campaign.playerIds.includes(playerId)) {
@@ -313,7 +328,10 @@ export async function saveSourcePack(sourcePackData: Omit<SourcePack, 'createdAt
     if (sourcePackData.id) {
         // Check ownership if updating existing pack
         const existingPack = await loadSourcePack(sourcePackData.id);
-        if (!existingPack || (existingPack.creatorId !== currentUserId && existingPack.creatorId !== 'system')) {
+        if (!existingPack) {
+             throw new Error(`Source pack with ID ${sourcePackData.id} not found.`);
+        }
+        if (existingPack.creatorId !== currentUserId && existingPack.creatorId !== 'system') {
             throw new Error('Permission denied: Cannot update this source pack.');
         }
     }
@@ -362,8 +380,10 @@ export async function loadSourcePack(sourcePackId: string): Promise<SourcePack |
         return null;
         }
     } catch (e) {
-        console.error('Error getting source pack document: ', e);
-        throw new Error('Failed to load source pack.');
+        console.error(`Error getting source pack document ${sourcePackId}: `, e);
+        // Don't throw here, return null to allow graceful handling in combined content
+        return null;
+        // throw new Error('Failed to load source pack.');
     }
 }
 
@@ -404,7 +424,10 @@ export async function deleteSourcePack(sourcePackId: string, currentUserId: stri
 
     // Permission Check
     const pack = await loadSourcePack(sourcePackId);
-    if (!pack || pack.creatorId === 'system' || pack.creatorId !== currentUserId) {
+     if (!pack) {
+        throw new Error(`Source pack with ID ${sourcePackId} not found.`);
+    }
+    if (pack.creatorId === 'system' || pack.creatorId !== currentUserId) {
         throw new Error('Permission denied: Cannot delete this source pack.');
     }
 
@@ -426,24 +449,40 @@ export async function getCombinedContentFromPacks(packIds: string[]): Promise<So
         races: {},
         classes: {},
         items: {},
+        monsters: {}, // Initialize monsters
         backgrounds: {},
     };
 
     if (!packIds || packIds.length === 0) {
-        // Optionally load a default pack (like SRD) if none are specified
-        // packIds = ['srd'];
-        return combinedContent; // Return empty if no packs specified and no default
+        packIds = ['srd']; // Default to SRD if no packs are specified
     }
 
-    const packPromises = packIds.map(id => loadSourcePack(id));
-    const packs = await Promise.all(packPromises);
+    // Ensure SRD is always included if not already present
+    const packIdsToLoad = [...new Set([...packIds, 'srd'])]; // Use Set to avoid duplicates
 
-    for (const pack of packs) {
+    const packPromises = packIdsToLoad.map(async (id) => {
+         try {
+            return await loadSourcePack(id);
+         } catch (error) {
+             console.warn(`Failed to load source pack ${id}:`, error);
+             return null; // Return null if a pack fails to load
+         }
+    });
+
+    const packs = (await Promise.all(packPromises)).filter((pack): pack is SourcePack => pack !== null); // Filter out nulls
+
+    // Define the order of merging (SRD first, then others)
+    const srdPack = packs.find(p => p.id === 'srd');
+    const otherPacks = packs.filter(p => p.id !== 'srd');
+    const sortedPacks = srdPack ? [srdPack, ...otherPacks] : otherPacks; // Put SRD first if found
+
+    for (const pack of sortedPacks) {
         if (pack?.content) {
-            // Merge content, potentially giving priority to later packs in the list
+            // Merge content, SRD content will be potentially overwritten by custom packs loaded later
             combinedContent.races = { ...combinedContent.races, ...pack.content.races };
             combinedContent.classes = { ...combinedContent.classes, ...pack.content.classes };
             combinedContent.items = { ...combinedContent.items, ...pack.content.items };
+            combinedContent.monsters = { ...combinedContent.monsters, ...pack.content.monsters }; // Merge monsters
             combinedContent.backgrounds = { ...combinedContent.backgrounds, ...pack.content.backgrounds };
             // Merge other content types (spells, etc.) if added
         }
@@ -451,3 +490,5 @@ export async function getCombinedContentFromPacks(packIds: string[]): Promise<So
 
     return combinedContent;
 }
+
+    

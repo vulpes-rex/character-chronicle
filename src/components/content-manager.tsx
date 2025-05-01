@@ -119,6 +119,7 @@ export function ContentManager() {
                {Object.keys(pack.content.races || {}).length} Races,{' '}
                {Object.keys(pack.content.classes || {}).length} Classes,{' '}
                {Object.keys(pack.content.items || {}).length} Items,{' '}
+               {Object.keys(pack.content.monsters || {}).length} Monsters,{' '} {/* Added monster count */}
                {Object.keys(pack.content.backgrounds || {}).length} Backgrounds
             </p>
              <p className="text-xs text-muted-foreground mt-1">

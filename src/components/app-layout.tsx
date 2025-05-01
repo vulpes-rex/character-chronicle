@@ -21,12 +21,14 @@ import {
   SidebarSeparator,
 } from '@/components/ui/sidebar';
 import { Button } from '@/components/ui/button';
-import { Users, UserPlus, Dices, LogIn, LogOut, Shield, ScrollText, Settings, ShieldCheck, BookOpen, Bot } from 'lucide-react'; // Added icons
+import { Users, UserPlus, Dices, LogIn, LogOut, Shield, ScrollText, Settings, ShieldCheck, BookOpen, Bot, Swords } from 'lucide-react'; // Added Swords icon
 import { BackstoryGenerator } from './backstory-generator';
 import type { Character } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar'; // For user display
 import { Skeleton } from './ui/skeleton'; // Import Skeleton component
+import { useQuery } from '@tanstack/react-query';
+import { loadCharacter } from '@/services/character-service';
 
 export function AppLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
@@ -36,6 +38,15 @@ export function AppLayout({ children }: { children: ReactNode }) {
 
   const characterIdMatch = pathname.match(/^\/character\/(view|edit)\/([a-zA-Z0-9_-]+)/);
   const currentCharacterId = characterIdMatch ? characterIdMatch[2] : undefined;
+
+  // Pre-fetch character data if ID is present, useful for BackstoryGenerator
+  const { data: currentCharacter } = useQuery<Character | null, Error>({
+      queryKey: ['character', currentCharacterId],
+      queryFn: () => currentCharacterId ? loadCharacter(currentCharacterId) : Promise.resolve(null), // Use client-safe fetcher or wrap server action
+      enabled: !!currentCharacterId, // Only fetch if we have an ID
+      staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+  });
+
 
   const handleLogout = async () => {
     try {
@@ -93,7 +104,12 @@ export function AppLayout({ children }: { children: ReactNode }) {
               </SidebarMenuButton>
             </SidebarMenuItem>
              <SidebarMenuItem>
-                 <BackstoryGenerator characterId={currentCharacterId} />
+                  <BackstoryGenerator
+                     characterId={currentCharacterId}
+                     characterRace={currentCharacter?.race}
+                     characterClass={currentCharacter?.class}
+                     characterAlignment={currentCharacter?.alignment}
+                 />
              </SidebarMenuItem>
 
              {/* Campaign Management (Visible to all logged-in users, DM sees more options) */}
@@ -120,6 +136,30 @@ export function AppLayout({ children }: { children: ReactNode }) {
              {isAdmin && (
                  <>
                     <SidebarSeparator />
+                     <SidebarMenuItem>
+                       <SidebarMenuButton
+                         asChild
+                         tooltip={{ children: 'Create Campaign' }}
+                          isActive={pathname === '/dm/campaigns/create'}
+                       >
+                         <Link href="/dm/campaigns/create">
+                           <ShieldCheck />
+                           <span>Create Campaign</span>
+                         </Link>
+                       </SidebarMenuButton>
+                    </SidebarMenuItem>
+                     <SidebarMenuItem>
+                       <SidebarMenuButton
+                         asChild
+                         tooltip={{ children: 'Manage Encounters' }}
+                          isActive={pathname.startsWith('/dm/encounters')}
+                       >
+                         <Link href="/dm/encounters"> {/* Link to encounters page */}
+                           <Swords />
+                           <span>Encounters</span>
+                         </Link>
+                       </SidebarMenuButton>
+                    </SidebarMenuItem>
                     <SidebarMenuItem>
                        <SidebarMenuButton
                          asChild
@@ -129,19 +169,6 @@ export function AppLayout({ children }: { children: ReactNode }) {
                          <Link href="/dm/content">
                            <Settings />
                            <span>Manage Content</span>
-                         </Link>
-                       </SidebarMenuButton>
-                    </SidebarMenuItem>
-                    {/* Add more DM tools here: manage sessions, manage source packs etc. */}
-                    <SidebarMenuItem>
-                       <SidebarMenuButton
-                         asChild
-                         tooltip={{ children: 'Create Campaign' }}
-                          isActive={pathname === '/dm/campaigns/create'}
-                       >
-                         <Link href="/dm/campaigns/create">
-                           <ShieldCheck />
-                           <span>Create Campaign</span>
                          </Link>
                        </SidebarMenuButton>
                     </SidebarMenuItem>

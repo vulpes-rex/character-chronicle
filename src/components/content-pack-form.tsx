@@ -15,7 +15,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { useToast } from '@/hooks/use-toast';
 import { saveSourcePack } from '@/services/campaign-service'; // Service to save pack
-import type { SourcePack, CharacterRace, CharacterClass, EquipmentItem, BackgroundInfo } from '@/lib/types';
+import type { SourcePack, CharacterRace, CharacterClass, EquipmentItem, BackgroundInfo, Monster } from '@/lib/types';
 import { useAuth } from '@/components/auth-provider';
 import { AlertCircle, Loader2, Trash2, PlusCircle } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -42,6 +42,43 @@ const backgroundSchema = z.object({
     // Add more background fields
 });
 
+// Simplified monster schema for the form
+const monsterActionSchema = z.object({
+    name: z.string().min(1),
+    description: z.string().optional(),
+    attackBonus: z.number().optional(),
+    damageDice: z.string().optional(),
+    damageBonus: z.number().optional(),
+});
+const monsterSpecialAbilitySchema = z.object({
+    name: z.string().min(1),
+    description: z.string().min(1),
+});
+
+const monsterSchema = z.object({
+    name: z.string().min(1, "Monster name required"),
+    size: z.string().optional(),
+    type: z.string().optional(),
+    alignment: z.string().optional(),
+    armorClass: z.number().optional(),
+    hitPointsDice: z.string().optional().describe('e.g., 2d8+2'), // Combined HP dice + bonus for form simplicity
+    speed: z.string().optional(),
+    challengeRating: z.string().optional(),
+    stats: z.object({ // Basic stats
+        strength: z.number().optional(),
+        dexterity: z.number().optional(),
+        constitution: z.number().optional(),
+        intelligence: z.number().optional(),
+        wisdom: z.number().optional(),
+        charisma: z.number().optional(),
+    }).optional(),
+    skills: z.string().optional().describe('e.g., Perception +5, Stealth +3'), // Simplified skill string
+    senses: z.string().optional(),
+    languages: z.string().optional(),
+    specialAbilities: z.array(monsterSpecialAbilitySchema).optional().default([]),
+    actions: z.array(monsterActionSchema).optional().default([]),
+});
+
 
 // Zod schema for the entire Source Pack form
 const sourcePackFormSchema = z.object({
@@ -52,6 +89,7 @@ const sourcePackFormSchema = z.object({
      classes: z.array(classSchema).optional().default([]),
      items: z.array(itemSchema).optional().default([]),
      backgrounds: z.array(backgroundSchema).optional().default([]),
+     monsters: z.array(monsterSchema).optional().default([]), // Added monsters
      // spells: z.array(...).optional(), // Add spells schema if needed
   }),
 });
@@ -83,11 +121,38 @@ export function ContentPackForm({ initialData }: ContentPackFormProps) {
       return array.reduce((acc, item) => {
           const { name, ...rest } = item;
           if (name) { // Ensure name is present
+             // Special handling for monster HP dice string back to object
+              if ('hitPointsDice' in rest) {
+                  const hpMatch = (rest as any).hitPointsDice?.match(/(\d+d\d+)\s*([+-]\s*\d+)?/);
+                  (rest as Monster).hitPoints = {
+                      average: 0, // Average HP is not directly in the form, needs calculation or separate field
+                      dice: hpMatch ? hpMatch[1] : '',
+                  };
+                  // Consider parsing modifier if needed, e.g., hpMatch[2]
+                  delete (rest as any).hitPointsDice;
+              }
              acc[name] = rest;
           }
           return acc;
       }, {} as Record<string, Omit<T, 'name'>>);
    };
+
+    // Helper to convert Monster HP object back to string for form display
+    const monsterHpToString = (hp?: Monster['hitPoints']): string | undefined => {
+        if (!hp || !hp.dice) return undefined;
+        // For simplicity, just return the dice string. Add average/modifier logic if needed.
+        return hp.dice;
+    };
+
+    const defaultMonsterValues = {
+       name: '',
+       size: 'Medium',
+       type: 'humanoid',
+       alignment: 'unaligned',
+       stats: { strength: 10, dexterity: 10, constitution: 10, intelligence: 10, wisdom: 10, charisma: 10 },
+       specialAbilities: [],
+       actions: [],
+    };
 
 
   const form = useForm<SourcePackFormData>({
@@ -100,6 +165,11 @@ export function ContentPackForm({ initialData }: ContentPackFormProps) {
          classes: recordToArray(initialData?.content.classes) || [],
          items: recordToArray(initialData?.content.items) || [],
          backgrounds: recordToArray(initialData?.content.backgrounds) || [],
+         monsters: recordToArray(initialData?.content.monsters).map(m => ({
+             ...m,
+             hitPointsDice: monsterHpToString(m.hitPoints),
+             // Convert other complex fields back to simple form fields if needed
+         })) || [],
       },
     },
   });
@@ -109,6 +179,7 @@ export function ContentPackForm({ initialData }: ContentPackFormProps) {
   const { fields: classFields, append: appendClass, remove: removeClass } = useFieldArray({ control: form.control, name: "content.classes"});
   const { fields: itemFields, append: appendItem, remove: removeItem } = useFieldArray({ control: form.control, name: "content.items"});
   const { fields: backgroundFields, append: appendBackground, remove: removeBackground } = useFieldArray({ control: form.control, name: "content.backgrounds"});
+  const { fields: monsterFields, append: appendMonster, remove: removeMonster } = useFieldArray({ control: form.control, name: "content.monsters"});
 
 
   useEffect(() => {
@@ -144,6 +215,7 @@ export function ContentPackForm({ initialData }: ContentPackFormProps) {
          classes: arrayToRecord(data.content.classes),
          items: arrayToRecord(data.content.items),
          backgrounds: arrayToRecord(data.content.backgrounds),
+         monsters: arrayToRecord(data.content.monsters), // Convert monsters array back to record
       },
     };
 
@@ -190,15 +262,16 @@ export function ContentPackForm({ initialData }: ContentPackFormProps) {
        <Card>
            <CardHeader>
                <CardTitle>Pack Content</CardTitle>
-                <p className="text-sm text-muted-foreground">Add or edit races, classes, items, and backgrounds for this pack.</p>
+                <p className="text-sm text-muted-foreground">Add or edit races, classes, items, backgrounds, and monsters for this pack.</p>
            </CardHeader>
            <CardContent>
                <Tabs defaultValue="races">
-                   <TabsList className="grid w-full grid-cols-4 mb-4">
+                   <TabsList className="grid w-full grid-cols-5 mb-4"> {/* Updated grid-cols */}
                        <TabsTrigger value="races">Races</TabsTrigger>
                        <TabsTrigger value="classes">Classes</TabsTrigger>
                        <TabsTrigger value="items">Items</TabsTrigger>
                        <TabsTrigger value="backgrounds">Backgrounds</TabsTrigger>
+                       <TabsTrigger value="monsters">Monsters</TabsTrigger> {/* Added Monsters trigger */}
                        {/* <TabsTrigger value="spells">Spells</TabsTrigger> */}
                    </TabsList>
 
@@ -267,6 +340,15 @@ export function ContentPackForm({ initialData }: ContentPackFormProps) {
                        </ContentSection>
                    </TabsContent>
 
+                    {/* Monsters Tab */}
+                    <TabsContent value="monsters">
+                       <ContentSection title="Monsters" fields={monsterFields} removeFn={removeMonster} appendFn={() => appendMonster(defaultMonsterValues)}>
+                           {(index) => (
+                                <MonsterFormFields index={index} control={form.control} register={form.register} />
+                           )}
+                       </ContentSection>
+                   </TabsContent>
+
                    {/* Spells Tab (Optional) */}
                    {/* <TabsContent value="spells"> ... </TabsContent> */}
                </Tabs>
@@ -312,19 +394,31 @@ function ContentSection<T>({ title, fields, removeFn, appendFn, children }: Cont
            <ScrollArea className="h-[300px] border rounded-md p-4">
              <div className="space-y-3">
                {fields.map((field, index) => (
-                   <div key={field.id} className="grid grid-cols-4 gap-2 items-center border-b pb-2 last:border-0">
-                       {children(index)} {/* Render the specific fields for this content type */}
-                       <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            className="text-destructive hover:text-destructive h-8 w-8 justify-self-end"
-                            onClick={() => removeFn(index)}
-                            aria-label={`Remove ${title} item`}
-                        >
-                            <Trash2 className="h-4 w-4" />
-                       </Button>
-                   </div>
+                   <Accordion key={field.id} type="single" collapsible className="border rounded p-2">
+                       <AccordionItem value={`item-${index}`} className="border-none">
+                           <div className="flex justify-between items-center">
+                               <AccordionTrigger className="flex-grow py-1 px-2 text-sm hover:no-underline">
+                                   {/* Display name from the form state */}
+                                   {(field as any).name || `${title} ${index + 1}`}
+                               </AccordionTrigger>
+                               <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon"
+                                    className="text-destructive hover:text-destructive h-8 w-8"
+                                    onClick={() => removeFn(index)}
+                                    aria-label={`Remove ${title} item`}
+                                >
+                                    <Trash2 className="h-4 w-4" />
+                               </Button>
+                           </div>
+                           <AccordionContent className="px-2 pt-2">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2">
+                                    {children(index)} {/* Render the specific fields */}
+                                </div>
+                           </AccordionContent>
+                       </AccordionItem>
+                   </Accordion>
                ))}
                 {fields.length === 0 && <p className='text-sm text-muted-foreground text-center py-4'>No {title.toLowerCase()} added yet.</p>}
             </div>
@@ -340,4 +434,80 @@ function ContentSection<T>({ title, fields, removeFn, appendFn, children }: Cont
             </Button>
        </div>
     );
+}
+
+
+// Component specifically for Monster form fields within the ContentSection accordion
+function MonsterFormFields({ index, control, register }: { index: number, control: any, register: any }) {
+   const { fields: abilityFields, append: appendAbility, remove: removeAbility } = useFieldArray({ control, name: `content.monsters.${index}.specialAbilities`});
+   const { fields: actionFields, append: appendAction, remove: removeAction } = useFieldArray({ control, name: `content.monsters.${index}.actions`});
+
+   return (
+       <>
+           {/* Basic Info */}
+           <Input {...register(`content.monsters.${index}.name`)} placeholder="Monster Name" className="col-span-2" />
+           <Input {...register(`content.monsters.${index}.size`)} placeholder="Size (e.g., Medium)" />
+           <Input {...register(`content.monsters.${index}.type`)} placeholder="Type (e.g., humanoid)" />
+           <Input {...register(`content.monsters.${index}.alignment`)} placeholder="Alignment" />
+           <Input type="number" {...register(`content.monsters.${index}.armorClass`, { valueAsNumber: true })} placeholder="AC" />
+           <Input {...register(`content.monsters.${index}.hitPointsDice`)} placeholder="HP (e.g., 2d8+2)" />
+           <Input {...register(`content.monsters.${index}.speed`)} placeholder="Speed (e.g., 30 ft)" />
+           <Input {...register(`content.monsters.${index}.challengeRating`)} placeholder="CR (e.g., 1/4)" />
+
+           {/* Stats */}
+           <div className="col-span-full mt-2 pt-2 border-t">
+               <h4 className="text-xs font-medium mb-1">Stats</h4>
+               <div className="grid grid-cols-3 gap-1">
+                    <Input type="number" {...register(`content.monsters.${index}.stats.strength`, { valueAsNumber: true })} placeholder="STR" className="text-xs h-7" />
+                    <Input type="number" {...register(`content.monsters.${index}.stats.dexterity`, { valueAsNumber: true })} placeholder="DEX" className="text-xs h-7" />
+                    <Input type="number" {...register(`content.monsters.${index}.stats.constitution`, { valueAsNumber: true })} placeholder="CON" className="text-xs h-7" />
+                    <Input type="number" {...register(`content.monsters.${index}.stats.intelligence`, { valueAsNumber: true })} placeholder="INT" className="text-xs h-7" />
+                    <Input type="number" {...register(`content.monsters.${index}.stats.wisdom`, { valueAsNumber: true })} placeholder="WIS" className="text-xs h-7" />
+                    <Input type="number" {...register(`content.monsters.${index}.stats.charisma`, { valueAsNumber: true })} placeholder="CHA" className="text-xs h-7" />
+               </div>
+           </div>
+
+           {/* Skills, Senses, Languages */}
+           <Textarea {...register(`content.monsters.${index}.skills`)} placeholder="Skills (e.g., Perception +5)" className="col-span-2 h-10 text-xs" />
+           <Textarea {...register(`content.monsters.${index}.senses`)} placeholder="Senses (e.g., darkvision 60 ft.)" className="col-span-2 h-10 text-xs" />
+           <Input {...register(`content.monsters.${index}.languages`)} placeholder="Languages" className="col-span-full" />
+
+           {/* Special Abilities */}
+           <div className="col-span-full mt-2 pt-2 border-t">
+               <h4 className="text-xs font-medium mb-1 flex justify-between items-center">
+                  <span>Special Abilities</span>
+                  <Button type="button" variant="outline" size="xs" onClick={() => appendAbility({ name: '', description: '' })}>Add Ability</Button>
+              </h4>
+               <div className="space-y-1">
+                  {abilityFields.map((field, abilityIndex) => (
+                       <div key={field.id} className="flex items-start gap-1">
+                            <Input {...register(`content.monsters.${index}.specialAbilities.${abilityIndex}.name`)} placeholder="Ability Name" className="text-xs h-7 flex-grow" />
+                            <Textarea {...register(`content.monsters.${index}.specialAbilities.${abilityIndex}.description`)} placeholder="Description" className="text-xs h-7 flex-grow-[2]" />
+                            <Button type="button" variant="ghost" size="icon" onClick={() => removeAbility(abilityIndex)} className="h-7 w-7 text-destructive hover:text-destructive shrink-0"><Trash2 className="h-3 w-3" /></Button>
+                       </div>
+                  ))}
+               </div>
+           </div>
+
+            {/* Actions */}
+           <div className="col-span-full mt-2 pt-2 border-t">
+               <h4 className="text-xs font-medium mb-1 flex justify-between items-center">
+                  <span>Actions</span>
+                  <Button type="button" variant="outline" size="xs" onClick={() => appendAction({ name: '', description: '' })}>Add Action</Button>
+              </h4>
+              <div className="space-y-1">
+                  {actionFields.map((field, actionIndex) => (
+                       <div key={field.id} className="grid grid-cols-5 gap-1 items-start">
+                            <Input {...register(`content.monsters.${index}.actions.${actionIndex}.name`)} placeholder="Action Name" className="text-xs h-7 col-span-2" />
+                            <Input type="number" {...register(`content.monsters.${index}.actions.${actionIndex}.attackBonus`, { valueAsNumber: true })} placeholder="Atk Bonus" className="text-xs h-7" />
+                            <Input {...register(`content.monsters.${index}.actions.${actionIndex}.damageDice`)} placeholder="Dmg Dice" className="text-xs h-7" />
+                            {/*<Input type="number" {...register(`content.monsters.${index}.actions.${actionIndex}.damageBonus`, { valueAsNumber: true })} placeholder="Dmg Bonus" className="text-xs h-7" />*/}
+                            <Textarea {...register(`content.monsters.${index}.actions.${actionIndex}.description`)} placeholder="Description (if not attack)" className="text-xs h-7 col-span-full" />
+                            <Button type="button" variant="ghost" size="icon" onClick={() => removeAction(actionIndex)} className="h-7 w-7 text-destructive hover:text-destructive shrink-0 justify-self-end absolute right-2"><Trash2 className="h-3 w-3" /></Button>
+                       </div>
+                   ))}
+              </div>
+           </div>
+       </>
+   );
 }

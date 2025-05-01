@@ -1,9 +1,8 @@
+
 'use client';
 
 import { useState } from 'react';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
+// Removed useForm imports as we get data via props now
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -15,76 +14,99 @@ import {
   DialogFooter,
   DialogClose
 } from '@/components/ui/dialog';
-import {
-  Form,
-  FormControl,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from '@/components/ui/form';
-import { Input } from '@/components/ui/input';
+// Removed Form imports
 import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useToast } from '@/hooks/use-toast';
 import { generateCharacterBackstory } from '@/ai/flows/generate-character-backstory';
 import type { GenerateCharacterBackstoryInput, GenerateCharacterBackstoryOutput } from '@/ai/flows/generate-character-backstory';
-import { ScrollText, Loader2 } from 'lucide-react'; // Using ScrollText for backstory icon
+import { ScrollText, Loader2 } from 'lucide-react';
+import { Alert, AlertDescription, AlertTitle } from './ui/alert';
+import { AlertCircle } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query'; // To potentially access character data from cache
+import type { Character } from '@/lib/types'; // Import Character type
 
-const formSchema = z.object({
-  race: z.string().min(1, { message: 'Race is required.' }),
-  class: z.string().min(1, { message: 'Class is required.' }),
-  alignment: z.string().min(1, { message: 'Alignment is required.' }),
-});
 
-export function BackstoryGenerator() {
+// Props to accept character details
+interface BackstoryGeneratorProps {
+    characterId?: string; // Optional: To potentially update the character directly
+    characterRace?: string;
+    characterClass?: string;
+    characterAlignment?: string;
+}
+
+export function BackstoryGenerator({ characterId, characterRace, characterClass, characterAlignment }: BackstoryGeneratorProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [generatedBackstory, setGeneratedBackstory] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const { toast } = useToast();
+  const queryClient = useQueryClient();
 
-  // TODO: Get default values from character state if available
-  const form = useForm<z.infer<typeof formSchema>>({
-    resolver: zodResolver(formSchema),
-    defaultValues: {
-      race: '',
-      class: '',
-      alignment: '',
-    },
-  });
+  // Determine if we have enough data to generate
+  const canGenerate = !!characterRace && !!characterClass && !!characterAlignment;
 
-   async function onSubmit(values: z.infer<typeof formSchema>) {
-      setIsLoading(true);
-      setGeneratedBackstory(null);
+  // Attempt to get character data from cache if props are missing
+  // This part is experimental and depends on how character data is keyed in React Query
+  // const cachedCharacter = characterId ? queryClient.getQueryData<Character>(['character', characterId]) : undefined;
+  // const race = characterRace ?? cachedCharacter?.race;
+  // const cls = characterClass ?? cachedCharacter?.class; // Use 'cls' as variable name
+  // const alignment = characterAlignment ?? cachedCharacter?.alignment;
+  // const canGenerate = !!race && !!cls && !!alignment;
+
+
+    async function handleGenerate() {
+        if (!canGenerate) {
+             toast({ variant: "destructive", title: "Missing Information", description: "Character race, class, and alignment must be set." });
+             return;
+        }
+
+        setIsLoading(true);
+        setGeneratedBackstory(null);
+        try {
+            const input: GenerateCharacterBackstoryInput = {
+                race: characterRace!, // Non-null assertion because we checked canGenerate
+                class: characterClass!,
+                alignment: characterAlignment!,
+            };
+            const result: GenerateCharacterBackstoryOutput = await generateCharacterBackstory(input);
+            setGeneratedBackstory(result.backstory);
+            toast({
+                title: "Backstory Generated",
+                description: "Your character's backstory is ready!",
+            });
+        } catch (error) {
+            console.error("Error generating backstory:", error);
+            toast({
+                variant: "destructive",
+                title: "Error",
+                description: `Failed to generate backstory. ${error instanceof Error ? error.message : 'Please try again.'}`,
+            });
+        } finally {
+            setIsLoading(false);
+        }
+    }
+
+    // TODO: Implement applying backstory to character sheet state/database
+    const handleApplyBackstory = async () => {
+      if (!characterId || !generatedBackstory) return;
+       // Optimistic UI update could happen here if needed
       try {
-          const input: GenerateCharacterBackstoryInput = {
-              race: values.race,
-              class: values.class, // Ensure field name matches schema ('class')
-              alignment: values.alignment,
-          };
-          const result: GenerateCharacterBackstoryOutput = await generateCharacterBackstory(input);
-          setGeneratedBackstory(result.backstory);
-          toast({
-              title: "Backstory Generated",
-              description: "Your character's backstory is ready!",
-          });
+          // Call service to update character
+          // await updateCharacter(characterId, { backstory: generatedBackstory });
+          toast({ title: "Backstory Applied", description: "Character sheet updated (simulation)." });
+           // Optionally invalidate character query to refetch
+           // queryClient.invalidateQueries({ queryKey: ['character', characterId] });
+           setIsOpen(false); // Close dialog on apply
       } catch (error) {
-          console.error("Error generating backstory:", error);
-          toast({
-              variant: "destructive",
-              title: "Error",
-              description: `Failed to generate backstory. ${error instanceof Error ? error.message : 'Please try again.'}`,
-          });
-      } finally {
-          setIsLoading(false);
+           toast({ variant: "destructive", title: "Apply Failed", description: "Could not save backstory." });
       }
-  }
+    };
+
 
     const handleOpenChange = (open: boolean) => {
         setIsOpen(open);
         if (!open) {
-            // Optionally reset form or generated backstory when closing
-             form.reset();
+             // Reset generated backstory when closing
              setGeneratedBackstory(null);
         }
     };
@@ -101,64 +123,35 @@ export function BackstoryGenerator() {
         <DialogHeader>
           <DialogTitle>Character Backstory Generator</DialogTitle>
           <DialogDescription>
-            Enter your character's details to generate a unique backstory using AI.
+             {canGenerate
+                 ? `Generating backstory for a ${characterRace} ${characterClass} (${characterAlignment}).`
+                 : 'Character details (race, class, alignment) needed.'
+              }
           </DialogDescription>
         </DialogHeader>
-        <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                 <FormField
-                   control={form.control}
-                   name="race"
-                   render={({ field }) => (
-                     <FormItem>
-                       <FormLabel>Race</FormLabel>
-                       <FormControl>
-                         <Input placeholder="e.g., High Elf" {...field} />
-                       </FormControl>
-                       <FormMessage />
-                     </FormItem>
-                   )}
-                 />
-                 <FormField
-                   control={form.control}
-                   name="class"
-                   render={({ field }) => (
-                     <FormItem>
-                       <FormLabel>Class</FormLabel>
-                       <FormControl>
-                         <Input placeholder="e.g., Paladin" {...field} />
-                       </FormControl>
-                       <FormMessage />
-                     </FormItem>
-                   )}
-                 />
-                 <FormField
-                   control={form.control}
-                   name="alignment"
-                   render={({ field }) => (
-                     <FormItem>
-                       <FormLabel>Alignment</FormLabel>
-                       <FormControl>
-                         <Input placeholder="e.g., Chaotic Good" {...field} />
-                       </FormControl>
-                       <FormMessage />
-                     </FormItem>
-                   )}
-                 />
-             </div>
 
-            <Button type="submit" disabled={isLoading} className="w-full">
+         {!canGenerate && (
+              <Alert variant="default" className="my-4">
+                 <AlertCircle className="h-4 w-4" />
+                 <AlertTitle>Missing Information</AlertTitle>
+                 <AlertDescription>
+                    Please ensure the character has a Race, Class, and Alignment selected on their sheet before generating a backstory.
+                 </AlertDescription>
+              </Alert>
+         )}
+
+         <div className="flex justify-center mt-4 mb-2">
+            <Button onClick={handleGenerate} disabled={isLoading || !canGenerate} className="w-1/2">
               {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               Generate Backstory
             </Button>
-          </form>
-        </Form>
+        </div>
+
 
         {generatedBackstory && (
           <div className="mt-6 space-y-2">
             <h4 className="font-semibold">Generated Backstory:</h4>
-            <ScrollArea className="h-[200px] w-full rounded-md border p-4 bg-secondary/30">
+            <ScrollArea className="h-[250px] w-full rounded-md border p-4 bg-secondary/30">
               <p className="text-sm whitespace-pre-wrap">{generatedBackstory}</p>
             </ScrollArea>
           </div>
@@ -168,8 +161,9 @@ export function BackstoryGenerator() {
             <DialogClose asChild>
                 <Button variant="outline">Close</Button>
              </DialogClose>
-             {/* TODO: Add button to copy or apply backstory */}
-             {generatedBackstory && <Button onClick={() => navigator.clipboard.writeText(generatedBackstory)}>Copy Backstory</Button>}
+              {generatedBackstory && <Button onClick={() => navigator.clipboard.writeText(generatedBackstory)}>Copy Backstory</Button>}
+              {/* TODO: Enable apply button when functionality is ready */}
+             {/* {characterId && generatedBackstory && <Button onClick={handleApplyBackstory} variant="default">Apply to Sheet (WIP)</Button>} */}
         </DialogFooter>
       </DialogContent>
     </Dialog>

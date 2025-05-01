@@ -1,3 +1,4 @@
+
 /**
  * Represents a character class in D\&D 5e.
  */
@@ -74,6 +75,37 @@ export interface CharacterLevel {
     */
    spellcasting?: Record<string, any>; // Placeholder for spell slot info
    // Add other level-specific details like class-specific resource increases (Ki, Sorcery Points, etc.) if needed
+}
+
+/**
+ * Represents an item of equipment.
+ */
+export interface EquipmentItem {
+    /**
+     * The name of the item.
+     */
+    name: string;
+    /**
+     * A description of the item (optional).
+     */
+    description?: string;
+    /**
+     * The quantity of the item (used in character sheet, may not be in base item data).
+     */
+    quantity?: number;
+     /**
+      * The weight of the item (optional).
+      */
+     weight?: number;
+     /**
+      * The cost of the item (optional).
+      */
+     cost?: string; // e.g., "5 gp", "1 sp"
+     /**
+      * The type of item (e.g., 'Weapon', 'Armor', 'Adventuring Gear').
+      */
+     type?: string;
+     // Add other relevant fields like damage, AC, properties etc. if needed
 }
 
 
@@ -262,4 +294,30 @@ export async function getCumulativeClassFeatures(className: string, maxLevel: nu
         }
     }
     return allFeatures;
+}
+
+/**
+ * Fetches a list of available equipment items from the database/API.
+ * @returns A promise that resolves to an array of EquipmentItem objects.
+ */
+export async function getAvailableEquipmentItems(): Promise<EquipmentItem[]> {
+  // TODO: Implement this by calling a real API or database. Using placeholder data.
+  console.log('Fetching available equipment items...');
+  await new Promise(resolve => setTimeout(resolve, 400)); // Simulate network delay
+
+  return [
+    { name: 'Backpack', description: 'Holds adventuring gear', weight: 5, cost: '2 gp', type: 'Adventuring Gear' },
+    { name: 'Bedroll', description: 'For sleeping', weight: 7, cost: '1 gp', type: 'Adventuring Gear' },
+    { name: 'Rope (50 feet)', description: 'Hempen rope', weight: 10, cost: '1 gp', type: 'Adventuring Gear' },
+    { name: 'Torch', description: 'Provides light', weight: 1, cost: '1 cp', type: 'Adventuring Gear' },
+    { name: 'Rations (1 day)', description: 'Food for one day', weight: 2, cost: '5 sp', type: 'Adventuring Gear' },
+    { name: 'Waterskin', description: 'Holds water (4 pints)', weight: 5, cost: '2 sp', type: 'Adventuring Gear' },
+    { name: 'Longsword', description: 'Versatile martial weapon', weight: 3, cost: '15 gp', type: 'Weapon' /* properties: 'Versatile (1d10)' */ },
+    { name: 'Dagger', description: 'Simple melee weapon', weight: 1, cost: '2 gp', type: 'Weapon' /* properties: 'Finesse, light, thrown (range 20/60)' */ },
+    { name: 'Shortbow', description: 'Simple ranged weapon', weight: 2, cost: '25 gp', type: 'Weapon' /* properties: 'Ammunition (range 80/320), two-handed' */ },
+    { name: 'Leather Armor', description: 'Light armor', weight: 10, cost: '10 gp', type: 'Armor' /* ac: 11 + Dex modifier */ },
+    { name: 'Shield', description: 'Increases AC by 2', weight: 6, cost: '10 gp', type: 'Armor' },
+    { name: 'Healing Potion', description: 'Regain 2d4+2 hit points', weight: 0.5, cost: '50 gp', type: 'Potion' },
+    { name: 'Thieves\' Tools', description: 'Tools for disarming traps and opening locks', weight: 1, cost: '25 gp', type: 'Tool' },
+  ].sort((a, b) => a.name.localeCompare(b.name)); // Sort alphabetically
 }

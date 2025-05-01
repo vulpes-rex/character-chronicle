@@ -3,8 +3,10 @@
 
 import type { ReactNode } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation'; // To check if on a character page
-// Removed unused useQuery import
+import { usePathname, useRouter } from 'next/navigation';
+import { signOut } from 'firebase/auth'; // Import signOut
+import { auth } from '@/lib/firebase'; // Import auth instance
+import { useAuth } from '@/components/auth-provider'; // Import useAuth hook
 import {
   SidebarProvider,
   Sidebar,
@@ -16,21 +18,42 @@ import {
   SidebarInset,
   SidebarTrigger,
   SidebarFooter,
+  SidebarSeparator,
 } from '@/components/ui/sidebar';
 import { Button } from '@/components/ui/button';
-import { Users, UserPlus, Dices } from 'lucide-react';
+import { Users, UserPlus, Dices, LogIn, LogOut, Shield, ScrollText, Settings, ShieldCheck, BookOpen, Bot } from 'lucide-react'; // Added icons
 import { BackstoryGenerator } from './backstory-generator';
-import type { Character } from '@/lib/types'; // Keep Character type for BackstoryGenerator props
+import type { Character } from '@/lib/types';
+import { useToast } from '@/hooks/use-toast';
+import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar'; // For user display
+import { Skeleton } from './ui/skeleton'; // Import Skeleton component
 
 export function AppLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
-  // Keep this logic if BackstoryGenerator relies on the ID even without loading data here
+  const router = useRouter();
+  const { toast } = useToast();
+  const { user, userProfile, loading, isAdmin } = useAuth(); // Get auth state
+
   const characterIdMatch = pathname.match(/^\/character\/(view|edit)\/([a-zA-Z0-9_-]+)/);
   const currentCharacterId = characterIdMatch ? characterIdMatch[2] : undefined;
 
-  // Removed the problematic useQuery hook.
-  // Character data is loaded on the respective pages (view/edit)
-  // and can be passed down or accessed via context/state management if needed globally.
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      toast({ title: 'Logged Out', description: 'You have been successfully logged out.' });
+      router.push('/login'); // Redirect to login page after logout
+    } catch (error) {
+      console.error("Logout failed:", error);
+      toast({ variant: 'destructive', title: 'Logout Failed', description: 'Could not log you out. Please try again.' });
+    }
+  };
+
+  const getInitials = (name?: string | null): string => {
+     if (!name) return '?';
+     const names = name.split(' ');
+     if (names.length === 1) return names[0].charAt(0).toUpperCase();
+     return (names[0].charAt(0) + names[names.length - 1].charAt(0)).toUpperCase();
+  };
 
   return (
     <SidebarProvider defaultOpen>
@@ -44,11 +67,12 @@ export function AppLayout({ children }: { children: ReactNode }) {
         </SidebarHeader>
         <SidebarContent className="p-2">
           <SidebarMenu>
-            {/* Link to Character List (Homepage) */}
+             {/* Character Management */}
              <SidebarMenuItem>
               <SidebarMenuButton
                 asChild
                 tooltip={{ children: 'Character List' }}
+                isActive={pathname === '/'}
               >
                 <Link href="/">
                   <Users />
@@ -56,12 +80,11 @@ export function AppLayout({ children }: { children: ReactNode }) {
                 </Link>
               </SidebarMenuButton>
             </SidebarMenuItem>
-
-             {/* Link to Create Character Page */}
              <SidebarMenuItem>
               <SidebarMenuButton
                 asChild
                 tooltip={{ children: 'Create New Character' }}
+                isActive={pathname === '/character/create'}
               >
                 <Link href="/character/create">
                   <UserPlus />
@@ -69,18 +92,99 @@ export function AppLayout({ children }: { children: ReactNode }) {
                 </Link>
               </SidebarMenuButton>
             </SidebarMenuItem>
-
-
              <SidebarMenuItem>
-                 {/* Pass only the ID if needed, or rely on context/page data */}
-                 {/* The props for race/class/alignment will likely be undefined here now */}
-                 {/* BackstoryGenerator needs to handle potentially missing props gracefully */}
                  <BackstoryGenerator characterId={currentCharacterId} />
-            </SidebarMenuItem>
+             </SidebarMenuItem>
+
+             {/* Campaign Management (Visible to all logged-in users, DM sees more options) */}
+             {user && (
+                 <>
+                     <SidebarSeparator />
+                     <SidebarMenuItem>
+                       <SidebarMenuButton
+                         asChild
+                         tooltip={{ children: 'Campaigns' }}
+                         isActive={pathname.startsWith('/campaign')}
+                       >
+                         <Link href="/campaigns">
+                           <BookOpen />
+                           <span>Campaigns</span>
+                         </Link>
+                       </SidebarMenuButton>
+                     </SidebarMenuItem>
+                 </>
+             )}
+
+
+             {/* DM-Specific Section */}
+             {isAdmin && (
+                 <>
+                    <SidebarSeparator />
+                    <SidebarMenuItem>
+                       <SidebarMenuButton
+                         asChild
+                         tooltip={{ children: 'Manage Content' }}
+                          isActive={pathname.startsWith('/dm/content')}
+                       >
+                         <Link href="/dm/content">
+                           <Settings />
+                           <span>Manage Content</span>
+                         </Link>
+                       </SidebarMenuButton>
+                    </SidebarMenuItem>
+                    {/* Add more DM tools here: manage sessions, manage source packs etc. */}
+                    <SidebarMenuItem>
+                       <SidebarMenuButton
+                         asChild
+                         tooltip={{ children: 'Create Campaign' }}
+                          isActive={pathname === '/dm/campaigns/create'}
+                       >
+                         <Link href="/dm/campaigns/create">
+                           <ShieldCheck />
+                           <span>Create Campaign</span>
+                         </Link>
+                       </SidebarMenuButton>
+                    </SidebarMenuItem>
+                 </>
+             )}
+
           </SidebarMenu>
         </SidebarContent>
-        <SidebarFooter className="p-2">
-            {/* Footer content if needed */}
+        <SidebarFooter className="p-2 mt-auto border-t border-sidebar-border">
+           {loading ? (
+                <div className="flex items-center gap-2 p-2">
+                   <Skeleton className="h-8 w-8 rounded-full" />
+                   <Skeleton className="h-4 w-24" />
+                </div>
+           ) : user && userProfile ? (
+               <div className="flex items-center justify-between gap-2 p-1">
+                 <div className="flex items-center gap-2 min-w-0">
+                    <Avatar className="h-8 w-8">
+                       {/* Add AvatarImage if user has a photoURL */}
+                       <AvatarFallback>{getInitials(userProfile.displayName)}</AvatarFallback>
+                    </Avatar>
+                    <div className="flex flex-col min-w-0 group-data-[collapsible=icon]:hidden">
+                         <span className="text-sm font-medium truncate">{userProfile.displayName || 'User'}</span>
+                         <span className="text-xs text-muted-foreground">{userProfile.role === 'dm' ? 'Dungeon Master' : 'Player'}</span>
+                    </div>
+                 </div>
+                 <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-7 w-7 group-data-[collapsible=icon]:ml-auto"
+                    onClick={handleLogout}
+                    title="Log Out"
+                 >
+                    <LogOut />
+                 </Button>
+               </div>
+           ) : (
+             <Button variant="default" className="w-full" asChild>
+                <Link href="/login">
+                   <LogIn className="mr-2 h-4 w-4" /> Log In
+                </Link>
+             </Button>
+           )}
         </SidebarFooter>
       </Sidebar>
       <SidebarInset>{children}</SidebarInset>

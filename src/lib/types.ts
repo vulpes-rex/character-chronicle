@@ -42,6 +42,7 @@ export interface Character {
   appearance: string;
   createdAt?: Date; // Optional: Timestamp for creation
   updatedAt?: Date; // Optional: Timestamp for last update
+  campaignId?: string; // Optional: ID of the campaign the character belongs to
 }
 
 /**
@@ -140,10 +141,81 @@ export interface BackgroundInfo {
     // Add languages, equipment, features if needed
 }
 
+
+/**
+ * Represents a User in the application.
+ */
+ export type UserRole = 'player' | 'dm';
+ export interface UserProfile {
+   id: string; // Firebase Auth UID
+   email?: string | null;
+   displayName?: string | null;
+   role: UserRole; // 'player' or 'dm'
+   // Add any other user-specific data needed
+ }
+
+
+ /**
+  * Represents a Campaign.
+  */
+ export interface Campaign {
+   id: string;
+   name: string;
+   description: string;
+   dmId: string; // User ID of the Dungeon Master
+   playerIds: string[]; // User IDs of the players
+   characterIds: string[]; // Character IDs belonging to this campaign
+   activeSourcePackIds?: string[]; // IDs of content packs enabled
+   createdAt: Date;
+   updatedAt: Date;
+ }
+
+ /**
+  * Represents an entry in the game log.
+  */
+ export interface GameLogEntry {
+    id: string;
+    campaignId: string;
+    timestamp: Date;
+    actorId: string; // User ID or Character ID
+    actorName: string; // Display name of the actor
+    actionType: 'roll' | 'featureUse' | 'message' | 'statusChange' | string; // Type of action
+    details: string; // Description of the action (e.g., "Rolled Athletics (1d20+3): 15", "Used Second Wind", "DM: A goblin appears!")
+    rollDetails?: { // Optional specific details for dice rolls
+        dice: string; // e.g., "1d20", "2d6+2"
+        result: number;
+        components?: { roll: number; modifier?: number }; // Breakdown if needed
+    };
+ }
+
+ /**
+  * Represents a content source pack (e.g., SRD, custom DM content).
+  */
+ export interface SourcePack {
+    id: string;
+    name: string;
+    description: string;
+    creatorId: string; // 'system' or DM's user ID
+    // Content can be stored directly as JSON or in subcollections
+    content: {
+        races?: Record<string, Omit<CharacterRace, 'description'>>; // Simplified for storage example
+        classes?: Record<string, Omit<CharacterClass, 'description'>>;
+        items?: Record<string, Omit<EquipmentItem, 'description' | 'isEquipped'>>;
+        // spells?: Record<string, any>; // Add spell structure if needed
+        backgrounds?: Record<string, BackgroundInfo>;
+    };
+    createdAt: Date;
+    updatedAt: Date;
+ }
+
 // Helper function for dice rolling (moved here for potential server-side use)
 export const rollDice = (diceString: string): number => {
     if (!diceString || !diceString.includes('d')) return 0;
     try {
+        // Handle simple dice like 'd6', 'd20'
+        if (diceString.startsWith('d')) {
+            diceString = '1' + diceString;
+        }
         const [numDiceStr, numSidesStr] = diceString.toLowerCase().split('d');
         const numDice = parseInt(numDiceStr, 10);
         const numSides = parseInt(numSidesStr, 10);

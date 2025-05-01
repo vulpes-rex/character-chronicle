@@ -21,7 +21,7 @@ import type { Character, EquipmentItem, Feature, HitPointsState, HitDiceState } 
 import { rollDice } from '@/lib/types'; // Import rollDice utility
 import { Skeleton } from './ui/skeleton';
 import { AlertCircle, Dices, Loader2, Trash2 } from 'lucide-react';
-import { Alert } from './ui/alert';
+import { Alert, AlertTitle, AlertDescription } from './ui/alert'; // Added AlertTitle and AlertDescription
 
 
 // Define Zod schema for form validation
@@ -39,6 +39,7 @@ const equipmentItemSchema = z.object({
     name: z.string().min(1),
     quantity: z.number().min(1).optional().default(1),
     description: z.string().optional(),
+    isEquipped: z.boolean().optional().default(false), // Added isEquipped
     // Add other relevant fields if needed for validation during add/edit within the form itself
     // weight: z.number().optional(),
     // type: z.string().optional(),
@@ -110,6 +111,7 @@ export function CharacterForm({ initialData }: CharacterFormProps) {
              const initialEquipment = initialData.equipment.map(item => ({
                  ...item,
                  quantity: typeof item.quantity === 'number' ? item.quantity : 1,
+                 isEquipped: item.isEquipped ?? false, // Ensure default value
              }));
 
             return {
@@ -273,6 +275,12 @@ export function CharacterForm({ initialData }: CharacterFormProps) {
              return false;
          });
 
+         // Initialize currentUses for features that have maxUses
+         features = features.map(feat => ({
+            ...feat,
+            currentUses: feat.maxUses !== null && feat.maxUses !== undefined ? feat.maxUses : undefined,
+         }));
+
     } catch (error) {
         console.error("Failed to fetch features during save:", error);
         toast({ variant: "destructive", title: "Feature Error", description: "Could not fetch all character features. Saving without full feature list." });
@@ -284,7 +292,7 @@ export function CharacterForm({ initialData }: CharacterFormProps) {
     const finalEquipment = data.equipment?.map(item => ({
         ...item,
         quantity: typeof item.quantity === 'number' && item.quantity > 0 ? item.quantity : 1,
-        // Ensure isEquipped defaults to false if not present (though schema shouldn't allow undefined)
+        // Ensure isEquipped defaults to false if not present
         isEquipped: item.isEquipped ?? false,
     })) ?? [];
 
@@ -304,20 +312,32 @@ export function CharacterForm({ initialData }: CharacterFormProps) {
       hitDice: hitDice,
       equipment: finalEquipment, // Use the processed equipment
       proficiencies: proficiencies,
-      features: features,
+      features: features, // Use features with initialized currentUses
       backstory: data.backstory || '',
       appearance: data.appearance || '',
     };
 
     try {
       if (isEditing && initialData?.id) {
-        await updateCharacter(initialData.id, characterToSave);
+        // When updating, try to preserve existing feature uses if the feature still exists
+        const existingFeaturesMap = new Map(initialData.features.map(f => [f.name, f.currentUses]));
+        const updatedFeaturesWithPreservedUses = characterToSave.features.map(f => ({
+            ...f,
+            // If feature existed before and had uses, keep the old count (unless it resets/changed max)
+            // Simple preservation for now - more complex logic might be needed for level changes
+            currentUses: existingFeaturesMap.get(f.name) ?? f.currentUses,
+        }));
+
+        await updateCharacter(initialData.id, {
+          ...characterToSave,
+          features: updatedFeaturesWithPreservedUses
+        });
         toast({ title: 'Character Updated', description: `${data.characterName} has been successfully updated.` });
-        router.push(`/character/${initialData.id}`); // Redirect to character sheet view
+        router.push(`/character/view/${initialData.id}`); // Redirect to character sheet view
       } else {
         const newId = await saveCharacter(characterToSave);
         toast({ title: 'Character Created', description: `${data.characterName} has been successfully created.` });
-        router.push(`/character/${newId}`); // Redirect to new character sheet view
+        router.push(`/character/view/${newId}`); // Redirect to new character sheet view
       }
       // Optionally reset form: form.reset(defaultValues_based_on_mode);
     } catch (error) {
@@ -351,7 +371,7 @@ export function CharacterForm({ initialData }: CharacterFormProps) {
       )
   }
 
-  if (apiError) {
+  if (apiError && !isLoading) { // Only show API error if not loading dropdowns
      return (
           <Alert variant="destructive" className="m-4 md:m-6">
               <AlertCircle className="h-4 w-4" />
@@ -398,7 +418,7 @@ export function CharacterForm({ initialData }: CharacterFormProps) {
                   name="race"
                   control={form.control}
                   render={({ field }) => (
-                      <Select onValueChange={field.onChange} value={field.value}>
+                      <Select onValueChange={field.onChange} value={field.value} defaultValue={field.value || ""}>
                           <SelectTrigger id="race">
                               <SelectValue placeholder="Select Race..." />
                           </SelectTrigger>
@@ -423,7 +443,7 @@ export function CharacterForm({ initialData }: CharacterFormProps) {
                   name="class"
                   control={form.control}
                   render={({ field }) => (
-                     <Select onValueChange={field.onChange} value={field.value}>
+                     <Select onValueChange={field.onChange} value={field.value} defaultValue={field.value || ""}>
                        <SelectTrigger id="class">
                           <SelectValue placeholder="Select Class..." />
                        </SelectTrigger>
@@ -550,6 +570,7 @@ export function CharacterForm({ initialData }: CharacterFormProps) {
                             size="icon"
                             className="text-destructive hover:text-destructive shrink-0"
                             onClick={() => removeEquipment(index)}
+                            aria-label={`Remove ${field.name || 'item'}`}
                         >
                             <Trash2 className="h-4 w-4" />
                         </Button>
@@ -559,7 +580,7 @@ export function CharacterForm({ initialData }: CharacterFormProps) {
                      type="button"
                      variant="outline"
                      size="sm"
-                     onClick={() => appendEquipment({ name: '', quantity: 1 })}
+                     onClick={() => appendEquipment({ name: '', quantity: 1, description: '', isEquipped: false })} // Ensure default values match schema
                  >
                      Add Equipment Item
                  </Button>
@@ -607,3 +628,5 @@ export function CharacterForm({ initialData }: CharacterFormProps) {
     </form>
   );
 }
+
+

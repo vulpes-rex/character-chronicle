@@ -137,35 +137,56 @@ export function CharacterSheet() {
     // Combine features and traits and add current uses
     const allFeaturesAndTraits = useMemo(() => {
         const combined = [...raceTraits, ...classFeaturesRaw];
-        return combined.map(feature => ({
-            ...feature,
-            currentUses: featureUses[feature.name] ?? feature.maxUses ?? undefined, // Get uses from state, default to maxUses
-        }));
+        // Ensure uniqueness based on name and source, maybe favoring class features if names overlap?
+        // Simple approach for now: just combine and let the state handle initialization.
+        const uniqueFeatures = combined.reduce((acc, feature) => {
+            const key = `${feature.name}-${feature.source}`;
+            if (!acc[key]) {
+                acc[key] = {
+                    ...feature,
+                     currentUses: featureUses[feature.name] ?? feature.maxUses ?? undefined, // Get uses from state, default to maxUses
+                };
+            }
+            return acc;
+        }, {} as Record<string, Feature & { currentUses?: number }>);
+
+        return Object.values(uniqueFeatures);
     }, [raceTraits, classFeaturesRaw, featureUses]);
 
 
-    // Initialize or update featureUses state when features/traits change
+   // Initialize or update featureUses state when relevant data changes
     useEffect(() => {
-        const initialUses: Record<string, number> = {};
-        [...raceTraits, ...classFeaturesRaw].forEach(feature => {
+        const newUses: Record<string, number> = {};
+        const featuresToConsider = [...raceTraits, ...classFeaturesRaw]; // Use raw fetched data
+
+        featuresToConsider.forEach(feature => {
             if (feature.maxUses !== null && feature.maxUses !== undefined) {
-                 // Only initialize if not already present in featureUses or if maxUses changed
-                 // This prevents resetting uses unnecessarily on data refetch
-                 if (featureUses[feature.name] === undefined) {
-                    initialUses[feature.name] = feature.maxUses;
-                } else {
-                     // Keep existing uses if feature is already tracked
-                     initialUses[feature.name] = featureUses[feature.name];
-                }
+                // Initialize uses to maxUses if not already tracked, otherwise keep existing tracked uses
+                newUses[feature.name] = featureUses[feature.name] ?? feature.maxUses;
             }
         });
-         // Update state only if there are changes needed
-         if (Object.keys(initialUses).length > 0 || Object.keys(featureUses).length !== Object.keys(initialUses).length) {
-              // Merge existing uses with newly initialized ones
-              setFeatureUses(prevUses => ({ ...prevUses, ...initialUses }));
-         }
 
-    }, [raceTraits, classFeaturesRaw]); // Dependency on raw data
+        // Only update state if the calculated uses differ from the current state
+        // This prevents unnecessary re-renders and potential loops
+        const currentKeys = Object.keys(featureUses);
+        const newKeys = Object.keys(newUses);
+        let changed = false;
+        if (currentKeys.length !== newKeys.length) {
+             changed = true;
+        } else {
+            for (const key of newKeys) {
+                 if (featureUses[key] !== newUses[key]) {
+                     changed = true;
+                     break;
+                 }
+            }
+        }
+
+        if (changed) {
+             setFeatureUses(newUses);
+        }
+
+    }, [selectedClass, selectedRace, level, raceTraits, classFeaturesRaw]); // Explicit dependencies
 
 
     // Update Max HP and Hit Dice when level or class changes (Depends on modifiers.constitution)
@@ -427,7 +448,7 @@ export function CharacterSheet() {
         const proficiencyMod = isProficientWith(weapon) ? proficiencyBonus : 0;
 
         return abilityMod + proficiencyMod;
-    }, [modifiers, proficiencyBonus, isProficientWith]); // Dependency includes modifier
+    }, [modifiers.strength, modifiers.dexterity, proficiencyBonus, isProficientWith]); // Corrected dependency array
 
     // Calculate Damage Bonus for a weapon - Depends on modifiers
     const getDamageBonus = useCallback((weapon: EquipmentItem): number => {
@@ -450,7 +471,7 @@ export function CharacterSheet() {
 
 
          return abilityMod + fightingStyleBonus;
-    }, [modifiers /* fightingStyle, hasShieldEquipped */]); // Dependency includes modifier
+    }, [modifiers.strength, modifiers.dexterity /* fightingStyle, hasShieldEquipped */]); // Corrected dependency array
 
 
     // --- Action Handlers ---
@@ -590,7 +611,7 @@ export function CharacterSheet() {
                         />
                         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-sm text-muted-foreground">
                             {/* Class Selection */}
-                            <Select value={selectedClass} onValueChange={(value) => {setSelectedClass(value); setFeatureUses({})}}> {/* Reset uses on class change */}
+                            <Select value={selectedClass} onValueChange={setSelectedClass}> {/* Removed setFeatureUses call */}
                                <SelectTrigger className="w-full" aria-label="Select Class">
                                    <SelectValue placeholder={isLoadingClasses ? "Loading..." : "Class"} />
                                </SelectTrigger>
@@ -605,7 +626,7 @@ export function CharacterSheet() {
                            </Select>
 
                             {/* Race Selection */}
-                            <Select value={selectedRace} onValueChange={(value) => {setSelectedRace(value); setFeatureUses({})}}> {/* Reset uses on race change */}
+                            <Select value={selectedRace} onValueChange={setSelectedRace}> {/* Removed setFeatureUses call */}
                                  <SelectTrigger className="w-full" aria-label="Select Race">
                                      <SelectValue placeholder={isLoadingRaces ? "Loading..." : "Race"} />
                                  </SelectTrigger>
@@ -619,7 +640,7 @@ export function CharacterSheet() {
                                  </SelectContent>
                              </Select>
 
-                             <Input placeholder="Level" type="number" value={level} onChange={(e) => {setLevel(Math.max(1, parseInt(e.target.value) || 1)); setFeatureUses({})}} aria-label="Level"/> {/* Reset uses on level change */}
+                             <Input placeholder="Level" type="number" value={level} onChange={(e) => setLevel(Math.max(1, parseInt(e.target.value) || 1))} aria-label="Level"/> {/* Removed setFeatureUses call */}
                              <Input placeholder="Background" value={background} onChange={(e) => setBackground(e.target.value)} aria-label="Background" />
                              <Input placeholder="Player Name" value={playerName} onChange={(e) => setPlayerName(e.target.value)} aria-label="Player Name"/>
                              <Input placeholder="Alignment" value={alignment} onChange={(e) => setAlignment(e.target.value)} aria-label="Alignment"/>
@@ -1018,5 +1039,3 @@ export function CharacterSheet() {
     </>
   );
 }
-
-    

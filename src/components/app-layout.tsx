@@ -4,7 +4,7 @@
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation'; // To check if on a character page
-import { useQuery } from '@tanstack/react-query';
+// Removed unused useQuery import
 import {
   SidebarProvider,
   Sidebar,
@@ -20,23 +20,17 @@ import {
 import { Button } from '@/components/ui/button';
 import { Users, UserPlus, Dices } from 'lucide-react';
 import { BackstoryGenerator } from './backstory-generator';
-import type { Character } from '@/lib/types'; // Import Character type
+import type { Character } from '@/lib/types'; // Keep Character type for BackstoryGenerator props
 
 export function AppLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  // Keep this logic if BackstoryGenerator relies on the ID even without loading data here
   const characterIdMatch = pathname.match(/^\/character\/(view|edit)\/([a-zA-Z0-9_-]+)/);
   const currentCharacterId = characterIdMatch ? characterIdMatch[2] : undefined;
 
-  // Optionally fetch character data here if needed globally in the layout,
-  // or rely on page components to fetch and potentially pass down props.
-  // Fetching here might be inefficient if not always needed.
-  const { data: currentCharacter } = useQuery<Character, Error>({
-      queryKey: ['character', currentCharacterId],
-      // queryFn: () => loadCharacter(currentCharacterId!), // Assumes loadCharacter is client-compatible or wrapped
-      enabled: !!currentCharacterId, // Only fetch if we have an ID
-      staleTime: 5 * 60 * 1000,
-  });
-
+  // Removed the problematic useQuery hook.
+  // Character data is loaded on the respective pages (view/edit)
+  // and can be passed down or accessed via context/state management if needed globally.
 
   return (
     <SidebarProvider defaultOpen>
@@ -78,13 +72,10 @@ export function AppLayout({ children }: { children: ReactNode }) {
 
 
              <SidebarMenuItem>
-                 {/* Pass relevant details from the potentially loaded character */}
-                 <BackstoryGenerator
-                    characterId={currentCharacter?.id}
-                    characterRace={currentCharacter?.race}
-                    characterClass={currentCharacter?.class}
-                    characterAlignment={currentCharacter?.alignment}
-                />
+                 {/* Pass only the ID if needed, or rely on context/page data */}
+                 {/* The props for race/class/alignment will likely be undefined here now */}
+                 {/* BackstoryGenerator needs to handle potentially missing props gracefully */}
+                 <BackstoryGenerator characterId={currentCharacterId} />
             </SidebarMenuItem>
           </SidebarMenu>
         </SidebarContent>

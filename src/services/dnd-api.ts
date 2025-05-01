@@ -1,207 +1,14 @@
+import type { CharacterClass as CharacterClassType, CharacterRace, Feature, CharacterLevel, EquipmentItem, HitPoints } from '@/lib/types';
 
-/**
- * Represents a character class in D\&D 5e.
- */
-export interface CharacterClass {
-  /**
-   * The name of the class.
-   */
-  name: string;
-  /**
-   * A description of the class.
-   */
-  description: string;
-  /**
-   * Hit die type for the class (e.g., d8, d10). String representation like 'd6', 'd8', 'd10', 'd12'.
-   */
-  hitDie: `d${6 | 8 | 10 | 12}`;
-   /**
-    * Proficiencies granted by the class.
-    */
-   proficiencies: {
-     armor: string[]; // e.g., ['Light', 'Medium', 'Shields']
-     weapons: string[]; // e.g., ['Simple', 'Martial']
-     tools?: string[];
-     savingThrows: string[]; // e.g., ['Strength', 'Constitution']
-     skills?: { choose: number; options: string[] }; // e.g., { choose: 2, options: ['Acrobatics', 'Athletics', ...] }
-   };
-}
-
-/**
- * Represents a character race in D\&D 5e.
- */
-export interface CharacterRace {
-  /**
-   * The name of the race.
-   */
-  name: string;
-  /**
-   * A description of the race.
-   */
-  description: string;
-  /**
-   * A list of trait names that the race has.
-   */
-  traits: string[]; // Keep simple for now, detailed traits fetched separately
-}
-
-/**
-* Represents a feature or trait gained by a character.
-*/
-export interface Feature {
-  /**
-   * The name of the feature or trait.
-   */
-  name: string;
-  /**
-   * A description of the feature or trait.
-   */
-  description: string;
-  /**
-   * The source of the feature (e.g., Class, Race, Feat).
-   */
-  source: string;
-  /**
-   * Indicates if this feature provides an actionable ability.
-   */
-  isActionable?: boolean; // Optional flag for features usable as actions
-   /**
-    * Maximum number of uses (optional, null/undefined means unlimited or not applicable).
-    */
-   maxUses?: number | null;
-   /**
-    * How uses are reset (e.g., short rest, long rest, daily).
-    */
-   usesResetOn?: 'short-rest' | 'long-rest' | 'daily' | null;
-   /**
-    * Current number of uses remaining (managed by character sheet state, not API directly usually).
-    * Included here for type consistency if needed, but primarily a state concern.
-    */
-   currentUses?: number;
-}
-
-
-/**
- * Represents the details gained at a specific character level.
- */
-export interface CharacterLevel {
-  /**
-   * The level achieved.
-   */
-  level: number;
-  /**
-   * The features gained specifically at this level.
-   */
-  features: Feature[];
-   /**
-    * The proficiency bonus at this level. (Optional, but useful)
-    */
-   proficiencyBonus?: number;
-   /**
-    * Details about spellcasting progression, if applicable. (Optional)
-    */
-   spellcasting?: Record<string, any>; // Placeholder for spell slot info
-   // Add other level-specific details like class-specific resource increases (Ki, Sorcery Points, etc.) if needed
-}
-
-/**
- * Represents an item of equipment.
- */
-export interface EquipmentItem {
-    /**
-     * The name of the item.
-     */
-    name: string;
-    /**
-     * A description of the item (optional).
-     */
-    description?: string;
-    /**
-     * The quantity of the item (used in character sheet, may not be in base item data).
-     */
-    quantity?: number;
-     /**
-      * The weight of the item (optional).
-      */
-     weight?: number;
-     /**
-      * The cost of the item (optional).
-      */
-     cost?: string; // e.g., "5 gp", "1 sp"
-     /**
-      * The type of item (e.g., 'Weapon', 'Armor', 'Adventuring Gear').
-      */
-     type?: 'Weapon' | 'Armor' | 'Adventuring Gear' | 'Tool' | 'Potion' | string; // More specific types
-     /**
-      * Indicates if the item is currently equipped.
-      */
-     isEquipped?: boolean;
-     /**
-      * Category of the weapon (e.g., 'Simple Melee', 'Martial Ranged'). Relevant if type is 'Weapon'.
-      */
-     weaponCategory?: 'Simple Melee' | 'Simple Ranged' | 'Martial Melee' | 'Martial Ranged' | string;
-     /**
-      * Damage dice string (e.g., '1d8', '2d6'). Relevant if type is 'Weapon'.
-      */
-     damageDice?: string;
-     /**
-      * Type of damage dealt (e.g., 'Slashing', 'Piercing', 'Bludgeoning'). Relevant if type is 'Weapon'.
-      */
-     damageType?: string;
-     /**
-      * Weapon properties (e.g., ['Finesse', 'Light', 'Versatile (1d10)']). Relevant if type is 'Weapon'.
-      */
-     properties?: string[];
-     /**
-      * Category of the armor (e.g., 'Light', 'Medium', 'Heavy', 'Shield'). Relevant if type is 'Armor'.
-      */
-     armorCategory?: 'Light' | 'Medium' | 'Heavy' | 'Shield';
-     /**
-      * Base Armor Class provided by the armor. Relevant if type is 'Armor'.
-      */
-     baseAC?: number;
-     /**
-      * Whether the Dexterity modifier is added to AC. Relevant if type is 'Armor'.
-      */
-     addDexModifier?: boolean;
-     /**
-      * Maximum Dexterity bonus allowed for AC. Relevant for Medium Armor. Null means no limit.
-      */
-     maxDexBonus?: number | null;
-     /**
-      * Strength requirement to wear the armor without speed penalty. Relevant for Heavy Armor.
-      */
-     strengthRequirement?: number | null;
-     /**
-      * Whether wearing this armor imposes disadvantage on Stealth checks.
-      */
-     stealthDisadvantage?: boolean;
-}
-
-/**
- * Represents character Hit Points and Hit Dice.
- */
-export interface HitPoints {
-    /** Current Hit Points */
-    current: number;
-    /** Maximum Hit Points */
-    max: number;
-    /** Temporary Hit Points */
-    temporary: number;
-    /** Current available Hit Dice */
-    currentHitDice: number;
-    /** Maximum number of Hit Dice (usually equal to level) */
-    maxHitDice: number;
-    /** The type of hit die the character uses (e.g., d8) */
-    hitDieType: `d${6 | 8 | 10 | 12}` | null;
-}
+// Re-export types from lib/types to ensure consistency
+export type { CharacterClass, CharacterRace, Feature, CharacterLevel, EquipmentItem, HitPoints };
 
 
 /**
  * Fetches available character classes from the D\&D 5e API.
  * @returns A promise that resolves to an array of character classes.
  */
-export async function getCharacterClasses(): Promise<CharacterClass[]> {
+export async function getCharacterClasses(): Promise<CharacterClassType[]> {
   // TODO: Implement this by calling an API. Using placeholder data.
   await new Promise(resolve => setTimeout(resolve, 100)); // Simulate network delay
   return [
@@ -483,4 +290,18 @@ export async function getAvailableEquipmentItems(): Promise<EquipmentItem[]> {
   ].sort((a, b) => a.name.localeCompare(b.name)); // Sort alphabetically
 }
 
-    
+
+// Placeholder function for fetching background details
+export async function getBackgroundDetails(backgroundName: string): Promise<{ name: string; skillProficiencies: string[] } | null> {
+    console.log(`Fetching details for background: ${backgroundName}`);
+    await new Promise(resolve => setTimeout(resolve, 50)); // Simulate delay
+
+    const backgrounds: Record<string, { name: string; skillProficiencies: string[] }> = {
+        "Acolyte": { name: "Acolyte", skillProficiencies: ["Insight", "Religion"] },
+        "Urchin": { name: "Urchin", skillProficiencies: ["Sleight of Hand", "Stealth"] },
+        "Soldier": { name: "Soldier", skillProficiencies: ["Athletics", "Intimidation"] },
+        // Add more backgrounds as needed
+    };
+
+    return backgrounds[backgroundName] || null;
+}

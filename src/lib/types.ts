@@ -100,6 +100,46 @@ export interface HitDiceState {
     dieType: `d${6 | 8 | 10 | 12}` | null;
 }
 
+/**
+ * Represents a character class in D&D 5e.
+ * (Copied from dnd-api.ts for now, could be shared)
+ */
+export interface CharacterClass {
+  name: string;
+  description: string;
+  hitDie: `d${6 | 8 | 10 | 12}`;
+  proficiencies: {
+    armor: string[];
+    weapons: string[];
+    tools?: string[];
+    savingThrows: string[];
+    skills?: { choose: number; options: string[] }; // Skill choices provided by the class
+  };
+}
+
+/**
+ * Represents a character race in D&D 5e.
+ * (Copied from dnd-api.ts for now, could be shared)
+ */
+export interface CharacterRace {
+  name: string;
+  description: string;
+  traits: string[]; // Names of traits
+  // Potentially add skill proficiencies granted by race here if needed
+  // skillProficiencies?: string[];
+}
+
+/**
+ * Represents a character background in D&D 5e.
+ * (Simplified for now)
+ */
+export interface BackgroundInfo {
+    name: string;
+    skillProficiencies: string[];
+    toolProficiencies?: string[];
+    // Add languages, equipment, features if needed
+}
+
 // Helper function for dice rolling (moved here for potential server-side use)
 export const rollDice = (diceString: string): number => {
     if (!diceString || !diceString.includes('d')) return 0;
@@ -122,4 +162,46 @@ export const rollDice = (diceString: string): number => {
         console.error("Error rolling dice:", diceString, e);
         return 0;
     }
+};
+
+// Skill to Ability Score mapping
+export const SKILL_ABILITY_MAP: Record<string, keyof Character['stats']> = {
+    "acrobatics": "dexterity",
+    "animal handling": "wisdom",
+    "arcana": "intelligence",
+    "athletics": "strength",
+    "deception": "charisma",
+    "history": "intelligence",
+    "insight": "wisdom",
+    "intimidation": "charisma",
+    "investigation": "intelligence",
+    "medicine": "wisdom",
+    "nature": "intelligence",
+    "perception": "wisdom",
+    "performance": "charisma",
+    "persuasion": "charisma",
+    "religion": "intelligence",
+    "sleight of hand": "dexterity",
+    "stealth": "dexterity",
+    "survival": "wisdom"
+};
+
+// All standard 5e skills
+export const ALL_SKILLS = Object.keys(SKILL_ABILITY_MAP);
+
+// Function to calculate skill modifier
+export const calculateSkillModifier = (
+    skillName: string,
+    stats: Character['stats'],
+    proficient: boolean,
+    proficiencyBonus: number
+): number => {
+    const ability = SKILL_ABILITY_MAP[skillName.toLowerCase()];
+    if (!ability || !stats[ability]) {
+        console.warn(`Could not find ability score for skill: ${skillName}`);
+        return 0;
+    }
+    const abilityModifier = Math.floor((stats[ability] - 10) / 2);
+    const proficiencyValue = proficient ? proficiencyBonus : 0;
+    return abilityModifier + proficiencyValue;
 };

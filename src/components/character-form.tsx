@@ -15,13 +15,17 @@ import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/componen
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/hooks/use-toast';
-import { getCharacterClasses, getCharacterRaces, getCumulativeClassFeatures, getRaceTraitsDetails, getAvailableEquipmentItems } from '@/services/dnd-api'; // Keep using these for dropdowns/features
+import { getCharacterClasses, getCharacterRaces, getCumulativeClassFeatures, getRaceTraitsDetails, getAvailableEquipmentItems, getBackgroundDetails } from '@/services/dnd-api'; // Keep using these for dropdowns/features
 import { saveCharacter, updateCharacter } from '@/services/character-service';
-import type { Character, EquipmentItem, Feature, HitPointsState, HitDiceState } from '@/lib/types'; // Use central types
-import { rollDice } from '@/lib/types'; // Import rollDice utility
+import type { Character, EquipmentItem, Feature, HitPointsState, HitDiceState, CharacterClass } from '@/lib/types'; // Use central types
+import { rollDice, ALL_SKILLS, SKILL_ABILITY_MAP } from '@/lib/types'; // Import utilities and constants
 import { Skeleton } from './ui/skeleton';
-import { AlertCircle, Dices, Loader2, Trash2 } from 'lucide-react';
+import { AlertCircle, Dices, Loader2, Trash2, Info } from 'lucide-react';
 import { Alert, AlertTitle, AlertDescription } from './ui/alert'; // Added AlertTitle and AlertDescription
+import { Popover, PopoverContent, PopoverTrigger } from './ui/popover'; // For skill choice info
+import { useQuery } from '@tanstack/react-query'; // Import useQuery
+import { cn } from '@/lib/utils';
+import { Badge } from './ui/badge';
 
 
 // Define Zod schema for form validation
@@ -40,9 +44,6 @@ const equipmentItemSchema = z.object({
     quantity: z.number().min(1).optional().default(1),
     description: z.string().optional(),
     isEquipped: z.boolean().optional().default(false), // Added isEquipped
-    // Add other relevant fields if needed for validation during add/edit within the form itself
-    // weight: z.number().optional(),
-    // type: z.string().optional(),
 });
 
 
@@ -56,30 +57,27 @@ const characterFormSchema = z.object({
   alignment: z.string().min(1, 'Alignment is required'),
   stats: statsSchema,
   skills: z.record(z.boolean()), // Record<string, boolean>
-  // hitPoints: z.object({ // HP/HD derived later or set based on defaults
-  //   max: z.number().min(1),
-  //   current: z.number(),
-  //   temporary: z.number().min(0),
-  // }),
-  // hitDice: z.object({
-  //   total: z.number().min(1),
-  //   remaining: z.number(),
-  //   dieType: z.string().nullable(),
-  // }),
    equipment: z.array(equipmentItemSchema).optional().default([]), // Validate items added to the list
   backstory: z.string().optional(),
   appearance: z.string().optional(),
+}).refine(data => {
+    // Validation for skill choices based on class
+    const selectedClass = availableClasses.find(c => c.name === data.class);
+    if (!selectedClass?.proficiencies?.skills) return true; // No choice needed
+
+    const numRequired = selectedClass.proficiencies.skills.choose;
+    const chosenSkills = ALL_SKILLS.filter(skill => data.skills[skill] && selectedClass.proficiencies.skills?.options.includes(skill));
+    return chosenSkills.length === numRequired;
+}, {
+    message: 'Please select the correct number of skill proficiencies required by your class.',
+    path: ['skills'], // Attach error to the skills section
 });
+
 
 type CharacterFormData = z.infer<typeof characterFormSchema>;
 
-// All D&D 5e skills
-const ALL_SKILLS = [
-    "acrobatics", "animal handling", "arcana", "athletics", "deception",
-    "history", "insight", "intimidation", "investigation", "medicine",
-    "nature", "perception", "performance", "persuasion", "religion",
-    "sleight of hand", "stealth", "survival"
-];
+// Declare availableClasses outside refine scope but initialize inside component
+let availableClasses: CharacterClass[] = [];
 
 interface CharacterFormProps {
   initialData?: Character; // Optional initial data for editing
@@ -89,7 +87,8 @@ export function CharacterForm({ initialData }: CharacterFormProps) {
   const router = useRouter();
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
-  const [availableClasses, setAvailableClasses] = useState<Awaited<ReturnType<typeof getCharacterClasses>>>([]);
+  // State for classes and races is now managed locally
+  const [localAvailableClasses, setLocalAvailableClasses] = useState<CharacterClass[]>([]);
   const [availableRaces, setAvailableRaces] = useState<Awaited<ReturnType<typeof getCharacterRaces>>>([]);
   const [isLoadingDropdowns, setIsLoadingDropdowns] = useState(true);
   const [apiError, setApiError] = useState<string | null>(null);
@@ -100,18 +99,15 @@ export function CharacterForm({ initialData }: CharacterFormProps) {
     resolver: zodResolver(characterFormSchema),
     defaultValues: useMemo(() => {
         if (initialData) {
-            // Map Character type to CharacterFormData type
-             // Ensure skills object includes all possible skills
              const initialSkills = ALL_SKILLS.reduce((acc, skill) => {
-                acc[skill] = !!initialData.skills[skill]; // Default to false if not present
+                acc[skill] = !!initialData.skills[skill];
                 return acc;
              }, {} as Record<string, boolean>);
 
-             // Map equipment: ensure quantity is number, default to 1 if missing
              const initialEquipment = initialData.equipment.map(item => ({
                  ...item,
                  quantity: typeof item.quantity === 'number' ? item.quantity : 1,
-                 isEquipped: item.isEquipped ?? false, // Ensure default value
+                 isEquipped: item.isEquipped ?? false,
              }));
 
             return {
@@ -129,7 +125,6 @@ export function CharacterForm({ initialData }: CharacterFormProps) {
                 appearance: initialData.appearance || '',
             };
         }
-         // Default for new character
          const defaultSkills = ALL_SKILLS.reduce((acc, skill) => {
             acc[skill] = false;
             return acc;
@@ -138,8 +133,8 @@ export function CharacterForm({ initialData }: CharacterFormProps) {
         return {
             playerName: '',
             characterName: '',
-            race: undefined, // Use undefined to trigger placeholder
-            class: undefined, // Use undefined to trigger placeholder
+            race: undefined,
+            class: undefined,
             level: 1,
             background: '',
             alignment: '',
@@ -149,7 +144,7 @@ export function CharacterForm({ initialData }: CharacterFormProps) {
             backstory: '',
             appearance: '',
         };
-    }, [initialData]), // Recalculate only if initialData changes
+    }, [initialData]),
   });
 
   const { fields: equipmentFields, append: appendEquipment, remove: removeEquipment } = useFieldArray({
@@ -167,7 +162,8 @@ export function CharacterForm({ initialData }: CharacterFormProps) {
           getCharacterClasses(),
           getCharacterRaces(),
         ]);
-        setAvailableClasses(classes);
+        setLocalAvailableClasses(classes);
+        availableClasses = classes; // Update the global variable for Zod schema
         setAvailableRaces(races);
       } catch (error) {
         console.error("Failed to load classes or races:", error);
@@ -178,7 +174,95 @@ export function CharacterForm({ initialData }: CharacterFormProps) {
       }
     };
     fetchData();
-  }, [toast]); // Only run once on mount
+  }, [toast]);
+
+
+  // --- Skill Proficiency Logic ---
+  const selectedClass = useMemo(() => localAvailableClasses.find(c => c.name === form.watch('class')), [localAvailableClasses, form.watch('class')]);
+  const selectedBackgroundName = form.watch('background');
+
+  // Fetch background details when background name changes
+   const { data: backgroundDetails } = useQuery<{ name: string; skillProficiencies: string[], toolProficiencies?: string[] } | null, Error>({
+      queryKey: ['backgroundDetails', selectedBackgroundName],
+      queryFn: () => selectedBackgroundName ? getBackgroundDetails(selectedBackgroundName) : Promise.resolve(null),
+      enabled: !!selectedBackgroundName,
+      staleTime: Infinity, // Background data is static
+  });
+
+
+  // Automatically update skill proficiencies based on class and background
+   useEffect(() => {
+       const currentSkills = { ...form.getValues('skills') }; // Get current selections
+       const newSkills = ALL_SKILLS.reduce((acc, skill) => {
+           acc[skill] = false; // Start fresh
+           return acc;
+       }, {} as Record<string, boolean>);
+
+       let classChoicesMade = 0;
+       const classSkillOptions = selectedClass?.proficiencies?.skills?.options ?? [];
+       const numClassChoices = selectedClass?.proficiencies?.skills?.choose ?? 0;
+
+       // Apply background proficiencies first (cannot be unselected)
+       backgroundDetails?.skillProficiencies.forEach(skill => {
+           if (ALL_SKILLS.includes(skill.toLowerCase())) {
+               newSkills[skill.toLowerCase()] = true;
+           }
+       });
+
+       // Re-apply existing *class* choices if they are still valid
+       classSkillOptions.forEach(skillOption => {
+            const skillKey = skillOption.toLowerCase();
+            if (currentSkills[skillKey] && !newSkills[skillKey] && classChoicesMade < numClassChoices) {
+                newSkills[skillKey] = true;
+                classChoicesMade++;
+            }
+       });
+
+        // // Set any remaining previously selected non-background/non-class skills (usually none)
+        // ALL_SKILLS.forEach(skill => {
+        //     if (currentSkills[skill] && !newSkills[skill] && !classSkillOptions.includes(skill) && !(backgroundDetails?.skillProficiencies.includes(skill))) {
+        //         newSkills[skill] = true;
+        //     }
+        // });
+
+
+        // // Only update if skills actually changed to prevent loops
+        // // NOTE: Comparing objects directly might not work as expected. Deep comparison or stringify needed.
+        // // For simplicity, always update if class or background changes. Consider optimizing if performance issues arise.
+        // // if (JSON.stringify(newSkills) !== JSON.stringify(form.getValues('skills'))) {
+           form.setValue('skills', newSkills, { shouldValidate: true, shouldDirty: true });
+        // }
+
+   }, [selectedClass, backgroundDetails, form.setValue, form.getValues]); // Dependencies: class and background
+
+
+   // Get skill choices for the selected class
+  const classSkillChoice = useMemo(() => {
+    if (!selectedClass?.proficiencies?.skills) return null;
+    return {
+      choose: selectedClass.proficiencies.skills.choose,
+      options: selectedClass.proficiencies.skills.options.map(s => s.toLowerCase()), // Ensure lowercase for comparison
+    };
+  }, [selectedClass]);
+
+    const handleSkillChange = (skill: string, checked: boolean) => {
+        if (!classSkillChoice || !classSkillChoice.options.includes(skill)) return; // Can only change class options
+
+        const currentSkills = form.getValues('skills');
+        const numSelected = classSkillChoice.options.filter(opt => currentSkills[opt]).length;
+
+        if (checked && numSelected >= classSkillChoice.choose) {
+            toast({
+                variant: 'destructive',
+                title: 'Too Many Skills',
+                description: `You can only choose ${classSkillChoice.choose} skills from your class list.`,
+            });
+            return; // Prevent selecting more than allowed
+        }
+
+        form.setValue(`skills.${skill}`, checked, { shouldValidate: true, shouldDirty: true });
+    };
+
 
 
   // --- Stat Rolling ---
@@ -208,8 +292,20 @@ export function CharacterForm({ initialData }: CharacterFormProps) {
     setIsLoading(true);
     setApiError(null);
 
+    // --- Validate Skill Selections ---
+     if (classSkillChoice) {
+         const selectedClassSkills = classSkillChoice.options.filter(opt => data.skills[opt]).length;
+         if (selectedClassSkills !== classSkillChoice.choose) {
+             form.setError('skills', { type: 'manual', message: `Please select exactly ${classSkillChoice.choose} skills from your class list.` });
+             toast({ variant: 'destructive', title: 'Skill Selection Error', description: `Please select exactly ${classSkillChoice.choose} class skills.` });
+             setIsLoading(false);
+             return;
+         }
+     }
+
+
     // --- Derive missing character properties ---
-    const selectedClassData = availableClasses.find(c => c.name === data.class);
+    const selectedClassData = localAvailableClasses.find(c => c.name === data.class);
     const selectedRaceData = availableRaces.find(r => r.name === data.race);
 
     if (!selectedClassData || !selectedRaceData) {
@@ -229,12 +325,12 @@ export function CharacterForm({ initialData }: CharacterFormProps) {
     maxHp = Math.max(1, maxHp); // Ensure HP is at least 1
 
     const hitPoints: HitPointsState = isEditing && initialData?.hitPoints
-      ? { // Preserve current HP if editing, but ensure it doesn't exceed new max
+      ? {
           max: maxHp,
           current: Math.min(initialData.hitPoints.current, maxHp),
           temporary: initialData.hitPoints.temporary || 0,
         }
-      : { // Defaults for new character
+      : {
           max: maxHp,
           current: maxHp,
           temporary: 0,
@@ -242,7 +338,7 @@ export function CharacterForm({ initialData }: CharacterFormProps) {
 
     const hitDice: HitDiceState = {
       total: data.level,
-      remaining: isEditing && initialData?.hitDice ? Math.min(initialData.hitDice.remaining, data.level) : data.level, // Preserve remaining if editing, capped by new level
+      remaining: isEditing && initialData?.hitDice ? Math.min(initialData.hitDice.remaining, data.level) : data.level,
       dieType: selectedClassData.hitDie,
     };
 
@@ -253,9 +349,12 @@ export function CharacterForm({ initialData }: CharacterFormProps) {
          weapons: selectedClassData.proficiencies.weapons ?? [],
          tools: selectedClassData.proficiencies.tools ?? [],
          savingThrows: selectedClassData.proficiencies.savingThrows ?? [],
-         // Skills are handled by the form's skills state
+         // Skills are derived from the form's skills state
      };
-     // TODO: Add race proficiencies if the API provides them
+     // Add background tool proficiencies
+      if (backgroundDetails?.toolProficiencies) {
+          proficiencies.tools = [...new Set([...proficiencies.tools, ...backgroundDetails.toolProficiencies])];
+      }
 
     // 3. Features (Fetch based on final class/race/level)
     let features: Feature[] = [];
@@ -264,7 +363,6 @@ export function CharacterForm({ initialData }: CharacterFormProps) {
             getCumulativeClassFeatures(data.class, data.level),
             getRaceTraitsDetails(selectedRaceData.traits),
         ]);
-         // Combine and remove duplicates (simple name check for now)
          const combined = [...raceFeats, ...classFeats];
          const uniqueFeatureNames = new Set<string>();
          features = combined.filter(feat => {
@@ -275,7 +373,6 @@ export function CharacterForm({ initialData }: CharacterFormProps) {
              return false;
          });
 
-         // Initialize currentUses for features that have maxUses
          features = features.map(feat => ({
             ...feat,
             currentUses: feat.maxUses !== null && feat.maxUses !== undefined ? feat.maxUses : undefined,
@@ -284,15 +381,12 @@ export function CharacterForm({ initialData }: CharacterFormProps) {
     } catch (error) {
         console.error("Failed to fetch features during save:", error);
         toast({ variant: "destructive", title: "Feature Error", description: "Could not fetch all character features. Saving without full feature list." });
-        // Proceeding without features, or could choose to block save
     }
 
 
-     // Ensure equipment has quantity (default to 1 if somehow missing)
     const finalEquipment = data.equipment?.map(item => ({
         ...item,
         quantity: typeof item.quantity === 'number' && item.quantity > 0 ? item.quantity : 1,
-        // Ensure isEquipped defaults to false if not present
         isEquipped: item.isEquipped ?? false,
     })) ?? [];
 
@@ -307,24 +401,21 @@ export function CharacterForm({ initialData }: CharacterFormProps) {
       background: data.background,
       alignment: data.alignment,
       stats: data.stats,
-      skills: data.skills, // Already Record<string, boolean>
+      skills: data.skills,
       hitPoints: hitPoints,
       hitDice: hitDice,
-      equipment: finalEquipment, // Use the processed equipment
+      equipment: finalEquipment,
       proficiencies: proficiencies,
-      features: features, // Use features with initialized currentUses
+      features: features,
       backstory: data.backstory || '',
       appearance: data.appearance || '',
     };
 
     try {
       if (isEditing && initialData?.id) {
-        // When updating, try to preserve existing feature uses if the feature still exists
         const existingFeaturesMap = new Map(initialData.features.map(f => [f.name, f.currentUses]));
         const updatedFeaturesWithPreservedUses = characterToSave.features.map(f => ({
             ...f,
-            // If feature existed before and had uses, keep the old count (unless it resets/changed max)
-            // Simple preservation for now - more complex logic might be needed for level changes
             currentUses: existingFeaturesMap.get(f.name) ?? f.currentUses,
         }));
 
@@ -333,13 +424,12 @@ export function CharacterForm({ initialData }: CharacterFormProps) {
           features: updatedFeaturesWithPreservedUses
         });
         toast({ title: 'Character Updated', description: `${data.characterName} has been successfully updated.` });
-        router.push(`/character/view/${initialData.id}`); // Redirect to character sheet view
+        router.push(`/character/view/${initialData.id}`);
       } else {
         const newId = await saveCharacter(characterToSave);
         toast({ title: 'Character Created', description: `${data.characterName} has been successfully created.` });
-        router.push(`/character/view/${newId}`); // Redirect to new character sheet view
+        router.push(`/character/view/${newId}`);
       }
-      // Optionally reset form: form.reset(defaultValues_based_on_mode);
     } catch (error) {
       console.error('Failed to save character:', error);
       setApiError(error instanceof Error ? error.message : 'An unknown error occurred during saving.');
@@ -371,7 +461,7 @@ export function CharacterForm({ initialData }: CharacterFormProps) {
       )
   }
 
-  if (apiError && !isLoading) { // Only show API error if not loading dropdowns
+  if (apiError && !isLoading) {
      return (
           <Alert variant="destructive" className="m-4 md:m-6">
               <AlertCircle className="h-4 w-4" />
@@ -448,7 +538,7 @@ export function CharacterForm({ initialData }: CharacterFormProps) {
                           <SelectValue placeholder="Select Class..." />
                        </SelectTrigger>
                        <SelectContent>
-                          {availableClasses.map((cls) => (
+                          {localAvailableClasses.map((cls) => (
                              <SelectItem key={cls.name} value={cls.name}>
                                 {cls.name}
                              </SelectItem>
@@ -463,6 +553,7 @@ export function CharacterForm({ initialData }: CharacterFormProps) {
           {/* Background */}
           <div className="space-y-2">
             <Label htmlFor="background">Background</Label>
+            {/* TODO: Replace with Select dropdown populated from fetched backgrounds */}
             <Input id="background" {...form.register('background')} placeholder="e.g., Acolyte, Urchin" />
              {form.formState.errors.background && <p className="text-xs text-destructive">{form.formState.errors.background.message}</p>}
           </div>
@@ -512,38 +603,59 @@ export function CharacterForm({ initialData }: CharacterFormProps) {
         {/* --- Skills --- */}
         <Card>
             <CardHeader>
-                <CardTitle>Skills</CardTitle>
-                <p className="text-sm text-muted-foreground">Select proficient skills. Proficiency choices depend on class and background (validation not fully implemented).</p>
+                <CardTitle className='flex items-center gap-2'>
+                    Skills
+                     {classSkillChoice && (
+                          <Popover>
+                            <PopoverTrigger asChild>
+                               <Button variant="ghost" size="icon" className="h-5 w-5 text-muted-foreground hover:text-foreground">
+                                   <Info className="h-4 w-4" />
+                               </Button>
+                            </PopoverTrigger>
+                            <PopoverContent className="text-sm w-auto max-w-xs">
+                               <p>Your background grants proficiency in: <strong>{backgroundDetails?.skillProficiencies.join(', ') || 'None'}</strong>.</p>
+                               <p className='mt-2'>Your class (<strong className='capitalize'>{selectedClass?.name}</strong>) allows you to choose <strong>{classSkillChoice.choose}</strong> more from: {classSkillChoice.options.map(s => s.charAt(0).toUpperCase() + s.slice(1)).join(', ')}.</p>
+                           </PopoverContent>
+                        </Popover>
+                    )}
+                 </CardTitle>
+                <p className="text-sm text-muted-foreground">Select skills to be proficient in.</p>
+                 {form.formState.errors.skills && <Alert variant="destructive" className="mt-2"><AlertCircle className="h-4 w-4" /><AlertDescription>{form.formState.errors.skills.message}</AlertDescription></Alert>}
             </CardHeader>
             <CardContent className="grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-3">
-                {ALL_SKILLS.map((skill) => (
-                    <Controller
-                        key={skill}
-                        name={`skills.${skill}`}
-                        control={form.control}
-                        render={({ field }) => (
-                            <div className="flex items-center space-x-2">
-                                <Checkbox
-                                    id={`skill-${skill}`}
-                                    checked={field.value}
-                                    onCheckedChange={field.onChange}
-                                    aria-labelledby={`skill-label-${skill}`}
-                                />
-                                <Label htmlFor={`skill-${skill}`} id={`skill-label-${skill}`} className="capitalize text-sm font-normal cursor-pointer">
-                                    {skill}
-                                </Label>
-                                {/* TODO: Add associated ability score in parenthesis */}
-                            </div>
-                        )}
-                    />
-                ))}
-                 {form.formState.errors.skills && <p className="text-xs text-destructive col-span-full mt-2">{form.formState.errors.skills.message || 'Error in skills selection.'}</p>}
+                {ALL_SKILLS.map((skill) => {
+                    const isBackgroundSkill = backgroundDetails?.skillProficiencies.some(bs => bs.toLowerCase() === skill);
+                    const isClassOption = classSkillChoice?.options.includes(skill);
+                    const isDisabled = isBackgroundSkill || !isClassOption; // Disable background skills and non-class options
+                    const ability = SKILL_ABILITY_MAP[skill];
+
+                    return (
+                        <div key={skill} className="flex items-center space-x-2">
+                           <Controller
+                               name={`skills.${skill}`}
+                               control={form.control}
+                               render={({ field }) => (
+                                    <Checkbox
+                                        id={`skill-${skill}`}
+                                        checked={field.value}
+                                        onCheckedChange={(checked) => handleSkillChange(skill, Boolean(checked))}
+                                        disabled={isDisabled}
+                                        aria-labelledby={`skill-label-${skill}`}
+                                    />
+                               )}
+                            />
+                           <Label htmlFor={`skill-${skill}`} id={`skill-label-${skill}`} className={cn("capitalize text-sm font-normal cursor-pointer", isDisabled && !isBackgroundSkill && "text-muted-foreground", isBackgroundSkill && "font-medium")}>
+                               {skill} <span className='text-xs text-muted-foreground ml-1'>({ability.substring(0, 3)})</span>
+                                {isBackgroundSkill && <Badge variant="secondary" className="ml-1 text-xs">BG</Badge>}
+                           </Label>
+                       </div>
+                    )
+                })}
             </CardContent>
         </Card>
 
 
       {/* --- Equipment (Simplified for form) --- */}
-        {/* NOTE: Full equipment management might be better in the CharacterSheet view after creation */}
        <Card>
             <CardHeader>
                 <CardTitle>Starting Equipment</CardTitle>
@@ -580,7 +692,7 @@ export function CharacterForm({ initialData }: CharacterFormProps) {
                      type="button"
                      variant="outline"
                      size="sm"
-                     onClick={() => appendEquipment({ name: '', quantity: 1, description: '', isEquipped: false })} // Ensure default values match schema
+                     onClick={() => appendEquipment({ name: '', quantity: 1, description: '', isEquipped: false })}
                  >
                      Add Equipment Item
                  </Button>
@@ -620,7 +732,7 @@ export function CharacterForm({ initialData }: CharacterFormProps) {
          <Button type="button" variant="outline" onClick={() => router.back()} disabled={isLoading}>
               Cancel
           </Button>
-         <Button type="submit" disabled={isLoading}>
+         <Button type="submit" disabled={isLoading || !form.formState.isValid}>
            {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
            {isEditing ? 'Update Character' : 'Create Character'}
          </Button>
@@ -628,5 +740,3 @@ export function CharacterForm({ initialData }: CharacterFormProps) {
     </form>
   );
 }
-
-

@@ -20,7 +20,6 @@ export async function loadUserProfile(userId: string): Promise<UserProfile | nul
     const docSnap = await getDoc(userDocRef);
     if (docSnap.exists()) {
       const data = docSnap.data();
-      // Convert Timestamps
       return {
           id: docSnap.id,
           ...data,
@@ -32,7 +31,13 @@ export async function loadUserProfile(userId: string): Promise<UserProfile | nul
       return null;
     }
   } catch (error) {
-    console.error(`Error in loadUserProfile for user ${userId}:`, error);
+    // Enhanced Logging
+    const e = error instanceof Error ? error : new Error(String(error));
+    console.error(`Error in loadUserProfile for user ${userId}: Firestore operation failed.`, {
+        errorMessage: e.message,
+        errorStack: e.stack,
+        userId: userId,
+    });
     throw new Error('Failed to load user profile.');
   }
 }
@@ -51,20 +56,27 @@ export async function createUserProfile(profileData: Omit<UserProfile, 'createdA
   const userDocRef = doc(db, 'users', profileData.id);
   const dataToSave = {
     ...profileData,
-    // Ensure role is explicitly set, default to 'player' if somehow missing
     role: profileData.role || 'player',
-    createdAt: serverTimestamp(), // Set on creation
+    createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   };
   try {
-    // Using setDoc with merge: false to ensure it creates or overwrites completely
-    // Consider using setDoc with merge: true or updateDoc for updates later
     await setDoc(userDocRef, dataToSave, { merge: false });
     console.log('User profile created/set for ID:', profileData.id);
-    // We don't get the timestamps back immediately, so return what we sent + ID
-    return { ...profileData, role: dataToSave.role, createdAt: new Date(), updatedAt: new Date() }; // Approximate timestamps
+    return { ...profileData, role: dataToSave.role, createdAt: new Date(), updatedAt: new Date() };
   } catch (error) {
-    console.error(`Error in createUserProfile for user ${profileData.id}:`, error);
+    // Enhanced Logging
+    const e = error instanceof Error ? error : new Error(String(error));
+    console.error(`Error in createUserProfile for user ${profileData.id}: Firestore operation failed.`, {
+        errorMessage: e.message,
+        errorStack: e.stack,
+        userId: profileData.id,
+        profileData: { // Log partial safe data
+            email: profileData.email,
+            displayName: profileData.displayName,
+            role: profileData.role
+        }
+    });
     throw new Error('Failed to create user profile.');
   }
 }
@@ -81,7 +93,7 @@ export async function updateUserProfile(userId: string, updates: Partial<Pick<Us
     }
      if (!updates || Object.keys(updates).length === 0) {
         console.warn(`updateUserProfile: Attempted to update user ${userId} with empty data.`);
-        return; // No changes to apply
+        return;
     }
   const userDocRef = doc(db, 'users', userId);
   const dataToUpdate: Record<string, any> = {
@@ -92,7 +104,14 @@ export async function updateUserProfile(userId: string, updates: Partial<Pick<Us
     await updateDoc(userDocRef, dataToUpdate);
     console.log('User profile updated for ID:', userId);
   } catch (error) {
-    console.error(`Error in updateUserProfile for user ${userId}:`, error);
+     // Enhanced Logging
+     const e = error instanceof Error ? error : new Error(String(error));
+     console.error(`Error in updateUserProfile for user ${userId}: Firestore operation failed.`, {
+         errorMessage: e.message,
+         errorStack: e.stack,
+         userId: userId,
+         updates: updates
+     });
     throw new Error('Failed to update user profile.');
   }
 }

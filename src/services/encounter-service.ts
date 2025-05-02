@@ -40,10 +40,10 @@ export async function saveEncounter(encounterData: Omit<Encounter, 'createdAt' |
 
   let campaign;
   try {
-    // Permission Check: Ensure the user is the DM of the associated campaign
     campaign = await loadCampaign(encounterData.campaignId);
   } catch (error) {
-    console.error(`saveEncounter: Failed to load campaign ${encounterData.campaignId} for permission check:`, error);
+    // Log the error from loadCampaign
+    console.error(`saveEncounter: Failed to load campaign ${encounterData.campaignId} for permission check during saveEncounter:`, error);
     throw new Error(`Failed to verify campaign ownership. Could not load campaign ${encounterData.campaignId}.`);
   }
 
@@ -61,19 +61,24 @@ export async function saveEncounter(encounterData: Omit<Encounter, 'createdAt' |
   const dataToSave = {
     ...encounterData,
     updatedAt: serverTimestamp(),
-    // Conditionally add createdAt only if it's a new document
     ...(!encounterData.id && { createdAt: serverTimestamp() }),
   };
-  // Remove the ID from the data being saved if it exists (Firestore handles ID separately)
   delete dataToSave.id;
 
   try {
-    // Use setDoc with merge: true to create or completely overwrite/update
     await setDoc(docRef, dataToSave, { merge: true });
     console.log('Encounter saved with ID:', docRef.id);
     return docRef.id;
   } catch (e) {
-    console.error(`Error in saveEncounter (ID: ${docRef.id}, Campaign: ${encounterData.campaignId}, User: ${dmUserId}):`, e);
+     // Enhanced Logging
+     const error = e instanceof Error ? e : new Error(String(e));
+     console.error(`Error in saveEncounter (ID: ${docRef.id}, Campaign: ${encounterData.campaignId}, User: ${dmUserId}): Firestore operation failed.`, {
+         errorMessage: error.message,
+         errorStack: error.stack,
+         encounterId: docRef.id,
+         campaignId: encounterData.campaignId,
+         dmUserId: dmUserId,
+     });
     throw new Error(`Failed to save encounter ${encounterData.name || 'Unnamed'}.`);
   }
 }
@@ -104,7 +109,13 @@ export async function loadEncounter(encounterId: string): Promise<Encounter | nu
       return null;
     }
   } catch (e) {
-    console.error(`Error in loadEncounter for ID ${encounterId}: `, e);
+     // Enhanced Logging
+     const error = e instanceof Error ? e : new Error(String(e));
+     console.error(`Error in loadEncounter for ID ${encounterId}: Firestore operation failed.`, {
+         errorMessage: error.message,
+         errorStack: error.stack,
+         encounterId: encounterId,
+     });
     throw new Error(`Failed to load encounter ${encounterId}.`);
   }
 }
@@ -119,35 +130,34 @@ export async function loadAllEncounters(dmUserId: string): Promise<Encounter[]> 
        console.warn("loadAllEncounters: Attempted to load encounters with empty dmUserId.");
        return [];
    }
-  // 1. Find campaigns run by this DM
   let campaignIds: string[] = [];
   try {
       const campaignsQuery = query(collection(db, 'campaigns'), where('dmId', '==', dmUserId));
       const campaignSnapshot = await getDocs(campaignsQuery);
       campaignIds = campaignSnapshot.docs.map(doc => doc.id);
   } catch (error) {
-      console.error(`Error in loadAllEncounters: Failed to load campaigns for DM ${dmUserId}:`, error);
+      // Enhanced Logging
+      const e = error instanceof Error ? error : new Error(String(error));
+      console.error(`Error in loadAllEncounters: Failed to load campaigns for DM ${dmUserId}: Firestore operation failed.`, {
+          errorMessage: e.message,
+          errorStack: e.stack,
+          dmUserId: dmUserId,
+      });
       throw new Error(`Failed to load campaigns for DM.`);
   }
 
 
   if (campaignIds.length === 0) {
     console.log(`loadAllEncounters: No campaigns found for DM ${dmUserId}.`);
-    return []; // No campaigns, so no encounters
+    return [];
   }
 
-  // 2. Find encounters belonging to those campaigns
-  // Firestore 'in' query limit is 30 - handle pagination or chunking if needed for more campaigns
   if (campaignIds.length > 30) {
       console.warn(`loadAllEncounters: Querying encounters for more than 30 campaigns for DM ${dmUserId}, results might be incomplete due to Firestore limits.`);
-      // Implement chunking logic here if necessary by breaking campaignIds into chunks of 30
-      // and running multiple queries.
-      // Example: const chunks = chunkArray(campaignIds, 30);
-      // For now, we'll proceed with the first 30.
       campaignIds = campaignIds.slice(0, 30);
   }
 
-  if (campaignIds.length === 0) { // Check again in case slicing resulted in empty
+  if (campaignIds.length === 0) {
       return [];
   }
 
@@ -164,11 +174,17 @@ export async function loadAllEncounters(dmUserId: string): Promise<Encounter[]> 
         updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : new Date(),
       } as Encounter);
     });
-    // Optional: Sort encounters, e.g., by update time descending
     encounters.sort((a, b) => (b.updatedAt?.getTime() || 0) - (a.updatedAt?.getTime() || 0));
     return encounters;
   } catch (e) {
-    console.error(`Error in loadAllEncounters: Failed to get encounter documents for DM ${dmUserId}:`, e);
+    // Enhanced Logging
+    const error = e instanceof Error ? e : new Error(String(e));
+    console.error(`Error in loadAllEncounters: Failed to get encounter documents for DM ${dmUserId}: Firestore operation failed.`, {
+        errorMessage: error.message,
+        errorStack: error.stack,
+        dmUserId: dmUserId,
+        queriedCampaignIds: campaignIds,
+    });
     throw new Error('Failed to load encounters.');
   }
 }
@@ -185,7 +201,6 @@ export async function deleteEncounter(encounterId: string, dmUserId: string): Pr
    }
   const encounterDocRef = doc(db, 'encounters', encounterId);
 
-  // Permission Check
   let encounter: Encounter | null = null;
   try {
       encounter = await loadEncounter(encounterId);
@@ -219,7 +234,14 @@ export async function deleteEncounter(encounterId: string, dmUserId: string): Pr
     await deleteDoc(encounterDocRef);
     console.log('Encounter deleted with ID:', encounterId);
   } catch (e) {
-    console.error(`Error in deleteEncounter for ID ${encounterId} by user ${dmUserId}:`, e);
+    // Enhanced Logging
+    const error = e instanceof Error ? e : new Error(String(e));
+    console.error(`Error in deleteEncounter for ID ${encounterId} by user ${dmUserId}: Firestore operation failed.`, {
+        errorMessage: error.message,
+        errorStack: error.stack,
+        encounterId: encounterId,
+        dmUserId: dmUserId,
+    });
     throw new Error(`Failed to delete encounter ${encounterId}.`);
   }
 }

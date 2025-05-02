@@ -54,7 +54,14 @@ export async function createCampaign(campaignData: Pick<Campaign, 'name' | 'desc
     console.log('Campaign created with ID: ', docRef.id);
     return docRef.id;
   } catch (e) {
-    console.error(`Error in createCampaign for DM ${dmId}:`, e);
+    // Enhanced Logging
+    const error = e instanceof Error ? e : new Error(String(e));
+    console.error(`Error in createCampaign for DM ${dmId}: Firestore operation failed.`, {
+        errorMessage: error.message,
+        errorStack: error.stack,
+        dmId: dmId,
+        campaignData: { name: campaignData.name } // Log partial data
+    });
     throw new Error('Failed to create campaign.');
   }
 }
@@ -85,7 +92,13 @@ export async function loadCampaign(campaignId: string): Promise<Campaign | null>
       return null;
     }
   } catch (e) {
-    console.error(`Error in loadCampaign for ID ${campaignId}: `, e);
+     // Enhanced Logging
+     const error = e instanceof Error ? e : new Error(String(e));
+     console.error(`Error in loadCampaign for ID ${campaignId}: Firestore operation failed.`, {
+         errorMessage: error.message,
+         errorStack: error.stack,
+         campaignId: campaignId,
+     });
     throw new Error(`Failed to load campaign ${campaignId}.`);
   }
 }
@@ -98,12 +111,10 @@ export async function loadCampaign(campaignId: string): Promise<Campaign | null>
  */
 export async function loadAllCampaigns(userId?: string, userRole?: UserRole): Promise<Campaign[]> {
     if (!userId) {
-        // If no user ID is provided, return an empty array or handle as needed
         console.warn("loadAllCampaigns: Called without userId.");
         return [];
     }
 
-    // Query for campaigns where the user is the DM OR the user is in the playerIds array
     const q = query(campaignsCollection,
         or(
             where('dmId', '==', userId),
@@ -125,7 +136,14 @@ export async function loadAllCampaigns(userId?: string, userRole?: UserRole): Pr
         });
         return campaigns;
     } catch (e) {
-        console.error(`Error in loadAllCampaigns for user ${userId}: `, e);
+         // Enhanced Logging
+        const error = e instanceof Error ? e : new Error(String(e));
+        console.error(`Error in loadAllCampaigns for user ${userId}: Firestore operation failed.`, {
+            errorMessage: error.message,
+            errorStack: error.stack,
+            userId: userId,
+            userRole: userRole
+        });
         throw new Error('Failed to load campaigns.');
     }
 }
@@ -145,7 +163,6 @@ export async function updateCampaign(campaignId: string, campaignData: Partial<P
   const campaignDocRef = doc(db, 'campaigns', campaignId);
 
   try {
-      // Permission Check (Example)
       const campaign = await loadCampaign(campaignId);
       if (!campaign) {
           console.error(`updateCampaign: Campaign with ID ${campaignId} not found.`);
@@ -164,10 +181,18 @@ export async function updateCampaign(campaignId: string, campaignData: Partial<P
       await updateDoc(campaignDocRef, dataToUpdate);
       console.log('Campaign updated with ID: ', campaignId);
   } catch (e) {
-     console.error(`Error in updateCampaign for ID ${campaignId} by user ${currentUserId}:`, e);
+     // Enhanced Logging
+     const error = e instanceof Error ? e : new Error(String(e));
+     console.error(`Error in updateCampaign for ID ${campaignId} by user ${currentUserId}: Firestore operation failed or permission error.`, {
+        errorMessage: error.message,
+        errorStack: error.stack,
+        campaignId: campaignId,
+        currentUserId: currentUserId,
+        updateDataKeys: Object.keys(campaignData)
+     });
     // Re-throw specific permission error or generic failure
-    if (e instanceof Error && e.message.startsWith('Permission denied')) {
-         throw e;
+    if (error.message.startsWith('Permission denied')) {
+         throw error;
     }
     throw new Error('Failed to update campaign.');
   }
@@ -186,7 +211,6 @@ export async function deleteCampaign(campaignId: string, currentUserId: string):
    const campaignDocRef = doc(db, 'campaigns', campaignId);
 
    try {
-       // Permission Check (Example)
        const campaign = await loadCampaign(campaignId);
        if (!campaign) {
             console.error(`deleteCampaign: Campaign with ID ${campaignId} not found.`);
@@ -197,15 +221,19 @@ export async function deleteCampaign(campaignId: string, currentUserId: string):
            throw new Error('Permission denied: Only the DM can delete the campaign.');
        }
 
-       // TODO: Consider implications - delete associated characters? game logs? encounters?
-       // This currently only deletes the campaign document itself.
-
        await deleteDoc(campaignDocRef);
        console.log('Campaign deleted with ID: ', campaignId);
    } catch (e) {
-        console.error(`Error in deleteCampaign for ID ${campaignId} by user ${currentUserId}:`, e);
-         if (e instanceof Error && e.message.startsWith('Permission denied')) {
-            throw e;
+        // Enhanced Logging
+        const error = e instanceof Error ? e : new Error(String(e));
+        console.error(`Error in deleteCampaign for ID ${campaignId} by user ${currentUserId}: Firestore operation failed or permission error.`, {
+            errorMessage: error.message,
+            errorStack: error.stack,
+            campaignId: campaignId,
+            currentUserId: currentUserId,
+        });
+         if (error.message.startsWith('Permission denied')) {
+            throw error;
         }
         throw new Error('Failed to delete campaign.');
    }
@@ -225,7 +253,6 @@ export async function addPlayerToCampaign(campaignId: string, playerId: string, 
     const campaignDocRef = doc(db, 'campaigns', campaignId);
 
     try {
-        // Permission Check (Example)
         const campaign = await loadCampaign(campaignId);
         if (!campaign) {
              console.error(`addPlayerToCampaign: Campaign with ID ${campaignId} not found.`);
@@ -237,7 +264,7 @@ export async function addPlayerToCampaign(campaignId: string, playerId: string, 
         }
         if (campaign.playerIds.includes(playerId)) {
             console.log(`Player ${playerId} already in campaign ${campaignId}.`);
-            return; // Already exists
+            return;
         }
 
         await updateDoc(campaignDocRef, {
@@ -246,9 +273,17 @@ export async function addPlayerToCampaign(campaignId: string, playerId: string, 
         });
         console.log(`Player ${playerId} added to campaign ${campaignId}`);
     } catch (e) {
-         console.error(`Error in addPlayerToCampaign (Campaign: ${campaignId}, Player: ${playerId}, User: ${currentUserId}):`, e);
-         if (e instanceof Error && e.message.startsWith('Permission denied')) {
-            throw e;
+         // Enhanced Logging
+         const error = e instanceof Error ? e : new Error(String(e));
+         console.error(`Error in addPlayerToCampaign (Campaign: ${campaignId}, Player: ${playerId}, User: ${currentUserId}): Firestore operation failed or permission error.`, {
+            errorMessage: error.message,
+            errorStack: error.stack,
+            campaignId: campaignId,
+            playerId: playerId,
+            currentUserId: currentUserId,
+         });
+         if (error.message.startsWith('Permission denied')) {
+            throw error;
         }
         throw new Error('Failed to add player.');
     }
@@ -268,7 +303,6 @@ export async function removePlayerFromCampaign(campaignId: string, playerId: str
     const campaignDocRef = doc(db, 'campaigns', campaignId);
 
     try {
-        // Permission Check (Example)
         const campaign = await loadCampaign(campaignId);
         if (!campaign) {
             console.error(`removePlayerFromCampaign: Campaign with ID ${campaignId} not found.`);
@@ -280,22 +314,26 @@ export async function removePlayerFromCampaign(campaignId: string, playerId: str
         }
         if (!campaign.playerIds.includes(playerId)) {
             console.log(`Player ${playerId} not found in campaign ${campaignId}.`);
-            return; // Not in campaign
+            return;
         }
-
-        // TODO: Should removing a player also remove their character(s) from the campaign?
-        // This currently only removes the player ID from the campaign's list.
 
         await updateDoc(campaignDocRef, {
             playerIds: arrayRemove(playerId),
-            // Consider removing associated characterIds here if needed
             updatedAt: serverTimestamp(),
         });
         console.log(`Player ${playerId} removed from campaign ${campaignId}`);
     } catch (e) {
-         console.error(`Error in removePlayerFromCampaign (Campaign: ${campaignId}, Player: ${playerId}, User: ${currentUserId}):`, e);
-        if (e instanceof Error && e.message.startsWith('Permission denied')) {
-            throw e;
+         // Enhanced Logging
+         const error = e instanceof Error ? e : new Error(String(e));
+         console.error(`Error in removePlayerFromCampaign (Campaign: ${campaignId}, Player: ${playerId}, User: ${currentUserId}): Firestore operation failed or permission error.`, {
+            errorMessage: error.message,
+            errorStack: error.stack,
+            campaignId: campaignId,
+            playerId: playerId,
+            currentUserId: currentUserId,
+         });
+        if (error.message.startsWith('Permission denied')) {
+            throw error;
         }
         throw new Error('Failed to remove player.');
     }
@@ -319,10 +357,18 @@ export async function addGameLogEntry(logEntryData: Omit<GameLogEntry, 'id' | 't
       ...logEntryData,
       timestamp: serverTimestamp(),
     });
-    console.log(`Game log entry added for campaign ${logEntryData.campaignId} with ID: ${docRef.id}`);
+    // console.log(`Game log entry added for campaign ${logEntryData.campaignId} with ID: ${docRef.id}`); // Reduce log noise
     return docRef.id;
   } catch (e) {
-    console.error(`Error in addGameLogEntry for campaign ${logEntryData.campaignId}:`, e);
+     // Enhanced Logging
+     const error = e instanceof Error ? e : new Error(String(e));
+     console.error(`Error in addGameLogEntry for campaign ${logEntryData.campaignId}: Firestore operation failed.`, {
+         errorMessage: error.message,
+         errorStack: error.stack,
+         campaignId: logEntryData.campaignId,
+         actorId: logEntryData.actorId,
+         actionType: logEntryData.actionType,
+     });
     throw new Error('Failed to add game log entry.');
   }
 }
@@ -354,9 +400,16 @@ export async function loadGameLogEntries(campaignId: string, limitCount?: number
         timestamp: data.timestamp instanceof Timestamp ? data.timestamp.toDate() : new Date(),
       } as GameLogEntry);
     });
-    return logEntries.reverse(); // Reverse to show oldest first if needed, or keep descending for latest first
+    return logEntries.reverse();
   } catch (e) {
-    console.error(`Error in loadGameLogEntries for campaign ${campaignId}:`, e);
+     // Enhanced Logging
+     const error = e instanceof Error ? e : new Error(String(e));
+     console.error(`Error in loadGameLogEntries for campaign ${campaignId}: Firestore operation failed.`, {
+         errorMessage: error.message,
+         errorStack: error.stack,
+         campaignId: campaignId,
+         limitCount: limitCount,
+     });
     throw new Error('Failed to load game log.');
   }
 }
@@ -374,18 +427,15 @@ export async function saveSourcePack(sourcePackData: Omit<SourcePack, 'createdAt
         console.error("saveSourcePack: Missing currentUserId.");
         throw new Error("User ID is required to save a source pack.");
     }
-    // Basic data validation
     if (!sourcePackData || !sourcePackData.name) {
         console.error("saveSourcePack: Missing required pack data (e.g., name).");
         throw new Error("Source pack name is required.");
     }
 
-
     const docRef = sourcePackData.id ? doc(db, 'sourcePacks', sourcePackData.id) : doc(collection(db, 'sourcePacks'));
 
     try {
         if (sourcePackData.id) {
-            // Check ownership if updating existing pack
             const existingPack = await loadSourcePack(sourcePackData.id);
             if (!existingPack) {
                 console.error(`saveSourcePack: Source pack with ID ${sourcePackData.id} not found for update.`);
@@ -396,30 +446,32 @@ export async function saveSourcePack(sourcePackData: Omit<SourcePack, 'createdAt
                 throw new Error('Permission denied: Cannot update this source pack.');
             }
         } else if (sourcePackData.creatorId && sourcePackData.creatorId !== currentUserId && sourcePackData.creatorId !== 'system') {
-            // Check creatorId on new pack creation if provided
              console.warn(`saveSourcePack: Permission denied for user ${currentUserId} to create pack with creatorId ${sourcePackData.creatorId}.`);
              throw new Error('Permission denied: Cannot create source pack for another user.');
         }
 
-
         const dataToSave = {
             ...sourcePackData,
-            creatorId: sourcePackData.creatorId || currentUserId, // Ensure creator is set
+            creatorId: sourcePackData.creatorId || currentUserId,
             updatedAt: serverTimestamp(),
-            // Conditionally add createdAt only if it's a new document (no ID provided)
             ...(!sourcePackData.id && { createdAt: serverTimestamp() }),
         };
-        // Remove the ID from the data being saved if it exists
         delete dataToSave.id;
 
-        // Use setDoc with merge: true for updates, default behavior creates if doesn't exist
         await setDoc(docRef, dataToSave, { merge: true });
         console.log('Source pack saved with ID:', docRef.id);
         return docRef.id;
     } catch (e) {
-         console.error(`Error in saveSourcePack (Pack ID: ${sourcePackData.id || 'new'}, User: ${currentUserId}):`, e);
-         if (e instanceof Error && e.message.startsWith('Permission denied')) {
-            throw e;
+         // Enhanced Logging
+         const error = e instanceof Error ? e : new Error(String(e));
+         console.error(`Error in saveSourcePack (Pack ID: ${sourcePackData.id || 'new'}, User: ${currentUserId}): Firestore operation failed or permission error.`, {
+            errorMessage: error.message,
+            errorStack: error.stack,
+            packId: sourcePackData.id || 'new',
+            currentUserId: currentUserId,
+         });
+         if (error.message.startsWith('Permission denied')) {
+            throw error;
          }
         throw new Error('Failed to save source pack.');
     }
@@ -451,10 +503,15 @@ export async function loadSourcePack(sourcePackId: string): Promise<SourcePack |
         return null;
         }
     } catch (e) {
-        console.error(`Error in loadSourcePack for ID ${sourcePackId}: `, e);
-        // Don't throw here, return null to allow graceful handling in combined content
+        // Enhanced Logging
+        const error = e instanceof Error ? e : new Error(String(e));
+        console.error(`Error in loadSourcePack for ID ${sourcePackId}: Firestore operation failed.`, {
+            errorMessage: error.message,
+            errorStack: error.stack,
+            packId: sourcePackId,
+        });
+        // Don't throw here for getCombinedContentFromPacks
         return null;
-        // throw new Error('Failed to load source pack.');
     }
 }
 
@@ -484,7 +541,13 @@ export async function loadSourcePacksByCreator(creatorId: string): Promise<Sourc
         });
         return packs;
     } catch (e) {
-        console.error(`Error in loadSourcePacksByCreator for creator ${creatorId}:`, e);
+        // Enhanced Logging
+        const error = e instanceof Error ? e : new Error(String(e));
+        console.error(`Error in loadSourcePacksByCreator for creator ${creatorId}: Firestore operation failed.`, {
+            errorMessage: error.message,
+            errorStack: error.stack,
+            creatorId: creatorId,
+        });
         throw new Error('Failed to load source packs.');
     }
 }
@@ -502,7 +565,6 @@ export async function deleteSourcePack(sourcePackId: string, currentUserId: stri
     const packDocRef = doc(db, 'sourcePacks', sourcePackId);
 
     try {
-        // Permission Check
         const pack = await loadSourcePack(sourcePackId);
         if (!pack) {
             console.error(`deleteSourcePack: Source pack with ID ${sourcePackId} not found.`);
@@ -517,38 +579,41 @@ export async function deleteSourcePack(sourcePackId: string, currentUserId: stri
             throw new Error('Permission denied: Cannot delete this source pack.');
         }
 
-        // TODO: Consider implications - remove from active campaigns?
-
         await deleteDoc(packDocRef);
         console.log('Source pack deleted with ID:', sourcePackId);
     } catch (e) {
-         console.error(`Error in deleteSourcePack (Pack ID: ${sourcePackId}, User: ${currentUserId}):`, e);
-         if (e instanceof Error && e.message.startsWith('Permission denied')) {
-            throw e;
+         // Enhanced Logging
+         const error = e instanceof Error ? e : new Error(String(e));
+         console.error(`Error in deleteSourcePack (Pack ID: ${sourcePackId}, User: ${currentUserId}): Firestore operation failed or permission error.`, {
+            errorMessage: error.message,
+            errorStack: error.stack,
+            packId: sourcePackId,
+            currentUserId: currentUserId,
+         });
+         if (error.message.startsWith('Permission denied')) {
+            throw error;
          }
         throw new Error('Failed to delete source pack.');
     }
 }
 
 // --- Helper to combine content from multiple source packs ---
-// This would be used during character creation/viewing to get available options
 export async function getCombinedContentFromPacks(packIds: string[]): Promise<SourcePack['content']> {
     const combinedContent: SourcePack['content'] = {
         races: {},
         classes: {},
         items: {},
         monsters: {},
-        npcs: {}, // Initialize npcs
+        npcs: {},
         backgrounds: {},
     };
 
     if (!packIds || packIds.length === 0) {
         console.log("getCombinedContentFromPacks: No pack IDs provided, defaulting to 'srd'.");
-        packIds = ['srd']; // Default to SRD if no packs are specified
+        packIds = ['srd'];
     }
 
-    // Ensure SRD is always included if not already present
-    const packIdsToLoad = [...new Set([...packIds, 'srd'])]; // Use Set to avoid duplicates
+    const packIdsToLoad = [...new Set([...packIds, 'srd'])];
 
     const packPromises = packIdsToLoad.map(async (id) => {
          try {
@@ -558,34 +623,36 @@ export async function getCombinedContentFromPacks(packIds: string[]): Promise<So
              }
             return pack;
          } catch (error) {
-             // Catch errors from loadSourcePack if it throws despite returning null
-             console.error(`getCombinedContentFromPacks: Error loading source pack ${id}:`, error);
+             // Error is already logged in loadSourcePack
              return null;
          }
     });
 
-    const packs = (await Promise.all(packPromises)).filter((pack): pack is SourcePack => pack !== null); // Filter out nulls
+    const packs = (await Promise.all(packPromises)).filter((pack): pack is SourcePack => pack !== null);
 
-    // Define the order of merging (SRD first, then others)
     const srdPack = packs.find(p => p.id === 'srd');
     const otherPacks = packs.filter(p => p.id !== 'srd');
-    const sortedPacks = srdPack ? [srdPack, ...otherPacks] : otherPacks; // Put SRD first if found
+    const sortedPacks = srdPack ? [srdPack, ...otherPacks] : otherPacks;
 
     for (const pack of sortedPacks) {
         if (pack?.content) {
-            // Merge content, SRD content will be potentially overwritten by custom packs loaded later
              try {
                  combinedContent.races = { ...combinedContent.races, ...pack.content.races };
                  combinedContent.classes = { ...combinedContent.classes, ...pack.content.classes };
                  combinedContent.items = { ...combinedContent.items, ...pack.content.items };
                  combinedContent.monsters = { ...combinedContent.monsters, ...pack.content.monsters };
-                 combinedContent.npcs = { ...combinedContent.npcs, ...pack.content.npcs }; // Merge NPCs
+                 combinedContent.npcs = { ...combinedContent.npcs, ...pack.content.npcs };
                  combinedContent.backgrounds = { ...combinedContent.backgrounds, ...pack.content.backgrounds };
              } catch (mergeError) {
-                 console.error(`Error merging content from pack ${pack.id} (${pack.name}):`, mergeError);
+                 const error = mergeError instanceof Error ? mergeError : new Error(String(mergeError));
+                 console.error(`Error merging content from pack ${pack.id} (${pack.name}):`, {
+                     errorMessage: error.message,
+                     errorStack: error.stack,
+                     packId: pack.id,
+                     packName: pack.name,
+                 });
                  // Decide how to handle merge errors: continue, stop, etc.
              }
-            // Merge other content types (spells, etc.) if added
         }
     }
 

@@ -5,6 +5,8 @@ import './globals.css';
 import { Toaster } from '@/components/ui/toaster';
 import { Providers } from '@/components/providers';
 import { AuthProvider } from '@/components/auth-provider'; // Import AuthProvider
+import React, { Suspense } from 'react'; // Import Suspense
+import { Skeleton } from '@/components/ui/skeleton'; // Import Skeleton for loading fallback
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
@@ -18,7 +20,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: 'Character Chronicle',
-  description: 'Manage your D\&D 5e characters',
+  description: 'Manage your D&D 5e characters',
 };
 
 export default function RootLayout({
@@ -31,11 +33,23 @@ export default function RootLayout({
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         <Providers>
            <AuthProvider> {/* Wrap children with AuthProvider */}
-                {children}
+              {/* Wrap children in Suspense for potential loading states */}
+               <Suspense fallback={<RootLoadingSkeleton />}>
+                  {children}
+               </Suspense>
            </AuthProvider>
           <Toaster />
         </Providers>
       </body>
     </html>
   );
+}
+
+// Simple loading skeleton for the root layout fallback
+function RootLoadingSkeleton() {
+   return (
+      <div className="flex h-screen w-screen items-center justify-center">
+          <Skeleton className="h-16 w-16 rounded-full animate-spin" />
+      </div>
+   )
 }

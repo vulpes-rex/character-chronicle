@@ -38,7 +38,18 @@ export async function saveCharacter(characterData: Omit<Character, 'id' | 'creat
     console.log('Character saved with ID: ', docRef.id);
     return docRef.id;
   } catch (e) {
-    console.error(`Error in saveCharacter for ${characterData.characterName}: `, e);
+    // Enhanced Logging
+    const error = e instanceof Error ? e : new Error(String(e));
+    console.error(`Error in saveCharacter for ${characterData.characterName}: Firestore operation failed.`, {
+        errorMessage: error.message,
+        errorStack: error.stack,
+        characterData: { // Log partial data for debugging (avoid sensitive info if needed)
+            characterName: characterData.characterName,
+            playerName: characterData.playerName,
+            race: characterData.race,
+            class: characterData.class,
+        }
+    });
     throw new Error('Failed to save character.');
   }
 }
@@ -65,7 +76,14 @@ export async function updateCharacter(characterId: string, characterData: Partia
     });
     console.log('Character updated with ID: ', characterId);
   } catch (e) {
-    console.error(`Error in updateCharacter for ID ${characterId}: `, e);
+     // Enhanced Logging
+     const error = e instanceof Error ? e : new Error(String(e));
+     console.error(`Error in updateCharacter for ID ${characterId}: Firestore operation failed.`, {
+         errorMessage: error.message,
+         errorStack: error.stack,
+         characterId: characterId,
+         updateDataKeys: Object.keys(characterData) // Log keys being updated
+     });
     throw new Error('Failed to update character.');
   }
 }
@@ -98,7 +116,13 @@ export async function loadCharacter(characterId: string): Promise<Character | nu
       return null;
     }
   } catch (e) {
-    console.error(`Error in loadCharacter for ID ${characterId}: `, e);
+     // Enhanced Logging
+     const error = e instanceof Error ? e : new Error(String(e));
+     console.error(`Error in loadCharacter for ID ${characterId}: Firestore operation failed.`, {
+         errorMessage: error.message,
+         errorStack: error.stack,
+         characterId: characterId,
+     });
     throw new Error('Failed to load character.');
   }
 }
@@ -125,7 +149,12 @@ export async function loadAllCharacters(): Promise<Character[]> {
     });
     return characters;
   } catch (e) {
-    console.error('Error in loadAllCharacters: ', e);
+    // Enhanced Logging
+    const error = e instanceof Error ? e : new Error(String(e));
+    console.error('Error in loadAllCharacters: Firestore operation failed.', {
+        errorMessage: error.message,
+        errorStack: error.stack,
+    });
     throw new Error('Failed to load characters.');
   }
 }
@@ -141,16 +170,16 @@ export async function deleteCharacter(characterId: string): Promise<void> {
    }
   const characterDoc = doc(db, 'characters', characterId);
   try {
-    // Optional: Add check if document exists before deleting?
-    // const docSnap = await getDoc(characterDoc);
-    // if (!docSnap.exists()) {
-    //     console.warn(`deleteCharacter: Character with ID ${characterId} not found.`);
-    //     return; // Or throw an error
-    // }
     await deleteDoc(characterDoc);
     console.log('Character deleted with ID: ', characterId);
   } catch (e) {
-    console.error(`Error in deleteCharacter for ID ${characterId}: `, e);
+     // Enhanced Logging
+     const error = e instanceof Error ? e : new Error(String(e));
+     console.error(`Error in deleteCharacter for ID ${characterId}: Firestore operation failed.`, {
+         errorMessage: error.message,
+         errorStack: error.stack,
+         characterId: characterId,
+     });
     throw new Error('Failed to delete character.');
   }
 }

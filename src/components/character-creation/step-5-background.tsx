@@ -172,10 +172,10 @@ export function Step5Background({ data, updateData, setValidity, combinedContent
                                     value={field.value || ""}
                                     onValueChange={(value) => field.onChange(value)}
                                     // Disable while loading content OR if no backgrounds are available
-                                    disabled={!combinedContent || availableBackgroundNames.length === 0}
+                                    disabled={isLoadingBgDetails || availableBackgroundNames.length === 0}
                                 >
-                                    <SelectTrigger className={!combinedContent ? 'animate-pulse' : ''}>
-                                        <SelectValue placeholder={!combinedContent ? "Loading..." : "Choose a background..."} />
+                                    <SelectTrigger className={isLoadingBgDetails ? 'animate-pulse' : ''}>
+                                        <SelectValue placeholder={isLoadingBgDetails ? "Loading..." : "Choose a background..."} />
                                     </SelectTrigger>
                                     <SelectContent>
                                         {availableBackgroundNames.map(bgName => (
@@ -231,7 +231,7 @@ export function Step5Background({ data, updateData, setValidity, combinedContent
                            <div className="space-y-1">
                                <Label htmlFor="bond" className="flex justify-between items-center">
                                    <span>Bond</span>
-                                    <Button type="button" variant="ghost" size="xs" onClick={()={() => randomizeField('bond', currentBgData?.suggestedBonds)} disabled={!currentBgData?.suggestedBonds || isLoadingBgDetails}>
+                                    <Button type="button" variant="ghost" size="xs" onClick={() => randomizeField('bond', currentBgData?.suggestedBonds)} disabled={!currentBgData?.suggestedBonds || isLoadingBgDetails}>
                                         <Dices className="h-3 w-3 mr-1" /> Randomize
                                     </Button>
                                </Label>

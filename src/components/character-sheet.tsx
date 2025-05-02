@@ -21,10 +21,6 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { PlusCircle, Trash2, Dices, ShieldCheck, Swords, ChevronUp, ChevronDown, BedDouble, BedSingle, HeartPulse, Edit, CheckSquare, Square, AlertCircle, Loader2 } from 'lucide-react'; // Added CheckSquare, Square
 import { useToast } from '@/hooks/use-toast';
 import {
-    getCharacterClasses,
-    getCharacterRaces,
-    getCumulativeClassFeatures,
-    getRaceTraitsDetails,
     getAvailableEquipmentItems,
     getLevelUpOptions,
 } from '@/services/dnd-api';
@@ -34,7 +30,8 @@ import { AddEquipmentDialog } from './add-equipment-dialog';
 import { ShortRestDialog } from './short-rest-dialog';
 import { rollDice, SKILL_ABILITY_MAP, calculateSkillModifier, ALL_SKILLS } from '@/lib/types'; // Use central utils/types
 import Link from 'next/link'; // For Edit button
-import { DDDiceRoller } from './dddice-roller';
+// Removed dddice imports for now
+// import { DDDiceRoller } from './dddice-roller';
 import { applyFeatureRules } from '@/services/feature-service'; // Import feature rule application
 
 interface CharacterSheetProps {
@@ -64,8 +61,9 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
     const [isSaving, setIsSaving] = useState(false);
     const [isAddEquipmentOpen, setIsAddEquipmentOpen] = useState(false);
     const [isShortRestDialogOpen, setIsShortRestDialogOpen] = useState(false);
-    const [diceRollResult, setDiceRollResult] = useState<string | null>(null);
-    const [rollerKey, setRollerKey] = useState(0); // To force re-render of roller
+    // Removed state for diceRollResult and rollerKey
+    // const [diceRollResult, setDiceRollResult] = useState<string | null>(null);
+    // const [rollerKey, setRollerKey] = useState(0); // To force re-render of roller
 
     // Derived state for feature uses - synchronized with query data
     const [featureUses, setFeatureUses] = useState<Record<string, number>>({});
@@ -277,7 +275,7 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
          let fightingStyleBonus = 0;
 
          return abilityMod + fightingStyleBonus;
-    }, [modifiers.strength, modifiers.dexterity, characterData?.features, characterData?.equipment]);
+    }, [modifiers.strength, modifiers.dexterity, characterData?.features]);
 
 
     // Calculated skill modifiers using derived stats
@@ -424,8 +422,9 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
     const triggerDiceRoll = (rollString: string, label: string) => {
          const roll = rollDice(rollString);
          const resultText = `${label}: Rolled ${roll} (${rollString})`;
-         setDiceRollResult(resultText);
-         setRollerKey(prev => prev + 1); // Increment key to trigger reroll animation
+         // Removed dddice integration for now
+         // setDiceRollResult(resultText);
+         // setRollerKey(prev => prev + 1); // Increment key to trigger reroll animation
          toast({
              title: `${label} Check`,
              description: `Result: ${roll}`,
@@ -438,8 +437,9 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
         const roll = rollDice('1d20');
         const total = roll + hitBonus;
         const resultText = `${weaponName} Attack: Rolled ${roll} + ${hitBonus} = ${total} (1d20)`; // Include dice notation
-        setDiceRollResult(resultText);
-        setRollerKey(prev => prev + 1); // Trigger dddice roller
+        // Removed dddice integration for now
+        // setDiceRollResult(resultText);
+        // setRollerKey(prev => prev + 1); // Trigger dddice roller
         toast({
             title: `${weaponName} Attack`,
             description: `Rolled ${roll} + ${hitBonus} = ${total}`,
@@ -454,8 +454,9 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
         const roll = rollDice(damageDice);
         const total = roll + damageBonus;
         const resultText = `${weaponName} Damage: Rolled ${roll} (${damageDice}) + ${damageBonus} = ${Math.max(0, total)}`;
-        setDiceRollResult(resultText);
-        setRollerKey(prev => prev + 1); // Trigger dddice roller
+        // Removed dddice integration for now
+        // setDiceRollResult(resultText);
+        // setRollerKey(prev => prev + 1); // Trigger dddice roller
         toast({
             title: `${weaponName} Damage`,
             description: resultText,
@@ -467,8 +468,9 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
          const roll = rollDice('1d20');
          const total = roll + modifier;
          const resultText = `${skillName.charAt(0).toUpperCase() + skillName.slice(1)} Check: Rolled ${roll} + ${modifier} = ${total} (1d20)`; // Include dice notation
-         setDiceRollResult(resultText);
-         setRollerKey(prev => prev + 1); // Trigger dddice roller
+         // Removed dddice integration for now
+         // setDiceRollResult(resultText);
+         // setRollerKey(prev => prev + 1); // Trigger dddice roller
          toast({
              title: `${skillName.charAt(0).toUpperCase() + skillName.slice(1)} Check`,
              description: `Rolled ${roll} + ${modifier} = ${total}`,
@@ -673,8 +675,8 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
 
   return (
     <>
-         {/* dddice Roller Component */}
-         {diceRollResult && <DDDiceRoller key={rollerKey} resultText={diceRollResult} />}
+         {/* Removed dddice Roller Component */}
+         {/* {diceRollResult && <DDDiceRoller key={rollerKey} resultText={diceRollResult} />} */}
 
         <ScrollArea className="h-full p-4 md:p-6">
           <div className="max-w-7xl mx-auto space-y-6">
@@ -1091,5 +1093,3 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
     </>
   );
 }
-
-```

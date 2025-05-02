@@ -1,6 +1,3 @@
-
-'use client';
-
 import { useState, useEffect, useMemo } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
@@ -22,6 +19,7 @@ import { useAuth } from '@/components/auth-provider';
 // import { DDDiceRoller } from './dddice-roller';
 import { Skeleton } from './ui/skeleton';
 import Link from 'next/link'; // Added Link import
+import { FloatingDiceRoller } from './floating-dice-roller';
 
 interface CombatTrackerProps {
     initialEncounter: Encounter;
@@ -257,12 +255,25 @@ export function CombatTracker({ initialEncounter, campaign, characters, monsters
         setTempHpInput(String(currentHp));
     };
 
+    const handleDiceRoll = (rollString: string, result: number) => {
+         addLogEntryMutation.mutate({
+            actorId: user?.uid || 'system',
+            actorName: userProfile?.displayName || 'DM',
+            actionType: 'roll',
+            details: `Rolled ${rollString} and got ${result}`,
+            rollDetails: {
+                dice: rollString,
+                result: result,
+            },
+         });
+    };
+
 
     // --- Render ---
     return (
         <div className="p-4 md:p-6 space-y-6 h-full flex flex-col">
-             {/* Removed DDDiceRoller */}
-             {/* {diceRollResult && <DDDiceRoller key={rollerKey} resultText={diceRollResult} />} */}
+             {/* Floating Dice Roller Component */}
+             <FloatingDiceRoller onRoll={handleDiceRoll} />
             {/* Header */}
             <Card>
                 <CardHeader>
@@ -447,3 +458,4 @@ export function CombatTrackerSkeleton() {
         </div>
     );
 }
+

@@ -1,16 +1,18 @@
 'use client';
 
-import React, {useState, useRef, useEffect, useCallback} from 'react';
+import React, {useState, useCallback} from 'react';
 import {Button} from "@/components/ui/button";
 import {Input} from "@/components/ui/input";
 import {Card, CardContent} from "@/components/ui/card";
 import { useToast } from '@/hooks/use-toast'; // Import useToast
 import { Dices } from 'lucide-react';
+import { rollDice } from '@/lib/types'; // Import rollDice utility
 
 interface FloatingDiceRollerProps {
+    onRoll: (rollString: string, result: number) => void; // Callback to send roll data to GameLog
 }
 
-const FloatingDiceRoller = () => {
+const FloatingDiceRoller = ({ onRoll }: FloatingDiceRollerProps) => {
     const [numDiceD4, setNumDiceD4] = useState(0);
     const [numDiceD6, setNumDiceD6] = useState(0);
     const [numDiceD8, setNumDiceD8] = useState(0);
@@ -18,12 +20,20 @@ const FloatingDiceRoller = () => {
     const [numDiceD12, setNumDiceD12] = useState(0);
     const [numDiceD20, setNumDiceD20] = useState(0);
     const [modifier, setModifier] = useState(0);
-    const [result, setResult] = useState<number | null>(null);
     const [show, setShow] = useState(false);
     const { toast } = useToast();
 
-    const rollDice = useCallback(() => {
+    const rollDiceAndLog = useCallback(() => {
         let total = 0;
+        let description = '';
+
+        const addDiceRoll = (numDice: number, diceType: string, rollFunc: () => void) => {
+            if (numDice > 0) {
+                rollFunc();
+                description += description.length > 0 ? ` + ${numDice}${diceType}` : `${numDice}${diceType}`;
+            }
+        };
+
         const rollD4 = () => {
             for (let i = 0; i < numDiceD4; i++) {
                 total += Math.floor(Math.random() * 4) + 1;
@@ -44,7 +54,7 @@ const FloatingDiceRoller = () => {
                 total += Math.floor(Math.random() * 10) + 1;
             }
         };
-         const rollD12 = () => {
+        const rollD12 = () => {
             for (let i = 0; i < numDiceD12; i++) {
                 total += Math.floor(Math.random() * 12) + 1;
             }
@@ -55,33 +65,30 @@ const FloatingDiceRoller = () => {
             }
         };
 
-        rollD4();
-        rollD6();
-        rollD8();
-        rollD10();
-        rollD12();
-        rollD20();
+        addDiceRoll(numDiceD4, "d4", rollD4);
+        addDiceRoll(numDiceD6, "d6", rollD6);
+        addDiceRoll(numDiceD8, "d8", rollD8);
+        addDiceRoll(numDiceD10, "d10", rollD10);
+        addDiceRoll(numDiceD12, "d12", rollD12);
+        addDiceRoll(numDiceD20, "d20", rollD20);
 
-        total += modifier;
-        setResult(total);
-
-        let description = '';
-        if (numDiceD4 > 0) description += `${numDiceD4}d4`;
-        if (numDiceD6 > 0) description += description.length > 0 ? ` + ${numDiceD6}d6` : `${numDiceD6}d6`;
-        if (numDiceD8 > 0) description += description.length > 0 ? ` + ${numDiceD8}d8` : `${numDiceD8}d8`;
-        if (numDiceD10 > 0) description += description.length > 0 ? ` + ${numDiceD10}d10` : `${numDiceD10}d10`;
-        if (numDiceD12 > 0) description += description.length > 0 ? ` + ${numDiceD12}d12` : `${numDiceD12}d12`;
-        if (numDiceD20 > 0) description += description.length > 0 ? ` + ${numDiceD20}d20` : `${numDiceD20}d20`;
-        if (modifier !== 0) description += description.length > 0 ? ` + ${modifier}` : `${modifier}`;
+        if (modifier !== 0) {
+            total += modifier;
+            description += description.length > 0 ? ` + ${modifier}` : `${modifier}`;
+        }
 
         description = description.length > 0 ? description : 'No dice specified';
+
+        // Call the onRoll callback to send the dice data upwards (to CombatTracker or similar)
+        onRoll(description, total);
 
         toast({
             title: "Dice Roll",
             description: `${description} = ${total}`,
         });
 
-    }, [numDiceD4, numDiceD6, numDiceD8, numDiceD10, numDiceD12, numDiceD20, modifier, toast]);
+    }, [numDiceD4, numDiceD6, numDiceD8, numDiceD10, numDiceD12, numDiceD20, modifier, onRoll, toast]);
+
 
     return (
         <div style={{
@@ -174,16 +181,10 @@ const FloatingDiceRoller = () => {
                             </div>
                         </div>
 
-                        <Button variant={"outline"} onClick={rollDice}>
+                        <Button variant={"outline"} onClick={rollDiceAndLog}>
                             <Dices className="mr-2 h-4 w-4" />
                             Roll Dice
                         </Button>
-
-                        {result !== null && (
-                            <div style={{marginTop: '10px', fontSize: '1.2em'}}>
-                                Result: {result}
-                            </div>
-                        )}
                         <Button variant={"secondary"} onClick={() => setShow(false)}>Close</Button>
                     </div>
                 </CardContent>

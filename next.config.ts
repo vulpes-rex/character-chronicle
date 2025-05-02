@@ -28,6 +28,11 @@ const nextConfig: NextConfig = {
      // For client-side Firebase SDK (firebase/app, firebase/firestore), this usually isn't needed.
      // serverComponentsExternalPackages: ['@google-cloud/firestore'], // Example
    },
+    webpack: (config) => {
+       config.resolve.extensionAlias = { '.js': ['.js', '.jsx'], '.ts': ['.ts', '.tsx'] };
+       return config;
+     },
+   
    output: 'standalone', // Optimize for deployment environments
 };
 

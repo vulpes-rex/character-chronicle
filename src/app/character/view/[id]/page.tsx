@@ -28,30 +28,32 @@ export default async function ViewCharacterPage({ params }: ViewCharacterPagePro
 
   return (
     <AppLayout>
-       {errorLoading && (
+      <div className="p-4 md:p-6">
+      {errorLoading && (
+        <div className="p-4 md:p-6">
+          <Alert variant="destructive">
+            <AlertCircle className="h-4 w-4" />
+            <AlertTitle>Error Loading Character</AlertTitle>
+            <AlertDescription>{errorLoading}</AlertDescription>
+          </Alert>
+        </div>
+      )}
+      {characterData ? (
+        // Pass the loaded character data to the CharacterSheet component
+        // CharacterSheet is a Client Component and receives the data as props
+        <CharacterSheet initialCharacter={characterData} />
+      ) : (
+        !errorLoading && (
           <div className="p-4 md:p-6">
-             <Alert variant="destructive">
-               <AlertCircle className="h-4 w-4" />
-               <AlertTitle>Error Loading Character</AlertTitle>
-               <AlertDescription>{errorLoading}</AlertDescription>
-             </Alert>
+            <Alert>
+              <AlertCircle className="h-4 w-4" />
+              <AlertTitle>Character Not Found</AlertTitle>
+              <AlertDescription>The character with ID "{characterId}" could not be found.</AlertDescription>
+            </Alert>
           </div>
-        )}
-        {characterData ? (
-           // Pass the loaded character data to the CharacterSheet component
-           // CharacterSheet is a Client Component and receives the data as props
-           <CharacterSheet initialCharacter={characterData} />
-        ) : (
-           !errorLoading && (
-              <div className="p-4 md:p-6">
-                  <Alert>
-                    <AlertCircle className="h-4 w-4" />
-                    <AlertTitle>Character Not Found</AlertTitle>
-                    <AlertDescription>The character with ID "{characterId}" could not be found.</AlertDescription>
-                  </Alert>
-              </div>
-           )
-        )}
+        )
+      )}
+      </div>
     </AppLayout>
   );
 }

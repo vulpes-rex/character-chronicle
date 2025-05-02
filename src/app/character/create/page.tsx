@@ -1,4 +1,6 @@
 
+'use client';
+
 import { CharacterForm } from '@/components/character-form';
 import { AppLayout } from '@/components/app-layout';
 

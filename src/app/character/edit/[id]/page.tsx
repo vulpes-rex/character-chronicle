@@ -1,3 +1,4 @@
+'use client'
 
 import { useState, useEffect } from 'react';
 import { CharacterForm } from '@/components/character-form';
@@ -9,8 +10,6 @@ import { AlertCircle } from 'lucide-react';
 interface EditCharacterPageProps {
   params: { id: string };
 }
-
-'use client';
 
 export default  function EditCharacterPage({ params }: EditCharacterPageProps) {
   const characterId = params.id;
@@ -50,7 +49,7 @@ export default  function EditCharacterPage({ params }: EditCharacterPageProps) {
           </Alert>
         )}
         {initialCharacterData ? (
-          <CharacterForm initialData={initialCharacterData} /> {/* Pass mode='edit' and initial data */}
+          <CharacterForm initialData={initialCharacterData} /> /* Pass mode='edit' and initial data */
         ) : (
           !errorLoading && (
              <Alert>

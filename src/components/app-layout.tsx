@@ -1,4 +1,3 @@
-
 'use client';
 
 import type { ReactNode } from 'react';
@@ -29,8 +28,7 @@ import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar'; // For user d
 import { Skeleton } from './ui/skeleton'; // Import Skeleton component
 import { useQuery } from '@tanstack/react-query';
 import { loadCharacter } from '@/services/character-service';
-// Removed import for FloatingDiceRoller
-// import { FloatingDiceRoller } from './floating-dice-roller';
+import { FloatingDiceRoller } from './floating-dice-roller';
 
 export function AppLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
@@ -235,9 +233,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
       </Sidebar>
       <SidebarInset>
          {children}
-         {/* Removed FloatingDiceRoller */}
-         {/* <FloatingDiceRoller /> */}
+         <FloatingDiceRoller />
       </SidebarInset>
     </SidebarProvider>
   );
 }
+

@@ -1,3 +1,4 @@
+
 /**
  * Represents the core data structure for a D&D character.
  */
@@ -152,6 +153,8 @@ export interface BackgroundInfo {
    displayName?: string | null;
    role: UserRole; // 'player' or 'dm'
    // Add any other user-specific data needed
+   createdAt?: Date; // Added timestamp
+   updatedAt?: Date; // Added timestamp
  }
 
 
@@ -321,13 +324,13 @@ export const rollDice = (diceString: string): number => {
         let modifier = 0;
         let dicePart = diceString;
         if (diceString.includes('+')) {
-            [dicePart, modifier] = diceString.split('+').map(s => s.trim());
-            modifier = parseInt(modifier, 10) || 0;
+            const parts = diceString.split('+');
+            dicePart = parts[0].trim();
+            modifier = parseInt(parts.slice(1).join('+').trim(), 10) || 0; // Handle multiple '+' if necessary
         } else if (diceString.includes('-')) {
             const parts = diceString.split('-');
             dicePart = parts[0].trim();
-            // Join remaining parts in case of multiple hyphens (unlikely but possible)
-            modifier = -(parseInt(parts.slice(1).join('-').trim(), 10) || 0);
+            modifier = -(parseInt(parts.slice(1).join('-').trim(), 10) || 0); // Handle multiple '-' if necessary
         }
 
 
@@ -379,20 +382,24 @@ export const ALL_SKILLS = Object.keys(SKILL_ABILITY_MAP);
 // Function to calculate skill modifier
 export const calculateSkillModifier = (
     skillName: string,
-    stats: Character['stats'] | NPC['stats'] | Monster['stats'], // Accept different stat blocks
+    stats: Character['stats'] | NPC['stats'] | Monster['stats'] | undefined, // Allow undefined stats
     proficient: boolean,
     proficiencyBonus: number
 ): number => {
     const skillLower = skillName.toLowerCase();
     const ability = SKILL_ABILITY_MAP[skillLower];
-    if (!ability || !stats?.[ability]) {
-        console.warn(`Could not find ability score for skill: ${skillName}`);
+
+    // Handle case where stats or specific ability score might be undefined
+    if (!stats || !ability || typeof stats[ability] !== 'number') {
+        console.warn(`Could not find ability score for skill: ${skillName} or stats are missing.`);
         // Handle Monster skill overrides (e.g., { Perception: 5 })
-         if (typeof (stats as Monster['stats'])?.[skillLower as keyof Monster['stats']] === 'number') {
-             return (stats as Monster['stats'])[skillLower as keyof Monster['stats']] as number;
+        // Check if stats exist and if the skillLower exists as a direct property and is a number
+         if (stats && typeof (stats as any)[skillLower] === 'number') {
+             return (stats as any)[skillLower] as number;
          }
-        return 0;
+        return 0; // Return 0 if ability score cannot be determined
     }
+
     const abilityModifier = Math.floor((stats[ability]! - 10) / 2);
     const proficiencyValue = proficient ? proficiencyBonus : 0;
     return abilityModifier + proficiencyValue;

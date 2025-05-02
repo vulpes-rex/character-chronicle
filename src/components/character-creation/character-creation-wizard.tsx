@@ -15,7 +15,7 @@ import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { AlertCircle, Loader2 } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { getCombinedContentFromPacks } from '@/services/campaign-service'; // Import function to get combined content
-import { applyFeatureEffects } from '@/services/feature-service'; // Import feature application service
+import { applyFeatureRules } from '@/services/feature-service'; // Import feature application service // Renamed import
 
 // Import step components
 import { Step1BasicInfo } from './step-1-basic-info';
@@ -208,7 +208,7 @@ export function CharacterCreationWizard({ initialData, editMode = false }: Chara
              };
 
               // Apply feature effects to get final calculated values
-              const derivedCharacter = await applyFeatureEffects(baseCharacterForCalc);
+              const derivedCharacter = await applyFeatureRules(baseCharacterForCalc); // Renamed function call
 
 
              // Recalculate HP based on final CON and class levels
@@ -358,3 +358,4 @@ export function CharacterCreationWizard({ initialData, editMode = false }: Chara
         </div>
     );
 }
+

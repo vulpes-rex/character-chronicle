@@ -18,7 +18,7 @@ import {
 import type { Character, Feature, FeatureEffectMetadata, EquipmentItem } from '@/lib/types'; // Import new types
 import { logError, logMessage } from './logging-service'; // Import logging service
 // Removed import for applyFeatureRules as it's now handled client-side or in specific contexts
-// import { applyFeatureRules } from './feature-service';
+import { applyFeatureRules } from './feature-service'; // Import renamed applyFeatureRules
 
 const charactersCollection = collection(db, 'characters');
 
@@ -138,7 +138,14 @@ export async function loadCharacter(characterId: string): Promise<Character | nu
             features: Array.isArray(data.features) ? data.features : [],
         } as Character;
 
+        // Apply feature rules after loading to get derived stats for potential use
+        // Note: This returns a new object with derived calculations, it doesn't modify the stored data.
+        // const characterWithDerived = await applyFeatureRules(baseCharacter);
+        // return characterWithDerived;
+
+        // Return only base data for now, calculation happens client-side in CharacterSheet
         return baseCharacter;
+
 
     } else {
       console.log(`No character document found for ID: ${characterId}`);
@@ -221,3 +228,4 @@ export async function deleteCharacter(characterId: string): Promise<void> {
     throw new Error('Failed to delete character.');
   }
 }
+

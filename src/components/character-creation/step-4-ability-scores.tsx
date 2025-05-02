@@ -1,3 +1,4 @@
+
 'use client';
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
@@ -83,7 +84,7 @@ export function Step4AbilityScores({ data, updateData, setValidity, availableRac
     const selectedRace = availableRaces.find(r => r.name === data.race);
 
     // Use react-hook-form for Zod validation, but don't drive state from it directly
-    const { formState: { isValid: formIsValid }, trigger, watch, reset } = useForm<Step4FormData>({
+     const { formState: { isValid: formIsValid }, trigger, watch, reset } = useForm<Step4FormData>({
         resolver: zodResolver(z.object({ stats: statsSchema })), // Validate final scores schema
         mode: 'onChange',
          // Default values will be set by the main useEffect below
@@ -167,21 +168,31 @@ export function Step4AbilityScores({ data, updateData, setValidity, availableRac
         // Set validity based on assignment and Zod validation of the *final* scores
         setValidity(allScoresAssigned && formIsValid);
         // Trigger validation explicitly if base scores change
-        if (allScoresAssigned) {
-            trigger();
-        }
-
+         // Use a separate effect to trigger validation to avoid potential loops
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [
         assignedScores, // Depends on base scores
         racialBonuses,  // Depends on calculated racial bonuses
         updateData,
         setValidity,
         reset,
-        trigger,
+        // trigger, // Moved to separate effect
         allScoresAssigned,
-        formIsValid, // Depends on Zod validation result
+        // formIsValid, // Moved to separate effect
         data.stats // Compare against parent's current state
     ]);
+
+    // Separate effect to trigger validation after assignment changes
+    useEffect(() => {
+      if (allScoresAssigned) {
+        trigger();
+      }
+    }, [allScoresAssigned, trigger]);
+
+     // Separate effect to update parent validity based on RHF state
+     useEffect(() => {
+        setValidity(allScoresAssigned && formIsValid);
+     }, [formIsValid, allScoresAssigned, setValidity]);
 
 
     const rollStat = useCallback((): number => {
@@ -207,48 +218,49 @@ export function Step4AbilityScores({ data, updateData, setValidity, availableRac
      const handleAssignScore = (ability: keyof Step4FormData['stats'], scoreValueString: string | null) => {
          if (editMode) return; // Don't allow re-assignment in edit mode
 
-         const score = scoreValueString ? parseInt(scoreValueString, 10) : null;
+          if (scoreValueString === UNASSIGN_VALUE) {
+              // If unassigning, put the score back into rolledScores if it was there
+              const currentBaseScore = assignedScores[ability];
+              if (currentBaseScore !== null) {
+                  setRolledScores(prev => [...prev, currentBaseScore].sort((a, b) => b - a));
+              }
+              // Set base score back to null
+              setAssignedScores(prev => ({ ...prev, [ability]: null }));
+              // Clear related Tasha's bonus if unassigning
+               if (useTashasRules) {
+                   setTashasBonuses(prev => {
+                       const newState = { ...prev };
+                       if (newState.plusTwo === ability) newState.plusTwo = null;
+                       if (newState.plusOne === ability) newState.plusOne = null;
+                       return newState;
+                   });
+               }
 
-         if (scoreValueString === UNASSIGN_VALUE || score === null) {
-             // If unassigning, put the score back into rolledScores if it was there
-             const currentBaseScore = assignedScores[ability];
-             if (currentBaseScore !== null) {
-                 setRolledScores(prev => [...prev, currentBaseScore].sort((a, b) => b - a));
-             }
-             // Set base score back to null
-             setAssignedScores(prev => ({ ...prev, [ability]: null }));
-             // Clear related Tasha's bonus if unassigning
-              if (useTashasRules) {
-                  setTashasBonuses(prev => {
-                      const newState = { ...prev };
-                      if (newState.plusTwo === ability) newState.plusTwo = null;
-                      if (newState.plusOne === ability) newState.plusOne = null;
-                      return newState;
-                  });
+          } else {
+              // Assigning a new score
+              const score = scoreValueString ? parseInt(scoreValueString, 10) : null;
+              if (score === null) return; // Should not happen if UNASSIGN_VALUE is handled
+
+              // Remove the assigned score from available rolledScores
+              setRolledScores(prev => {
+                  const index = prev.indexOf(score);
+                  if (index > -1) {
+                      const nextScores = [...prev];
+                      nextScores.splice(index, 1);
+                      return nextScores;
+                  }
+                  return prev; // Should not happen if UI logic is correct
+              });
+
+              // Put the previously assigned score (if any) back into rolledScores
+              const currentBaseScore = assignedScores[ability];
+              if (currentBaseScore !== null) {
+                  setRolledScores(prev => [...prev, currentBaseScore].sort((a, b) => b - a));
               }
 
-         } else {
-             // Assigning a new score
-             // Remove the assigned score from available rolledScores
-             setRolledScores(prev => {
-                 const index = prev.indexOf(score);
-                 if (index > -1) {
-                     const nextScores = [...prev];
-                     nextScores.splice(index, 1);
-                     return nextScores;
-                 }
-                 return prev; // Should not happen if UI logic is correct
-             });
-
-             // Put the previously assigned score (if any) back into rolledScores
-             const currentBaseScore = assignedScores[ability];
-             if (currentBaseScore !== null) {
-                 setRolledScores(prev => [...prev, currentBaseScore].sort((a, b) => b - a));
-             }
-
-             // Update the assignment with the new BASE score
-             setAssignedScores(prev => ({ ...prev, [ability]: score }));
-         }
+              // Update the assignment with the new BASE score
+              setAssignedScores(prev => ({ ...prev, [ability]: score }));
+          }
      };
 
 
@@ -330,21 +342,24 @@ export function Step4AbilityScores({ data, updateData, setValidity, availableRac
                                       ) : (
                                          // Select dropdown for assignment in create mode
                                          <Select
-                                              value={assignedScores[ability]?.toString() ?? ""} // Use empty string for placeholder
-                                              onValueChange={(value) => handleAssignScore(ability, value)}
-                                              disabled={rolledScores.length === 0 && assignedScores[ability] === null} // Disable if no scores rolled and not already assigned
+                                               value={assignedScores[ability]?.toString() ?? ""} // Use empty string for placeholder if null
+                                               onValueChange={(value) => handleAssignScore(ability, value)}
+                                               disabled={rolledScores.length === 0 && assignedScores[ability] === null} // Disable if no scores rolled and not already assigned
                                          >
                                               <SelectTrigger id={`assign-${ability}`}>
-                                                  <SelectValue placeholder="Assign..." />
+                                                    {/* Use SelectValue to display the assigned score or placeholder */}
+                                                    <SelectValue placeholder="Assign..." />
                                               </SelectTrigger>
                                               <SelectContent>
                                                    {/* Option to unassign - use UNASSIGN_VALUE */}
                                                    {assignedScores[ability] !== null && (
+                                                       // Use a distinct, non-empty value for the 'unassign' option
                                                        <SelectItem value={UNASSIGN_VALUE}>Unassign ({assignedScores[ability]})</SelectItem>
                                                    )}
                                                    {/* Show available rolled scores */}
                                                    {rolledScores.map((score, index) => (
-                                                       <SelectItem key={`${score}-${index}`} value={String(score)}>
+                                                       // Ensure score is string and not empty
+                                                        <SelectItem key={`${score}-${index}`} value={String(score)}>
                                                            {score}
                                                        </SelectItem>
                                                    ))}
@@ -380,27 +395,29 @@ export function Step4AbilityScores({ data, updateData, setValidity, availableRac
                                      <div className='space-y-2'>
                                          <div>
                                              <Label htmlFor="tashas-plus-two" className="text-xs">Assign +2 Bonus</Label>
-                                             <Select value={tashasBonuses.plusTwo ?? ""} onValueChange={(val) => handleTashasBonusChange('plusTwo', val)}>
-                                                 <SelectTrigger id="tashas-plus-two">
-                                                     <SelectValue placeholder="Select Ability..." />
-                                                 </SelectTrigger>
-                                                 <SelectContent>
-                                                      <SelectItem value={UNASSIGN_VALUE}>None</SelectItem>
-                                                     {ABILITIES.map(ab => <SelectItem key={`p2-${ab}`} value={ab}>{ab.charAt(0).toUpperCase() + ab.slice(1)}</SelectItem>)}
-                                                 </SelectContent>
-                                             </Select>
-                                         </div>
-                                         <div>
-                                              <Label htmlFor="tashas-plus-one" className="text-xs">Assign +1 Bonus</Label>
-                                              <Select value={tashasBonuses.plusOne ?? ""} onValueChange={(val) => handleTashasBonusChange('plusOne', val)}>
-                                                  <SelectTrigger id="tashas-plus-one">
+                                              <Select value={tashasBonuses.plusTwo ?? ""} onValueChange={(val) => handleTashasBonusChange('plusTwo', val)}>
+                                                  <SelectTrigger id="tashas-plus-two">
                                                       <SelectValue placeholder="Select Ability..." />
                                                   </SelectTrigger>
                                                   <SelectContent>
-                                                       <SelectItem value={UNASSIGN_VALUE}>None</SelectItem>
-                                                      {ABILITIES.map(ab => <SelectItem key={`p1-${ab}`} value={ab}>{ab.charAt(0).toUpperCase() + ab.slice(1)}</SelectItem>)}
+                                                      {/* Use UNASSIGN_VALUE for the 'None' option */}
+                                                      <SelectItem value={UNASSIGN_VALUE}>None</SelectItem>
+                                                      {ABILITIES.map(ab => <SelectItem key={`p2-${ab}`} value={ab}>{ab.charAt(0).toUpperCase() + ab.slice(1)}</SelectItem>)}
                                                   </SelectContent>
                                               </Select>
+                                         </div>
+                                         <div>
+                                              <Label htmlFor="tashas-plus-one" className="text-xs">Assign +1 Bonus</Label>
+                                               <Select value={tashasBonuses.plusOne ?? ""} onValueChange={(val) => handleTashasBonusChange('plusOne', val)}>
+                                                   <SelectTrigger id="tashas-plus-one">
+                                                       <SelectValue placeholder="Select Ability..." />
+                                                   </SelectTrigger>
+                                                   <SelectContent>
+                                                        {/* Use UNASSIGN_VALUE for the 'None' option */}
+                                                       <SelectItem value={UNASSIGN_VALUE}>None</SelectItem>
+                                                       {ABILITIES.map(ab => <SelectItem key={`p1-${ab}`} value={ab}>{ab.charAt(0).toUpperCase() + ab.slice(1)}</SelectItem>)}
+                                                   </SelectContent>
+                                               </Select>
                                           </div>
                                      </div>
                                  ) : (
@@ -459,3 +476,4 @@ export function Step4AbilityScores({ data, updateData, setValidity, availableRac
         </div>
     );
 }
+

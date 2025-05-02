@@ -83,13 +83,13 @@ export function CharacterCreationWizard() {
     // Memoize setValidity using useCallback
     const setValidity = useCallback((valid: boolean) => {
         _setIsValid(valid);
-    }, []); // _setIsValid is stable
+    }, [_setIsValid]); // Dependency on the state setter function
 
 
     const handleNext = () => {
         if (isValid) {
             setCurrentStep(prev => Math.min(prev + 1, TOTAL_STEPS));
-            setIsValid(false); // Reset validity for the next step
+            _setIsValid(false); // Reset validity for the next step using the state setter
         } else {
             toast({ variant: 'destructive', title: 'Incomplete Step', description: 'Please complete the required fields.' });
         }
@@ -97,7 +97,7 @@ export function CharacterCreationWizard() {
 
     const handlePrevious = () => {
         setCurrentStep(prev => Math.max(prev - 1, 1));
-        setIsValid(true); // Assume previous step was valid
+        _setIsValid(true); // Assume previous step was valid, use state setter
     };
 
     const calculateProficiencyBonus = (level: number): number => {
@@ -279,3 +279,5 @@ export function CharacterCreationWizard() {
         </div>
     );
 }
+
+    

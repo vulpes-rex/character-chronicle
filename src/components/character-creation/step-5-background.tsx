@@ -13,10 +13,11 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Skeleton } from '@/components/ui/skeleton';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { useQuery } from '@tanstack/react-query';
-import { Dices } from 'lucide-react';
+import { Dices, CheckSquare, Square } from 'lucide-react'; // Added Checkbox icons
 import type { PartialCharacterFormData } from './character-creation-wizard';
-import { ALL_SKILLS, type SourcePack, type BackgroundInfo } from '@/lib/types';
-import { getBackgroundDetails, getAvailableBackgrounds } from '@/services/dnd-api'; // Updated import
+import { ALL_SKILLS, type SourcePack, type BackgroundInfo, Feature } from '@/lib/types';
+import { getAvailableBackgrounds, getBackgroundDetails } from '@/services/dnd-api'; // Keep for names and details
+import { getBackgroundFeatures } from '@/services/feature-service'; // Use feature service
 
 // Simplified Zod schema for validation within this step
 const step5Schema = z.object({
@@ -25,6 +26,7 @@ const step5Schema = z.object({
     ideal: z.string().optional(),
     bond: z.string().optional(),
     flaw: z.string().optional(),
+    // Add fields for chosen skills/tools/languages if background offers choices
 });
 
 type Step5FormData = z.infer<typeof step5Schema>;
@@ -59,17 +61,25 @@ export function Step5Background({ data, updateData, setValidity, combinedContent
         staleTime: Infinity, // Background names are fairly static
     });
 
-    // Fetch background details for the selected background
+    // Fetch background details for the selected background (for suggestions, etc.)
     const { data: currentBgData, isLoading: isLoadingBgDetails } = useQuery<BackgroundInfo | null, Error>({
-        queryKey: ['backgroundDetails', selectedBgName, combinedContent], // Still include combinedContent in case API uses it
+        queryKey: ['backgroundDetails', selectedBgName], // Key based on name
         queryFn: () => selectedBgName ? getBackgroundDetails(selectedBgName, combinedContent) : Promise.resolve(null),
         enabled: !!selectedBgName, // Fetch when a background is selected
         staleTime: 5 * 60 * 1000, // Cache details for 5 mins
     });
 
+     // Fetch background *features* using the feature service
+     const { data: backgroundFeatures, isLoading: isLoadingBgFeatures } = useQuery<Feature[], Error>({
+        queryKey: ['backgroundFeatures', selectedBgName, combinedContent],
+        queryFn: () => selectedBgName && combinedContent ? getBackgroundFeatures(selectedBgName, combinedContent) : Promise.resolve([]),
+        enabled: !!selectedBgName && !!combinedContent,
+        staleTime: 5 * 60 * 1000,
+    });
+
 
     useEffect(() => {
-        const isLoading = isLoadingNames || isLoadingBgDetails;
+        const isLoading = isLoadingNames || isLoadingBgDetails || isLoadingBgFeatures;
         // Update Validity
         setValidity(!!selectedBgName && formIsValid && !isLoading); // Also check loading states
 
@@ -81,48 +91,31 @@ export function Step5Background({ data, updateData, setValidity, combinedContent
             `Flaw: ${watchedPersonality[3] || 'None'}`
         ].join('\n---\n');
 
-        // Start with existing skills/proficiencies and remove old background ones
-        // Note: This logic might need refinement if multiple sources grant the same proficiency.
-        // For now, we simply remove old background ones and add new ones.
-        const baseSkills = { ...(data.skills || {}) };
-        const baseProficiencies = {
-            armor: [...(data.tempProficiencies?.armor ?? [])],
-            weapons: [...(data.tempProficiencies?.weapons ?? [])],
-            tools: [...(data.tempProficiencies?.tools?.filter(p => !p.endsWith('(Background)')) ?? [])], // Remove old background tools
-            savingThrows: [...(data.tempProficiencies?.savingThrows ?? [])],
-        };
+        // Start with existing skills (might have selections from class/race)
+        const newSkills = { ...(data.skills || {}) };
 
-         // Remove skills potentially granted by the *previous* background
-         // This is tricky without knowing the *exact* previous background's skills.
-         // We assume background skills were marked or clear the slate if selection changed.
-         // A safer approach: filter out *all* potential background skills before adding new ones.
-         // For simplicity here, we assume the final save calculation will handle duplicates.
-         const newSkills = { ...baseSkills };
-         const newProficiencies = { ...baseProficiencies };
-
-
-        if (currentBgData) {
-             // Add skill proficiencies from the current background
-            (currentBgData.skillProficiencies || []).forEach(skill => {
-                 const skillLower = skill.toLowerCase();
-                 if (ALL_SKILLS.includes(skillLower)) {
-                     newSkills[skillLower] = true;
-                 } else {
-                     console.warn(`Background skill "${skill}" not found in standard skills list.`);
+        // Apply skill proficiencies granted by the fetched background features
+         if (backgroundFeatures) {
+             backgroundFeatures.forEach(feature => {
+                 if (feature.metadata?.effectType === 'proficiencyGrant' && feature.metadata.type === 'skill') {
+                     // TODO: Handle choices if metadata.choose is present
+                     feature.metadata.proficiencies.forEach(skill => {
+                         const skillLower = skill.toLowerCase();
+                         if (ALL_SKILLS.includes(skillLower)) {
+                             newSkills[skillLower] = true;
+                         } else {
+                             console.warn(`Background feature "${feature.name}" grants unknown skill: "${skill}"`);
+                         }
+                     });
                  }
              });
-             // Add tool proficiencies
-             if (currentBgData.toolProficiencies) {
-                newProficiencies.tools = [...new Set([...newProficiencies.tools, ...currentBgData.toolProficiencies.map(p => `${p} (Background)`)])];
-             }
-             // TODO: Handle language choices if applicable
         }
 
         const updatePayload: Partial<PartialCharacterFormData> = {
             background: selectedBgName || '',
             backstory: backstoryString,
-            skills: newSkills,
-            tempProficiencies: newProficiencies,
+            skills: newSkills, // Update the skills object
+            // Proficiencies (tools, languages) are handled by feature metadata in final calculation
             // Persist chosen languages/skill choices from background here if implemented
         };
 
@@ -130,9 +123,8 @@ export function Step5Background({ data, updateData, setValidity, combinedContent
         const backgroundChanged = updatePayload.background !== data.background;
         const backstoryChanged = updatePayload.backstory !== data.backstory;
         const skillsChanged = JSON.stringify(updatePayload.skills) !== JSON.stringify(data.skills);
-        const proficienciesChanged = JSON.stringify(updatePayload.tempProficiencies) !== JSON.stringify(data.tempProficiencies);
 
-        if (backgroundChanged || backstoryChanged || skillsChanged || proficienciesChanged) {
+        if (backgroundChanged || backstoryChanged || skillsChanged) {
             console.log("Step 5: Updating parent data");
             updateData(updatePayload);
         }
@@ -142,14 +134,14 @@ export function Step5Background({ data, updateData, setValidity, combinedContent
         formIsValid,
         isLoadingNames,
         isLoadingBgDetails,
+        isLoadingBgFeatures,
         watchedPersonality,
-        currentBgData,
+        backgroundFeatures, // Depend on fetched features
         setValidity,
         updateData,
         data.background,
         data.backstory,
         data.skills,
-        data.tempProficiencies
     ]);
 
 
@@ -160,7 +152,13 @@ export function Step5Background({ data, updateData, setValidity, combinedContent
         }
     };
 
-    const isLoading = isLoadingNames || isLoadingBgDetails;
+    const isLoading = isLoadingNames || isLoadingBgDetails || isLoadingBgFeatures;
+
+    // Extract granted skills/tools/languages from features for display
+    const grantedSkills = useMemo(() => backgroundFeatures?.filter(f => f.metadata?.effectType === 'proficiencyGrant' && f.metadata.type === 'skill').flatMap(f => f.metadata.proficiencies) ?? [], [backgroundFeatures]);
+    const grantedTools = useMemo(() => backgroundFeatures?.filter(f => f.metadata?.effectType === 'proficiencyGrant' && f.metadata.type === 'tool').flatMap(f => f.metadata.proficiencies) ?? [], [backgroundFeatures]);
+    const mainFeature = useMemo(() => backgroundFeatures?.find(f => f.source.includes('Background') && f.metadata?.effectType !== 'proficiencyGrant'), [backgroundFeatures]); // Simple check for the core feature
+    // Language choices would need specific metadata handling
 
     return (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -176,10 +174,8 @@ export function Step5Background({ data, updateData, setValidity, combinedContent
                            control={control}
                            render={({ field }) => (
                                 <Select
-                                    // Use || "" to handle potential undefined/null from field.value but avoid passing it directly
                                     value={field.value || ""}
                                     onValueChange={(value) => field.onChange(value)}
-                                    // Disable while loading names
                                     disabled={isLoadingNames}
                                 >
                                     <SelectTrigger id="background-select" className={isLoadingNames ? 'animate-pulse' : ''}>
@@ -198,19 +194,26 @@ export function Step5Background({ data, updateData, setValidity, combinedContent
                        />
                         {errors.background && <p className="text-xs text-destructive mt-1">{errors.background.message}</p>}
 
-                        {isLoadingBgDetails && selectedBgName && <Skeleton className="h-20 w-full mt-4" />}
-                        {!isLoadingBgDetails && currentBgData && (
+                        {(isLoadingBgDetails || isLoadingBgFeatures) && selectedBgName && <Skeleton className="h-20 w-full mt-4" />}
+                        {!isLoading && currentBgData && backgroundFeatures && (
                              <div className="mt-4 space-y-2 text-sm text-muted-foreground">
                                 <p className="font-medium text-foreground">{currentBgData.name}</p>
                                 <p>{currentBgData.description}</p>
-                                {currentBgData.skillProficiencies?.length > 0 && <p><strong>Skills:</strong> {currentBgData.skillProficiencies.join(', ')}</p>}
-                                {currentBgData.toolProficiencies?.length > 0 && <p><strong>Tools:</strong> {currentBgData.toolProficiencies.join(', ')}</p>}
-                                {currentBgData.languages && <p><strong>Languages:</strong> Choose {currentBgData.languages.choose}</p>}
-                                {currentBgData.feature && <p><strong>Feature:</strong> {currentBgData.feature.name}</p>}
+                                {grantedSkills.length > 0 && <p><strong>Skills:</strong> {grantedSkills.join(', ')}</p>}
+                                {grantedTools.length > 0 && <p><strong>Tools:</strong> {grantedTools.join(', ')}</p>}
+                                {/* Display language choices if logic is added */}
+                                {mainFeature && <p><strong>Feature:</strong> {mainFeature.name}</p>}
                              </div>
                         )}
+                         {!isLoading && selectedBgName && !currentBgData && (
+                             <Alert variant='destructive' className='mt-4 text-xs'>
+                                Background details not found.
+                             </Alert>
+                         )}
                     </CardContent>
                 </Card>
+                {/* Skill Selection Card (if background offers choices) */}
+                {/* TODO: Implement based on backgroundData.skillProficiencies.choose */}
             </div>
 
             {/* Personality Traits */}
@@ -224,7 +227,7 @@ export function Step5Background({ data, updateData, setValidity, combinedContent
                          <div className="space-y-1">
                              <Label htmlFor="personalityTrait" className="flex justify-between items-center">
                                  <span>Personality Trait</span>
-                                  <Button type="button" variant="ghost" size="xs" onClick={() => randomizeField('personalityTrait', currentBgData?.suggestedTraits)} disabled={!selectedBgName || isLoadingBgDetails || !currentBgData?.suggestedTraits}>
+                                  <Button type="button" variant="ghost" size="xs" onClick={() => randomizeField('personalityTrait', currentBgData?.suggestedTraits)} disabled={!selectedBgName || isLoading || !currentBgData?.suggestedTraits}>
                                       <Dices className="h-3 w-3 mr-1" /> Randomize
                                   </Button>
                              </Label>
@@ -233,7 +236,7 @@ export function Step5Background({ data, updateData, setValidity, combinedContent
                           <div className="space-y-1">
                               <Label htmlFor="ideal" className="flex justify-between items-center">
                                   <span>Ideal</span>
-                                   <Button type="button" variant="ghost" size="xs" onClick={() => randomizeField('ideal', currentBgData?.suggestedIdeals)} disabled={!selectedBgName || isLoadingBgDetails || !currentBgData?.suggestedIdeals}>
+                                   <Button type="button" variant="ghost" size="xs" onClick={() => randomizeField('ideal', currentBgData?.suggestedIdeals)} disabled={!selectedBgName || isLoading || !currentBgData?.suggestedIdeals}>
                                        <Dices className="h-3 w-3 mr-1" /> Randomize
                                    </Button>
                               </Label>
@@ -242,7 +245,7 @@ export function Step5Background({ data, updateData, setValidity, combinedContent
                            <div className="space-y-1">
                                <Label htmlFor="bond" className="flex justify-between items-center">
                                    <span>Bond</span>
-                                    <Button type="button" variant="ghost" size="xs" onClick={() => randomizeField('bond', currentBgData?.suggestedBonds)} disabled={!selectedBgName || isLoadingBgDetails || !currentBgData?.suggestedBonds}>
+                                    <Button type="button" variant="ghost" size="xs" onClick={() => randomizeField('bond', currentBgData?.suggestedBonds)} disabled={!selectedBgName || isLoading || !currentBgData?.suggestedBonds}>
                                         <Dices className="h-3 w-3 mr-1" /> Randomize
                                     </Button>
                                </Label>
@@ -251,7 +254,7 @@ export function Step5Background({ data, updateData, setValidity, combinedContent
                             <div className="space-y-1">
                                 <Label htmlFor="flaw" className="flex justify-between items-center">
                                     <span>Flaw</span>
-                                     <Button type="button" variant="ghost" size="xs" onClick={() => randomizeField('flaw', currentBgData?.suggestedFlaws)} disabled={!selectedBgName || isLoadingBgDetails || !currentBgData?.suggestedFlaws}>
+                                     <Button type="button" variant="ghost" size="xs" onClick={() => randomizeField('flaw', currentBgData?.suggestedFlaws)} disabled={!selectedBgName || isLoading || !currentBgData?.suggestedFlaws}>
                                          <Dices className="h-3 w-3 mr-1" /> Randomize
                                      </Button>
                                 </Label>
@@ -263,3 +266,5 @@ export function Step5Background({ data, updateData, setValidity, combinedContent
         </div>
     );
 }
+
+    

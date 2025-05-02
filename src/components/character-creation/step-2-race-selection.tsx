@@ -10,7 +10,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 import type { PartialCharacterFormData } from './character-creation-wizard';
 import type { CharacterRace, Feature, SourcePack } from '@/lib/types';
-import { getRaceTraitsDetails } from '@/services/dnd-api';
+import { getRaceFeatures } from '@/services/feature-service'; // Use feature service
 import { useQuery } from '@tanstack/react-query';
 
 
@@ -26,11 +26,11 @@ export function Step2RaceSelection({ data, updateData, setValidity, availableRac
     const [selectedRaceName, setSelectedRaceName] = useState<string | null>(data.race || null);
     const selectedRace = availableRaces.find(r => r.name === selectedRaceName);
 
-    // Fetch trait details using the race's trait keys and the combinedContent
+    // Fetch trait details using the race name and combinedContent via feature service
     const { data: traitDetails, isLoading: isLoadingTraits } = useQuery<Feature[], Error>({
-        queryKey: ['raceTraits', selectedRace?.name, combinedContent], // Include combinedContent in key
-        queryFn: () => selectedRace?.traits ? getRaceTraitsDetails(selectedRace.traits, combinedContent) : Promise.resolve([]),
-        enabled: !!selectedRace && !!combinedContent, // Enable only when race and content are available
+        queryKey: ['raceFeatures', selectedRace?.name, combinedContent], // Include combinedContent in key
+        queryFn: () => selectedRaceName && combinedContent ? getRaceFeatures(selectedRaceName, combinedContent) : Promise.resolve([]), // Use getRaceFeatures
+        enabled: !!selectedRaceName && !!combinedContent, // Enable only when race and content are available
         staleTime: Infinity, // Trait details are static for a given content set
     });
 
@@ -40,73 +40,22 @@ export function Step2RaceSelection({ data, updateData, setValidity, availableRac
         // Validity depends only on selection
         setValidity(!!selectedRaceName);
 
-        // Calculate the update data inside the effect based on current state
-        const baseFeatures = data.tempFeatures?.filter(f => f.source !== 'Race') ?? [];
-        const baseProficiencies = {
-            armor: data.tempProficiencies?.armor?.filter(p => !p.endsWith('(Race)')) ?? [],
-            weapons: data.tempProficiencies?.weapons?.filter(p => !p.endsWith('(Race)')) ?? [],
-            tools: data.tempProficiencies?.tools?.filter(p => !p.endsWith('(Race)')) ?? [],
-            savingThrows: data.tempProficiencies?.savingThrows ?? [],
-        };
-
-        let finalFeatures = [...baseFeatures];
-        let finalProficiencies = { ...baseProficiencies };
-
-        if (selectedRaceName && traitDetails) {
-             // Traits are now full Feature objects, directly add them with source marking
-             finalFeatures = [...baseFeatures, ...traitDetails.map(t => ({ ...t, source: 'Race' }))];
-
-            // Extract proficiencies granted by race traits with metadata
-             traitDetails.forEach(trait => {
-                if (trait.metadata?.effectType === 'proficiencyGrant') {
-                    const marker = '(Race)';
-                     switch (trait.metadata.type) {
-                         case 'armor':
-                             finalProficiencies.armor.push(...trait.metadata.proficiencies.map(p => `${p} ${marker}`));
-                             break;
-                         case 'weapon':
-                             finalProficiencies.weapons.push(...trait.metadata.proficiencies.map(p => `${p} ${marker}`));
-                             break;
-                         case 'tool':
-                             finalProficiencies.tools.push(...trait.metadata.proficiencies.map(p => `${p} ${marker}`));
-                             break;
-                         // Note: Race traits typically don't grant saving throw or skill proficiencies directly,
-                         // those usually come from class/background. Handle if needed.
-                     }
-                }
-            });
-             // Ensure uniqueness
-            finalProficiencies.armor = [...new Set(finalProficiencies.armor)];
-            finalProficiencies.weapons = [...new Set(finalProficiencies.weapons)];
-            finalProficiencies.tools = [...new Set(finalProficiencies.tools)];
+        // Only update parent if a race is selected
+        if (selectedRaceName) {
+            const updatePayload: Partial<PartialCharacterFormData> = {
+                race: selectedRaceName,
+                // Clear or update skills/proficiencies based on the race might happen here,
+                // but currently handled in wizard's final submit or dedicated step.
+                // For now, just update the selected race.
+            };
+            if (updatePayload.race !== data.race) {
+                console.log("Step 2: Updating parent data with selected race");
+                updateData(updatePayload);
+            }
         }
 
-        // Create the update object
-        const updatePayload: Partial<PartialCharacterFormData> = {
-            race: selectedRaceName || '',
-            tempFeatures: finalFeatures,
-            tempProficiencies: finalProficiencies,
-        };
 
-        // Compare relevant parts before updating
-        const raceChanged = updatePayload.race !== data.race;
-        const featuresChanged = JSON.stringify(updatePayload.tempFeatures) !== JSON.stringify(data.tempFeatures);
-        const proficienciesChanged = JSON.stringify(updatePayload.tempProficiencies) !== JSON.stringify(data.tempProficiencies);
-
-        if (raceChanged || featuresChanged || proficienciesChanged) {
-             console.log("Step 2: Updating parent data");
-            updateData(updatePayload);
-        }
-
-    }, [
-        selectedRaceName,
-        traitDetails,
-        setValidity,
-        updateData,
-        data.race,
-        data.tempFeatures,
-        data.tempProficiencies
-    ]);
+    }, [selectedRaceName, setValidity, updateData, data.race]);
 
 
     return (
@@ -162,7 +111,7 @@ export function Step2RaceSelection({ data, updateData, setValidity, availableRac
                          <ScrollArea className="h-[400px]">
                              <Accordion type="multiple" className="w-full">
                                 {traitDetails.map((trait, index) => (
-                                     <AccordionItem value={`trait-${index}`} key={trait.name}>
+                                     <AccordionItem value={`trait-${index}-${trait.name}`} key={`${index}-${trait.name}`}>
                                          <AccordionTrigger className="text-sm">{trait.name}</AccordionTrigger>
                                          <AccordionContent className="text-xs text-muted-foreground">
                                              {trait.description}
@@ -173,11 +122,13 @@ export function Step2RaceSelection({ data, updateData, setValidity, availableRac
                          </ScrollArea>
                     )}
                      {selectedRace && !isLoadingTraits && (!traitDetails || traitDetails.length === 0) && (
-                        <p className='text-sm text-muted-foreground italic'>No detailed traits available.</p>
+                        <p className='text-sm text-muted-foreground italic'>No detailed traits available for this race.</p>
                      )}
+                     {!selectedRace && <p className="text-sm text-muted-foreground italic">Select a race to view its traits.</p>}
                 </CardContent>
             </Card>
         </div>
     );
 }
 
+    

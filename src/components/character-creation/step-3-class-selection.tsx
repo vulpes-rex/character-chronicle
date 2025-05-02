@@ -14,7 +14,7 @@ import { AlertCircle, PlusCircle, Trash2 } from 'lucide-react';
 import { useQueries } from '@tanstack/react-query'; // Use useQueries for multiple feature fetches
 import type { PartialCharacterFormData } from './character-creation-wizard';
 import type { CharacterClass, Feature, SourcePack } from '@/lib/types';
-import { getCumulativeClassFeatures } from '@/services/dnd-api'; // Keep using this
+import { getClassFeatures } from '@/services/feature-service'; // Use feature service
 
 
 interface Step3Props {
@@ -37,7 +37,8 @@ export function Step3ClassSelection({ data, updateData, setValidity, availableCl
         .filter(([_, level]) => level > 0)
         .map(([className, level]) => ({
             queryKey: ['classFeatures', className, level, combinedContent], // Include combinedContent in key
-            queryFn: () => getCumulativeClassFeatures(className, level, combinedContent), // Pass combinedContent
+            // Fetch features ONLY from source packs using the feature service
+            queryFn: () => getClassFeatures(className, level, combinedContent!),
             enabled: level > 0 && !!combinedContent, // Enable only when content is ready
             staleTime: Infinity, // Features are generally static for a given content set
         })), [selectedClasses, combinedContent]); // Depend on selectedClasses and combinedContent
@@ -66,56 +67,20 @@ export function Step3ClassSelection({ data, updateData, setValidity, availableCl
         // Update Validity
         setValidity(totalLevel > 0 && totalLevel <= 20 && !isLoadingFeatures && !featureError);
 
-        // Calculate Derived Update Data inside the effect
-        const allFeatures: Feature[] = [...(data.tempFeatures?.filter(f => f.source !== 'Class') ?? [])];
-        const baseProficiencies = {
-            armor: [...(data.tempProficiencies?.armor?.filter(p => !p.endsWith('(Class)')) ?? [])],
-            weapons: [...(data.tempProficiencies?.weapons?.filter(p => !p.endsWith('(Class)')) ?? [])],
-            tools: [...(data.tempProficiencies?.tools?.filter(p => !p.endsWith('(Class)')) ?? [])],
-            savingThrows: [],
-        };
-
-        let isFirstClass = true;
-        Object.entries(selectedClasses).forEach(([className, level]) => {
-            // Use availableClasses which should now be sourced from combinedContent by the parent
-            const classData = availableClasses.find(c => c.name === className);
-            const features = allClassFeatures[className];
-
-            if (!classData || level <= 0) return;
-
-            // Add fetched features
-            if (features) {
-                allFeatures.push(...features.map(f => ({ ...f, source: 'Class' })));
-            }
-
-            // Add class proficiencies
-             if (classData.proficiencies) {
-                 baseProficiencies.armor = [...new Set([...baseProficiencies.armor, ...classData.proficiencies.armor.map(p => `${p} (Class)`)])];
-                 baseProficiencies.weapons = [...new Set([...baseProficiencies.weapons, ...classData.proficiencies.weapons.map(p => `${p} (Class)`)])];
-                 baseProficiencies.tools = [...new Set([...baseProficiencies.tools, ...(classData.proficiencies.tools ?? []).map(p => `${p} (Class)`)])];
-
-                 if (isFirstClass) {
-                     baseProficiencies.savingThrows = [...new Set([...classData.proficiencies.savingThrows])];
-                     isFirstClass = false;
-                 }
-            }
-        });
-
+        // Create update payload with current class selections
         const updatePayload: Partial<PartialCharacterFormData> = {
-            class: Object.keys(selectedClasses)[0] || '',
+            class: Object.keys(selectedClasses)[0] || '', // Primary class for reference
             level: totalLevel || 1,
             selectedClasses: selectedClasses,
-            tempFeatures: allFeatures,
-            tempProficiencies: baseProficiencies,
+             // Skills/Proficiencies derived from class/background are handled later or in final step
         };
 
         // Compare specific parts before updating
         const selectedClassesChanged = JSON.stringify(updatePayload.selectedClasses) !== JSON.stringify(data.selectedClasses);
-        const featuresChanged = JSON.stringify(updatePayload.tempFeatures) !== JSON.stringify(data.tempFeatures);
-        const proficienciesChanged = JSON.stringify(updatePayload.tempProficiencies) !== JSON.stringify(data.tempProficiencies);
+        const levelChanged = updatePayload.level !== data.level;
 
-        if (selectedClassesChanged || featuresChanged || proficienciesChanged) {
-             console.log("Step 3: Updating parent data");
+        if (selectedClassesChanged || levelChanged) {
+             console.log("Step 3: Updating parent data with class/level selections");
             updateData(updatePayload);
         }
 
@@ -126,11 +91,8 @@ export function Step3ClassSelection({ data, updateData, setValidity, availableCl
         featureError,
         setValidity,
         updateData,
-        availableClasses, // Depends on this prop which comes from parent's query
-        allClassFeatures,
         data.selectedClasses,
-        data.tempFeatures,
-        data.tempProficiencies
+        data.level // Include level in dependency to update parent if totalLevel changes
     ]);
 
 
@@ -174,6 +136,7 @@ export function Step3ClassSelection({ data, updateData, setValidity, availableCl
     };
 
 
+     // Derive proficiencies just for display in this step
     const derivedProficienciesForDisplay = useMemo(() => {
         const profs: { armor: string[]; weapons: string[]; tools: string[]; savingThrows: string[] } = { armor: [], weapons: [], tools: [], savingThrows: [] };
         let isFirst = true;
@@ -288,7 +251,8 @@ export function Step3ClassSelection({ data, updateData, setValidity, availableCl
                 </Card>
                  <Card>
                     <CardHeader className='pb-2'>
-                        <CardTitle className='text-base'>Proficiencies Gained</CardTitle>
+                        <CardTitle className='text-base'>Starting Proficiencies</CardTitle>
+                        <CardDescription className='text-xs'>(Based on first class)</CardDescription>
                     </CardHeader>
                      <CardContent className='text-xs space-y-1'>
                          <p><strong>Saving Throws:</strong> {derivedProficienciesForDisplay.savingThrows?.join(', ') || 'None'}</p>
@@ -325,7 +289,7 @@ export function Step3ClassSelection({ data, updateData, setValidity, availableCl
                                                 ) : (
                                                      <Accordion type="multiple" className="w-full">
                                                          {features.map((feature, index) => (
-                                                            <AccordionItem value={`${className}-feature-${index}`} key={feature.name} className="border-b-0 pl-4">
+                                                            <AccordionItem value={`${className}-feature-${index}-${feature.name}`} key={`${index}-${feature.name}`} className="border-b-0 pl-4">
                                                                 <AccordionTrigger className="text-sm py-2">{feature.name}</AccordionTrigger>
                                                                 <AccordionContent className="text-xs text-muted-foreground pb-2">
                                                                     {feature.description}
@@ -351,3 +315,5 @@ export function Step3ClassSelection({ data, updateData, setValidity, availableCl
         </div>
     );
 }
+
+    

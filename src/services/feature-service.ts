@@ -6,115 +6,16 @@ import { logError, logMessage } from './logging-service';
 
 // --- Rule-Based System for Applying Feature Effects ---
 
-type CharacterStateModifier = (character: Character, metadata: FeatureEffectMetadata) => Partial<Character>;
+// Type for functions that calculate a specific derived property
+type CharacterDerivedPropertyCalculator = (character: Character, baseValue: any) => any;
 
 interface FeatureRule {
     effectType: FeatureEffectMetadata['effectType'];
-    apply: CharacterStateModifier;
-    // Optional: Add priority for ordering complex interactions later if needed
-    // priority?: number;
+    // Instead of modifying the character directly, rules provide calculation logic
+    // or modify specific derived properties. For stats, we'll calculate bonuses separately.
+    // For proficiencies, we'll accumulate them.
+    // For AC/Advantage/Resistance, they are informational for later calculations.
 }
-
-// Rule implementations
-const statBonusRule: FeatureRule = {
-    effectType: 'statBonus',
-    apply: (character, metadata) => {
-        if (metadata.effectType !== 'statBonus') return {};
-        const updatedStats = { ...character.stats };
-        Object.entries(metadata.stats).forEach(([stat, bonus]) => {
-            if (updatedStats[stat as keyof typeof updatedStats]) {
-                updatedStats[stat as keyof typeof updatedStats] += bonus;
-            }
-        });
-        return { stats: updatedStats };
-    }
-};
-
-const proficiencyGrantRule: FeatureRule = {
-    effectType: 'proficiencyGrant',
-    apply: (character, metadata) => {
-        if (metadata.effectType !== 'proficiencyGrant') return {};
-        const updatedProficiencies = {
-            armor: [...(character.proficiencies?.armor || [])],
-            weapons: [...(character.proficiencies?.weapons || [])],
-            tools: [...(character.proficiencies?.tools || [])],
-            savingThrows: [...(character.proficiencies?.savingThrows || [])],
-        };
-        const updatedSkills = { ...(character.skills || {}) };
-
-        switch (metadata.type) {
-            case 'armor':
-                updatedProficiencies.armor.push(...metadata.proficiencies);
-                break;
-            case 'weapon':
-                updatedProficiencies.weapons.push(...metadata.proficiencies);
-                break;
-            case 'tool':
-                updatedProficiencies.tools.push(...metadata.proficiencies);
-                break;
-            case 'savingThrow':
-                updatedProficiencies.savingThrows.push(...metadata.proficiencies);
-                break;
-            case 'skill':
-                 // TODO: Handle choices if metadata.choose is present
-                metadata.proficiencies.forEach(skill => {
-                    updatedSkills[skill.toLowerCase()] = true;
-                });
-                break;
-        }
-        // Ensure uniqueness within the returned update
-        return {
-             proficiencies: {
-                 armor: [...new Set(updatedProficiencies.armor)],
-                 weapons: [...new Set(updatedProficiencies.weapons)],
-                 tools: [...new Set(updatedProficiencies.tools)],
-                 savingThrows: [...new Set(updatedProficiencies.savingThrows)],
-             },
-             skills: updatedSkills
-        };
-    }
-};
-
-// Note: ACBonus, Advantage, Resistance rules currently don't modify the base character state directly.
-// They are informational for calculation elsewhere (like AC calculation or roll checks).
-// We can add them here if we decide to store derived states like "hasAdvantageAgainstCharm".
-const acBonusRule: FeatureRule = {
-    effectType: 'acBonus',
-    apply: (character, metadata) => {
-        // Placeholder: AC is calculated later based on features, equipment, etc.
-        // This rule could potentially add a temporary flag or modify a derived acBonus field if we had one.
-        // console.log(`Informational: AC bonus feature found: +${metadata.value} (${metadata.condition})`);
-        return {};
-    }
-};
-
-const advantageGrantRule: FeatureRule = {
-    effectType: 'advantage',
-    apply: (character, metadata) => {
-        // Placeholder: Informational for UI/combat tracker.
-        // console.log(`Informational: Advantage feature found on ${metadata.target} (${metadata.condition})`);
-        return {};
-    }
-};
-
-const resistanceGrantRule: FeatureRule = {
-    effectType: 'resistance',
-    apply: (character, metadata) => {
-        // Placeholder: Informational for UI/combat tracker.
-        // console.log(`Informational: Resistance feature found to ${metadata.damageType}`);
-        return {};
-    }
-};
-
-// Rule Registry
-const FEATURE_RULES: Record<FeatureEffectMetadata['effectType'], FeatureRule> = {
-    statBonus: statBonusRule,
-    proficiencyGrant: proficiencyGrantRule,
-    acBonus: acBonusRule,
-    advantage: advantageGrantRule,
-    resistance: resistanceGrantRule,
-    // Add other rules here as they are implemented
-};
 
 // --- Base/Placeholder Data (SRD or Core Rules) ---
 
@@ -520,6 +421,38 @@ export async function getBackgroundFeatures(
                     source: `Acolyte Background (Base)`,
                 });
                 break;
+            case 'Urchin':
+                const citySecretsFeature = await getFeatureDefinition('CitySecrets', combinedContent);
+                if (citySecretsFeature) features.push({ ...citySecretsFeature, source: 'Urchin Background (Base)' });
+                features.push({
+                    name: 'Urchin Skill Proficiencies',
+                    description: 'Gain proficiency in Sleight of Hand and Stealth.',
+                    source: 'Urchin Background (Base)',
+                    metadata: { effectType: 'proficiencyGrant', type: 'skill', proficiencies: ['Sleight of Hand', 'Stealth'] },
+                });
+                features.push({
+                    name: 'Urchin Tool Proficiencies',
+                    description: "Gain proficiency with the Disguise kit and Thieves' tools.",
+                    source: 'Urchin Background (Base)',
+                    metadata: { effectType: 'proficiencyGrant', type: 'tool', proficiencies: ["Disguise kit", "Thieves' tools"] },
+                });
+                break;
+             case 'Soldier':
+                 const militaryRankFeature = await getFeatureDefinition('MilitaryRank', combinedContent);
+                 if (militaryRankFeature) features.push({ ...militaryRankFeature, source: 'Soldier Background (Base)' });
+                 features.push({
+                     name: 'Soldier Skill Proficiencies',
+                     description: 'Gain proficiency in Athletics and Intimidation.',
+                     source: 'Soldier Background (Base)',
+                     metadata: { effectType: 'proficiencyGrant', type: 'skill', proficiencies: ['Athletics', 'Intimidation'] },
+                 });
+                 features.push({
+                     name: 'Soldier Tool Proficiencies',
+                     description: 'Gain proficiency with one type of gaming set and land vehicles.',
+                     source: 'Soldier Background (Base)',
+                     metadata: { effectType: 'proficiencyGrant', type: 'tool', proficiencies: ["One type of gaming set", "Vehicles (land)"] },
+                 });
+                 break;
             default:
                  logMessage('warn', `No base features defined for background: "${backgroundName}"`);
         }
@@ -528,66 +461,101 @@ export async function getBackgroundFeatures(
     return features;
 }
 
-
 /**
- * Applies the effects of a character's features using the rule-based system.
- * This modifies the character object *in place* based on feature metadata rules.
+ * Applies the effects of a character's features to their base stats and properties.
+ * Returns a new character object with derived values, without modifying the original.
+ * This function focuses on calculating bonuses and collecting proficiencies.
+ * Complex effects like AC, HP, Advantage, Resistance are noted but calculated elsewhere.
  *
- * @param character - The character object to apply effects to.
- * @returns The modified character object.
+ * @param baseCharacter - The base character object (should have base stats).
+ * @returns A new character object containing the derived state after applying features.
  */
-export async function applyFeatureRules(character: Character): Promise<Character> {
-    logMessage('debug', `Applying feature rules for character ${character.id}`);
-    if (!character.features || character.features.length === 0) {
-        logMessage('debug', `No features found for character ${character.id}. Returning base character.`);
-        return character;
+export async function applyFeatureRules(baseCharacter: Character): Promise<Character> {
+    logMessage('debug', `Applying feature rules for character ${baseCharacter.id}`);
+    if (!baseCharacter.features || baseCharacter.features.length === 0) {
+        logMessage('debug', `No features found for character ${baseCharacter.id}. Returning base character.`);
+        return { ...baseCharacter }; // Return a copy
     }
 
-    let modifiedCharacter = JSON.parse(JSON.stringify(character)) as Character; // Deep copy
+    const derivedStats = { ...baseCharacter.stats };
+    const derivedProficiencies = {
+        armor: [...baseCharacter.proficiencies.armor],
+        weapons: [...baseCharacter.proficiencies.weapons],
+        tools: [...baseCharacter.proficiencies.tools],
+        savingThrows: [...baseCharacter.proficiencies.savingThrows],
+    };
+    const derivedSkills = { ...baseCharacter.skills };
+    // Add placeholders for other derived properties if needed later (e.g., resistances)
 
-    for (const feature of modifiedCharacter.features) {
+    for (const feature of baseCharacter.features) {
         if (feature.metadata) {
-            const rule = FEATURE_RULES[feature.metadata.effectType];
-            if (rule) {
-                try {
-                    const updates = rule.apply(modifiedCharacter, feature.metadata);
-                    // Merge updates cautiously
-                    if (updates.stats) {
-                        modifiedCharacter.stats = { ...modifiedCharacter.stats, ...updates.stats };
-                    }
-                    if (updates.proficiencies) {
-                         modifiedCharacter.proficiencies.armor = [...new Set([...modifiedCharacter.proficiencies.armor, ...(updates.proficiencies.armor || [])])];
-                         modifiedCharacter.proficiencies.weapons = [...new Set([...modifiedCharacter.proficiencies.weapons, ...(updates.proficiencies.weapons || [])])];
-                         modifiedCharacter.proficiencies.tools = [...new Set([...modifiedCharacter.proficiencies.tools, ...(updates.proficiencies.tools || [])])];
-                         modifiedCharacter.proficiencies.savingThrows = [...new Set([...modifiedCharacter.proficiencies.savingThrows, ...(updates.proficiencies.savingThrows || [])])];
-                    }
-                     if (updates.skills) {
-                         modifiedCharacter.skills = { ...modifiedCharacter.skills, ...updates.skills };
-                    }
-                    // Add merging for other potential updates (resistances, advantages, etc.) if rules modify them directly
-                } catch (error) {
-                     const e = error instanceof Error ? error : new Error(String(error));
-                     logError(e, {
-                        function: 'applyFeatureRules',
-                        characterId: character.id,
-                        featureName: feature.name,
-                        effectType: feature.metadata.effectType,
-                     });
-                      // Decide whether to continue applying other rules or stop
+             try {
+                 const metadata = feature.metadata as FeatureEffectMetadata; // Type assertion
+
+                 switch (metadata.effectType) {
+                    case 'statBonus':
+                        Object.entries(metadata.stats).forEach(([stat, bonus]) => {
+                            if (derivedStats[stat as keyof typeof derivedStats] !== undefined) {
+                                derivedStats[stat as keyof typeof derivedStats] += bonus;
+                            }
+                        });
+                        break;
+                    case 'proficiencyGrant':
+                        switch (metadata.type) {
+                            case 'armor': derivedProficiencies.armor.push(...metadata.proficiencies); break;
+                            case 'weapon': derivedProficiencies.weapons.push(...metadata.proficiencies); break;
+                            case 'tool': derivedProficiencies.tools.push(...metadata.proficiencies); break;
+                            case 'savingThrow': derivedProficiencies.savingThrows.push(...metadata.proficiencies); break;
+                            case 'skill':
+                                // TODO: Handle choices if metadata.choose is present
+                                metadata.proficiencies.forEach(skill => { derivedSkills[skill.toLowerCase()] = true; });
+                                break;
+                        }
+                        break;
+                    case 'acBonus':
+                        // Informational, AC calculation happens separately
+                        // console.log(`AC Bonus feature detected: ${feature.name}`);
+                        break;
+                    case 'advantage':
+                        // Informational, handled during rolls
+                         // console.log(`Advantage feature detected: ${feature.name}`);
+                        break;
+                    case 'resistance':
+                        // Informational, handled during damage calculation
+                         // console.log(`Resistance feature detected: ${feature.name}`);
+                        break;
+                    default:
+                        logMessage('warn', `Unknown or unhandled feature metadata effectType: ${(metadata as any).effectType} for feature ${feature.name}`);
                 }
-            } else {
-                logMessage('warn', `No rule found for effectType: ${feature.metadata.effectType} in feature ${feature.name}`);
-            }
+             } catch (error) {
+                 const e = error instanceof Error ? error : new Error(String(error));
+                 logError(e, {
+                    function: 'applyFeatureRules.loop',
+                    characterId: baseCharacter.id,
+                    featureName: feature.name,
+                    effectType: feature.metadata.effectType,
+                 });
+             }
         }
     }
 
-     // Final cleanup/calculations after all rules applied (e.g., ensuring unique proficiencies again)
-     modifiedCharacter.proficiencies.armor = [...new Set(modifiedCharacter.proficiencies.armor)];
-     modifiedCharacter.proficiencies.weapons = [...new Set(modifiedCharacter.proficiencies.weapons)];
-     modifiedCharacter.proficiencies.tools = [...new Set(modifiedCharacter.proficiencies.tools)];
-     modifiedCharacter.proficiencies.savingThrows = [...new Set(modifiedCharacter.proficiencies.savingThrows)];
+    // Combine the base character with the derived/modified properties
+    const finalCharacter: Character = {
+        ...baseCharacter, // Start with the original base data
+        // Overwrite with calculated properties
+        // Note: We are NOT modifying baseCharacter.stats here.
+        // We return the derived properties separately if needed, or components calculate them.
+        proficiencies: { // Store the fully accumulated proficiencies
+            armor: [...new Set(derivedProficiencies.armor)],
+            weapons: [...new Set(derivedProficiencies.weapons)],
+            tools: [...new Set(derivedProficiencies.tools)],
+            savingThrows: [...new Set(derivedProficiencies.savingThrows)],
+        },
+        skills: derivedSkills,
+        // Other derived properties (like final AC, max HP based on derived CON) would be calculated
+        // by components or helper functions using `finalCharacter` as input.
+    };
 
-    // AC, HP, Speed etc. should be calculated separately based on the final character state + equipment
-    logMessage('debug', `Finished applying feature rules for character ${character.id}.`);
-    return modifiedCharacter;
+    logMessage('debug', `Finished applying feature rules for character ${baseCharacter.id}.`);
+    return finalCharacter;
 }

@@ -12,7 +12,7 @@ export interface Character {
   level: number;
   background: string;
   alignment: string;
-  // Base stats before modifications
+  // Base ability scores before racial or other modifications.
   stats: {
     strength: number;
     dexterity: number;
@@ -450,7 +450,7 @@ export const ALL_SKILLS = Object.keys(SKILL_ABILITY_MAP);
  */
 export const calculateSkillModifier = (
     skillName: string,
-    stats: Character['stats'] | NPC['stats'] | Monster['stats'] | undefined,
+    stats: Character['stats'] | NPC['stats'] | Monster['stats'] | undefined, // Use base stats
     proficient: boolean,
     proficiencyBonus: number
 ): number => {
@@ -462,10 +462,10 @@ export const calculateSkillModifier = (
         return 0;
     }
 
-    // Handle direct skill modifiers from monsters/NPCs if available
-    if ((stats as any).skills && typeof (stats as any).skills[skillLower] === 'number') {
-        return (stats as any).skills[skillLower] as number;
-    }
+    // Handle direct skill modifiers from monsters/NPCs if available (these override calculation)
+     if ('skills' in stats && stats.skills && typeof stats.skills[skillLower] === 'number') {
+       return stats.skills[skillLower] as number;
+     }
 
     // Calculate based on ability score if skill override not present
      if (!ability || typeof stats[ability] !== 'number') {

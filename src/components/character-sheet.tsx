@@ -28,18 +28,17 @@ import {
     getAvailableEquipmentItems,
     getLevelUpOptions,
 } from '@/services/dnd-api';
-import type { Character, EquipmentItem, Feature, HitPointsState, HitDiceState } from '@/lib/types';
+import type { Character, EquipmentItem, Feature, HitPointsState, HitDiceState, FeatureEffectMetadata } from '@/lib/types'; // Import FeatureEffectMetadata
 import { updateCharacter } from '@/services/character-service';
 import { AddEquipmentDialog } from './add-equipment-dialog';
 import { ShortRestDialog } from './short-rest-dialog';
 import { rollDice, SKILL_ABILITY_MAP, calculateSkillModifier, ALL_SKILLS } from '@/lib/types'; // Use central utils/types
 import Link from 'next/link'; // For Edit button
-// Import DDDiceRoller component
 import { DDDiceRoller } from './dddice-roller';
 
 
 interface CharacterSheetProps {
-    initialCharacter: Character; // Character data is now passed in
+    initialCharacter: Character; // Character data is now passed in (includes base stats)
 }
 
 
@@ -52,22 +51,37 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
     const [isSaving, setIsSaving] = useState(false);
     const [isAddEquipmentOpen, setIsAddEquipmentOpen] = useState(false);
     const [isShortRestDialogOpen, setIsShortRestDialogOpen] = useState(false);
-     // State for dddice roller
-     const [diceRollResult, setDiceRollResult] = useState<string | null>(null);
-     const [rollerKey, setRollerKey] = useState(0); // To force re-render of roller
+    const [diceRollResult, setDiceRollResult] = useState<string | null>(null);
+    const [rollerKey, setRollerKey] = useState(0); // To force re-render of roller
 
 
-    // --- Derived Data ---
+    // --- Calculate Derived Stats from Base Stats and Features ---
+    const derivedStats = useMemo(() => {
+        const stats = { ...characterState.stats }; // Start with base stats
+        (characterState.features || []).forEach(feature => {
+            if (feature.metadata?.effectType === 'statBonus') {
+                const metadata = feature.metadata as FeatureEffectMetadata & { effectType: 'statBonus' };
+                 // TODO: Add condition checking if metadata.condition exists
+                Object.entries(metadata.stats).forEach(([stat, bonus]) => {
+                     if (stats[stat as keyof typeof stats] !== undefined) {
+                        stats[stat as keyof typeof stats] += bonus;
+                    }
+                });
+            }
+        });
+        return stats;
+    }, [characterState.stats, characterState.features]);
 
     const modifiers = useMemo(() => ({
-        strength: Math.floor((characterState.stats.strength - 10) / 2),
-        dexterity: Math.floor((characterState.stats.dexterity - 10) / 2),
-        constitution: Math.floor((characterState.stats.constitution - 10) / 2),
-        intelligence: Math.floor((characterState.stats.intelligence - 10) / 2),
-        wisdom: Math.floor((characterState.stats.wisdom - 10) / 2),
-        charisma: Math.floor((characterState.stats.charisma - 10) / 2),
-    }), [characterState.stats]);
+        strength: Math.floor((derivedStats.strength - 10) / 2),
+        dexterity: Math.floor((derivedStats.dexterity - 10) / 2),
+        constitution: Math.floor((derivedStats.constitution - 10) / 2),
+        intelligence: Math.floor((derivedStats.intelligence - 10) / 2),
+        wisdom: Math.floor((derivedStats.wisdom - 10) / 2),
+        charisma: Math.floor((derivedStats.charisma - 10) / 2),
+    }), [derivedStats]);
 
+    // --- Fetch Level Data (Proficiency Bonus) ---
     const { data: levelData } = useQuery<Awaited<ReturnType<typeof getLevelUpOptions>>, Error>({
         queryKey: ['levelData', characterState.class, characterState.level],
         queryFn: () => getLevelUpOptions(characterState.class, characterState.level),
@@ -75,6 +89,7 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
         staleTime: Infinity,
     });
     const proficiencyBonus = useMemo(() => levelData?.proficiencyBonus ?? 0, [levelData]);
+
 
     const allFeaturesAndTraits = useMemo(() => characterState.features ?? [], [characterState.features]);
 
@@ -97,35 +112,70 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
     });
 
 
-    // --- Memoized Calculations ---
+    // --- Memoized Calculations (Using derived stats/modifiers) ---
 
-    const armorClass = useMemo(() => {
-        let baseAC = 10;
-        let dexMod = modifiers.dexterity;
-        let maxDex: number | null = null;
-        let hasShield = false;
-        let armorEquipped = false;
+     const armorClass = useMemo(() => {
+         let baseAC = 10;
+         let dexModForAC = modifiers.dexterity; // Use derived modifier
+         let maxDex: number | null = null;
+         let hasShield = false;
+         let armorEquipped = false;
+         let unarmoredDefenseValue: number | null = null;
 
-        characterState.equipment
-            .filter(item => item.isEquipped && item.type === 'Armor')
-            .forEach(item => {
-                if (item.armorCategory === 'Shield') {
-                    hasShield = true;
-                } else {
-                    if (!armorEquipped && item.baseAC !== undefined) {
-                        baseAC = item.baseAC;
-                        if (item.addDexModifier === false) dexMod = 0;
-                        maxDex = item.maxDexBonus ?? null;
-                        armorEquipped = true;
-                    }
-                }
-            });
+         // Check for Unarmored Defense features first
+         characterState.features.forEach(f => {
+             if (f.name === 'Unarmored Defense (Barbarian)') {
+                 unarmoredDefenseValue = 10 + modifiers.dexterity + modifiers.constitution;
+             } else if (f.name === 'Unarmored Defense (Monk)') {
+                 unarmoredDefenseValue = 10 + modifiers.dexterity + modifiers.wisdom;
+             }
+         });
 
-        if (!armorEquipped) baseAC = 10;
-        if (maxDex !== null) dexMod = Math.min(dexMod, maxDex);
-        const shieldBonus = hasShield ? (characterState.equipment.find(i => i.isEquipped && i.armorCategory === 'Shield')?.baseAC ?? 2) : 0;
-        return baseAC + dexMod + shieldBonus;
-    }, [characterState.equipment, modifiers.dexterity]);
+         // Check equipped armor
+         characterState.equipment
+             .filter(item => item.isEquipped && item.type === 'Armor')
+             .forEach(item => {
+                 if (item.armorCategory === 'Shield') {
+                     hasShield = true;
+                 } else {
+                     if (!armorEquipped && item.baseAC !== undefined) {
+                         baseAC = item.baseAC;
+                         if (item.addDexModifier === false) dexModForAC = 0;
+                         maxDex = item.maxDexBonus ?? null;
+                         armorEquipped = true;
+                     }
+                 }
+             });
+
+         // Apply Unarmored Defense if applicable
+         const canUseUnarmoredDefense = unarmoredDefenseValue !== null && !armorEquipped && (f.name.includes('Barbarian') || !hasShield);
+         if (canUseUnarmoredDefense) {
+             baseAC = unarmoredDefenseValue!;
+             dexModForAC = 0; // Modifier is already included in the formula
+         } else if (!armorEquipped) {
+             baseAC = 10; // Default unarmored
+             dexModForAC = modifiers.dexterity; // Use full derived dex
+         }
+
+         // Apply Max Dex Bonus from armor
+         if (maxDex !== null) {
+             dexModForAC = Math.min(dexModForAC, maxDex);
+         }
+
+         // Calculate final AC
+         let finalAC = baseAC + dexModForAC + (hasShield ? 2 : 0); // Standard shield bonus = 2
+
+         // Apply direct AC bonuses from features (e.g., Fighting Style: Defense)
+         characterState.features.forEach(f => {
+             if (f.metadata?.effectType === 'acBonus') {
+                 // TODO: Add condition checking based on f.metadata.condition
+                 finalAC += (f.metadata as FeatureEffectMetadata & { effectType: 'acBonus' }).value;
+             }
+         });
+
+         return finalAC;
+     }, [characterState.equipment, characterState.features, modifiers]);
+
 
     const equippedWeapons = useMemo(() => characterState.equipment.filter(item => item.isEquipped && item.type === 'Weapon'), [characterState.equipment]);
     const actionableFeatures = useMemo(() =>
@@ -143,17 +193,29 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
 
         if (item.type === 'Weapon') {
             if (characterState.proficiencies.weapons.includes(item.name)) return true;
-            if (item.weaponCategory && characterState.proficiencies.weapons.some(p => item.weaponCategory!.startsWith(p))) return true;
+            // Check weapon category proficiency (e.g., "Simple", "Martial", or specific types like "Longswords")
+            if (item.weaponCategory) {
+                const categories = item.weaponCategory.split(' '); // e.g., ["Simple", "Melee"]
+                if (characterState.proficiencies.weapons.some(p => categories.includes(p) || p === item.weaponCategory)) {
+                    return true;
+                }
+            }
+             // Check specific weapon name again (e.g., proficiency with "Rapier")
+             if (characterState.proficiencies.weapons.some(p => p === item.name)) return true;
+
         } else if (item.type === 'Armor') {
-            if (!item.armorCategory) return true;
+            if (!item.armorCategory) return true; // Items like clothes don't require proficiency
+            // Check armor category proficiency (e.g., "Light", "Medium", "Heavy", "Shields")
             if (characterState.proficiencies.armor.includes(item.armorCategory)) return true;
-            if (characterState.proficiencies.armor.includes(item.name)) return true;
+            // Check specific armor name proficiency
+             if (characterState.proficiencies.armor.includes(item.name)) return true;
         }
         return false;
     }, [characterState.proficiencies]);
 
+
     const getHitBonus = useCallback((weapon: EquipmentItem): number => {
-        let abilityMod = modifiers.strength;
+        let abilityMod = modifiers.strength; // Use derived modifier
         const isFinesse = weapon.properties?.includes('Finesse');
 
         if (isFinesse && modifiers.dexterity > modifiers.strength) {
@@ -162,11 +224,17 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
              abilityMod = modifiers.dexterity;
         }
         const proficiencyMod = isProficientWith(weapon) ? proficiencyBonus : 0;
-        return abilityMod + proficiencyMod;
-    }, [modifiers.strength, modifiers.dexterity, proficiencyBonus, isProficientWith]);
+        // TODO: Add other potential bonuses (e.g., Archery fighting style +2 for ranged)
+        let fightingStyleBonus = 0;
+        if (weapon.weaponCategory?.includes('Ranged') && characterState.features.some(f => f.name === 'Fighting Style: Archery')) {
+            fightingStyleBonus = 2;
+        }
+        return abilityMod + proficiencyMod + fightingStyleBonus;
+    }, [modifiers.strength, modifiers.dexterity, proficiencyBonus, isProficientWith, characterState.features]);
+
 
     const getDamageBonus = useCallback((weapon: EquipmentItem): number => {
-         let abilityMod = modifiers.strength;
+         let abilityMod = modifiers.strength; // Use derived modifier
          const isFinesse = weapon.properties?.includes('Finesse');
 
          if (isFinesse && modifiers.dexterity > modifiers.strength) {
@@ -181,35 +249,69 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
          return abilityMod + fightingStyleBonus;
     }, [modifiers.strength, modifiers.dexterity, characterState.features, characterState.equipment]);
 
-    // Calculated skill modifiers
+
+    // Calculated skill modifiers using derived stats
     const skillModifiers = useMemo(() => {
         const mods: Record<string, number> = {};
         ALL_SKILLS.forEach(skill => {
             const proficient = !!characterState.skills[skill];
-            mods[skill] = calculateSkillModifier(skill, characterState.stats, proficient, proficiencyBonus);
+             // Pass derived stats to the calculation function
+            mods[skill] = calculateSkillModifier(skill, derivedStats, proficient, proficiencyBonus);
         });
         return mods;
-    }, [characterState.stats, characterState.skills, proficiencyBonus]);
+    }, [derivedStats, characterState.skills, proficiencyBonus]);
 
 
    // --- Update Functions ---
 
     const updateCharacterData = async (updates: Partial<Character>) => {
         setIsSaving(true);
-        const newState = { ...characterState, ...updates };
-        try {
-            const dataToSave: Partial<Omit<Character, 'id' | 'createdAt'>> = {};
-            if ('hitPoints' in updates && updates.hitPoints) dataToSave.hitPoints = updates.hitPoints;
-            if ('hitDice' in updates && updates.hitDice) dataToSave.hitDice = updates.hitDice;
-            if ('equipment' in updates && updates.equipment) dataToSave.equipment = updates.equipment;
-            if ('features' in updates && updates.features) dataToSave.features = updates.features;
+        // IMPORTANT: Only save the fields that are meant to be persisted (base stats, equipment, HP/HD state, features with current uses).
+        // Derived values (modifiers, final AC, final proficiencies) should NOT be saved back directly.
+        const dataToSave: Partial<Omit<Character, 'id' | 'createdAt'>> = {};
+        const newState = { ...characterState }; // Start with current local state
 
-            await updateCharacter(characterState.id, dataToSave);
-            setCharacterState(newState);
-            toast({ title: "Character Updated", description: "Changes saved successfully." });
+        if ('hitPoints' in updates && updates.hitPoints) {
+            dataToSave.hitPoints = updates.hitPoints;
+            newState.hitPoints = updates.hitPoints;
+        }
+        if ('hitDice' in updates && updates.hitDice) {
+            dataToSave.hitDice = updates.hitDice;
+            newState.hitDice = updates.hitDice;
+        }
+        if ('equipment' in updates && updates.equipment) {
+            dataToSave.equipment = updates.equipment;
+            newState.equipment = updates.equipment;
+        }
+        if ('features' in updates && updates.features) {
+            // Only save features with potentially updated currentUses
+             dataToSave.features = updates.features.map(f => ({
+                 name: f.name,
+                 description: f.description,
+                 source: f.source,
+                 metadata: f.metadata,
+                 isActionable: f.isActionable,
+                 maxUses: f.maxUses,
+                 usesResetOn: f.usesResetOn,
+                 currentUses: f.currentUses, // Persist current uses
+             }));
+            newState.features = updates.features; // Update local state fully
+        }
+        // Never save derivedStats directly, only baseCharacter.stats should be persisted
+        // if ('stats' in updates) { /* DO NOT SAVE DERIVED STATS */ }
+
+        try {
+            if (Object.keys(dataToSave).length > 0) {
+                 await updateCharacter(characterState.id, dataToSave);
+                 setCharacterState(newState); // Update local state after successful save
+                 toast({ title: "Character Updated", description: "Changes saved successfully." });
+            } else {
+                toast({ title: "No Changes", description: "No data needed saving." });
+            }
         } catch (error) {
             console.error("Failed to update character:", error);
             toast({ variant: "destructive", title: "Update Failed", description: "Could not save changes." });
+            // Potentially revert local state if save fails?
         } finally {
             setIsSaving(false);
         }
@@ -220,18 +322,26 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
 
      const handleHitPointChange = (type: 'current' | 'temporary', value: string) => {
          const numValue = parseInt(value, 10);
+         const currentHp = characterState.hitPoints.current;
+         const maxHp = characterState.hitPoints.max;
+         const tempHp = characterState.hitPoints.temporary;
+
          if (!isNaN(numValue)) {
-             const newHp = { ...characterState.hitPoints };
+             const newHpState = { ...characterState.hitPoints };
              if (type === 'current') {
-                 newHp.current = Math.max(0, Math.min(numValue, newHp.max));
+                 newHpState.current = Math.max(0, Math.min(numValue, maxHp));
              } else {
-                 newHp.temporary = Math.max(0, numValue);
+                 newHpState.temporary = Math.max(0, numValue);
              }
-             updateCharacterData({ hitPoints: newHp });
+             // Update local state immediately for responsiveness
+             setCharacterState(prev => ({ ...prev, hitPoints: newHpState }));
+             // Debounce or trigger save after a short delay? For now, direct save.
+             updateCharacterData({ hitPoints: newHpState });
          } else if (value === '') {
-             const newHp = { ...characterState.hitPoints };
-             newHp[type] = 0;
-              updateCharacterData({ hitPoints: newHp });
+             const newHpState = { ...characterState.hitPoints };
+             newHpState[type] = 0;
+             setCharacterState(prev => ({ ...prev, hitPoints: newHpState }));
+             updateCharacterData({ hitPoints: newHpState });
          }
      };
 
@@ -242,7 +352,9 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
                 ? { ...item, isEquipped: !item.isEquipped }
                 : item
         );
-        updateCharacterData({ equipment: newEquipment });
+        // Update local state immediately
+        setCharacterState(prev => ({ ...prev, equipment: newEquipment }));
+        updateCharacterData({ equipment: newEquipment }); // Save the change
     };
 
     const handleAddEquipment = (itemToAdd: EquipmentItem) => {
@@ -257,20 +369,27 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
          } else {
             newEquipment = [...characterState.equipment, { ...itemToAdd, quantity: itemToAdd.quantity || 1, isEquipped: false }];
          }
-         updateCharacterData({ equipment: newEquipment });
+         // Update local state immediately
+         setCharacterState(prev => ({ ...prev, equipment: newEquipment }));
+         updateCharacterData({ equipment: newEquipment }); // Save the change
     };
 
     const handleRemoveEquipment = (itemName: string) => {
         const newEquipment = characterState.equipment.filter(item => item.name !== itemName);
-        updateCharacterData({ equipment: newEquipment });
+         // Update local state immediately
+        setCharacterState(prev => ({ ...prev, equipment: newEquipment }));
+        updateCharacterData({ equipment: newEquipment }); // Save the change
     };
 
      const handleUpdateEquipmentQuantity = (itemName: string, quantity: number) => {
+         const newQuantity = Math.max(0, quantity);
          const newEquipment = characterState.equipment
             .map(item =>
-                item.name === itemName ? { ...item, quantity: Math.max(0, quantity) } : item
+                item.name === itemName ? { ...item, quantity: newQuantity } : item
             ).filter(item => item.quantity > 0);
-         updateCharacterData({ equipment: newEquipment });
+        // Update local state immediately
+        setCharacterState(prev => ({ ...prev, equipment: newEquipment }));
+        updateCharacterData({ equipment: newEquipment }); // Save the change
     }
 
     // --- Dice Rolling Handler ---
@@ -330,35 +449,56 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
 
 
     const handleUseFeature = (featureName: string) => {
-         const feature = actionableFeatures.find(f => f.name === featureName);
-         if (!feature || feature.currentUses === undefined || feature.currentUses === null) {
+         const feature = characterState.features.find(f => f.name === featureName);
+         if (!feature) return;
+
+         const currentUses = featureUses[featureName]; // Get current uses from local state
+
+         if (feature.maxUses === null || feature.maxUses === undefined || currentUses === undefined || currentUses === null) {
+             // Feature has unlimited uses or doesn't track them
              toast({
                  title: `Used ${featureName}`,
                  description: (typeof feature?.description === 'string' && feature.description.length > 0)
                      ? feature.description.split('.')[0] + '.'
-                     : "Feature action executed."
-                     ,
+                     : "Feature action executed.",
              });
+              // Special handling for features like Second Wind
+             if (featureName === 'Second Wind') { /* Handle effect */ }
              return;
          }
 
-         if (feature.currentUses > 0) {
-             const newUses = feature.currentUses - 1;
-             setFeatureUses(prev => ({ ...prev, [featureName]: newUses }));
+         if (currentUses > 0) {
+             const newUses = currentUses - 1;
+             const newFeatureUses = { ...featureUses, [featureName]: newUses };
+             setFeatureUses(newFeatureUses); // Update local UI state first
+
              toast({
                  title: `Used ${featureName}`,
                  description: `${newUses} uses remaining.`,
              });
 
+             // Special handling for features like Second Wind
              if (featureName === 'Second Wind') {
                   const healing = rollDice('1d10') + characterState.level;
-                  const newHp = {
+                  const newHpState = {
                      ...characterState.hitPoints,
                      current: Math.min(characterState.hitPoints.max, characterState.hitPoints.current + healing)
                   }
-                  updateCharacterData({ hitPoints: newHp });
+                   // We need to update both features (for uses) and hitpoints
+                   const updatedFeaturesForSave = characterState.features.map(f =>
+                       f.name === featureName ? { ...f, currentUses: newUses } : f
+                   );
+                   updateCharacterData({ hitPoints: newHpState, features: updatedFeaturesForSave });
                    toast({ title: 'Second Wind Healing', description: `Regained ${healing} hit points.` });
+                   return; // Exit early as updateCharacterData was called
              }
+
+             // Save the feature use change
+             const updatedFeaturesForSave = characterState.features.map(f =>
+                 f.name === featureName ? { ...f, currentUses: newUses } : f
+             );
+             updateCharacterData({ features: updatedFeaturesForSave });
+
          } else {
              toast({
                  variant: "destructive",
@@ -381,7 +521,7 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
          };
 
          const usesReset: Record<string, number> = {};
-          allFeaturesAndTraits.forEach(feature => {
+          characterState.features.forEach(feature => {
               if (feature.usesResetOn === 'short-rest' && feature.maxUses !== null && feature.maxUses !== undefined) {
                   usesReset[feature.name] = feature.maxUses;
               }
@@ -392,12 +532,10 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
          try {
             setIsSaving(true);
              const updatedFeaturesWithUses = characterState.features.map(f => {
-                // Use the combined state (newFeatureUses) to determine the current uses to save
                  const currentLocalUse = newFeatureUses[f.name];
                 if (currentLocalUse !== undefined && currentLocalUse !== null) {
                      return { ...f, currentUses: currentLocalUse };
                 }
-                 // If not in newFeatureUses (e.g., no max uses), keep original data
                 return f;
              });
 
@@ -406,6 +544,7 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
                hitDice: newHitDice,
                features: updatedFeaturesWithUses,
              });
+            // Update local state after successful save
             setCharacterState(prev => ({
                ...prev,
                hitPoints: newHp,
@@ -440,7 +579,7 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
         };
 
         const usesReset: Record<string, number> = {};
-         allFeaturesAndTraits.forEach(feature => {
+         characterState.features.forEach(feature => {
              if (feature.maxUses !== null && feature.maxUses !== undefined) {
                  usesReset[feature.name] = feature.maxUses;
              }
@@ -460,6 +599,7 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
                hitDice: newHitDice,
                features: updatedFeaturesWithUses,
             });
+           // Update local state after successful save
            setCharacterState(prev => ({
                ...prev,
                hitPoints: newHp,
@@ -536,21 +676,30 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
                          <Card className="bg-card/80 backdrop-blur-sm">
                            <CardHeader>
                              <CardTitle>Ability Scores</CardTitle>
+                              <CardDescription>Base Score (Modifier)</CardDescription>
                            </CardHeader>
                            <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                             {Object.entries(characterState.stats).map(([name, value]) => (
-                               <div key={name} className="text-center p-3 border rounded-md bg-secondary/30 relative pt-6">
-                                 <Label className="uppercase text-xs font-semibold tracking-wider text-muted-foreground absolute top-1 left-1/2 transform -translate-x-1/2 capitalize">{name}</Label>
-                                  <div className="relative mt-1">
-                                     <div className="text-4xl font-bold text-center h-auto p-0 border-none bg-transparent">
-                                        {value}
-                                     </div>
-                                     <div className="absolute -bottom-3 left-1/2 transform -translate-x-1/2 border border-primary bg-background rounded-full w-8 h-8 flex items-center justify-center text-sm font-semibold text-primary shadow-md">
-                                        {modifiers[name as keyof typeof modifiers] >= 0 ? '+' : ''}{modifiers[name as keyof typeof modifiers]}
-                                     </div>
-                                 </div>
-                               </div>
-                             ))}
+                              {Object.entries(characterState.stats).map(([name, baseValue]) => {
+                                  const derivedValue = derivedStats[name as keyof typeof derivedStats];
+                                  const modifierValue = modifiers[name as keyof typeof modifiers];
+                                  const modifierString = modifierValue >= 0 ? `+${modifierValue}` : `${modifierValue}`;
+                                  return (
+                                      <div key={name} className="text-center p-3 border rounded-md bg-secondary/30 relative pt-6">
+                                          <Label className="uppercase text-xs font-semibold tracking-wider text-muted-foreground absolute top-1 left-1/2 transform -translate-x-1/2 capitalize">{name}</Label>
+                                          <div className="relative mt-1">
+                                              <div className="text-4xl font-bold text-center h-auto p-0 border-none bg-transparent">
+                                                  {derivedValue} {/* Display derived score */}
+                                              </div>
+                                              <div className="absolute -bottom-3 left-1/2 transform -translate-x-1/2 border border-primary bg-background rounded-full w-8 h-8 flex items-center justify-center text-sm font-semibold text-primary shadow-md">
+                                                  {modifierString} {/* Display derived modifier */}
+                                              </div>
+                                          </div>
+                                           <div className="text-[0.6rem] text-muted-foreground h-3 mt-1">
+                                                (Base: {baseValue}) {/* Show base score */}
+                                            </div>
+                                      </div>
+                                  );
+                              })}
                            </CardContent>
                          </Card>
                        </div>
@@ -566,7 +715,7 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
                                     {ALL_SKILLS.map((skill) => {
                                         const proficient = !!characterState.skills[skill];
                                         const ability = SKILL_ABILITY_MAP[skill];
-                                        const modifier = skillModifiers[skill];
+                                        const modifier = skillModifiers[skill]; // Use pre-calculated skill modifiers
                                         const modifierString = modifier >= 0 ? `+${modifier}` : `${modifier}`;
 
                                         return (
@@ -651,7 +800,7 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
                                      </div>
                                      <div className="border rounded-md p-3 bg-secondary/30">
                                          <Label className="text-xs uppercase text-muted-foreground">Speed</Label>
-                                         {/* TODO: Better speed calculation based on race */}
+                                         {/* TODO: Better speed calculation based on race/features */}
                                          <div className="text-3xl font-bold mt-1">{characterState.race === 'Dwarf' ? '25 ft' : '30 ft'}</div>
                                      </div>
                                     <div className="col-span-3 border rounded-md p-3 bg-secondary/30">
@@ -882,7 +1031,7 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
              maxHitDice={characterState.hitDice.total}
              currentHitDice={characterState.hitDice.remaining}
              hitDieType={characterState.hitDice.dieType}
-             constitutionModifier={modifiers.constitution}
+             constitutionModifier={modifiers.constitution} // Pass derived modifier
              maxHp={characterState.hitPoints.max}
              currentHp={characterState.hitPoints.current}
              onConfirm={handleShortRest}

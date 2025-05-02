@@ -17,12 +17,15 @@ import {
 } from 'firebase/firestore';
 import type { Character, Feature, FeatureEffectMetadata, EquipmentItem } from '@/lib/types'; // Import new types
 import { logError, logMessage } from './logging-service'; // Import logging service
-import { applyFeatureRules } from './feature-service'; // Import the new rule-based function
+// Removed import for applyFeatureRules as it's now handled client-side or in specific contexts
+// import { applyFeatureRules } from './feature-service';
 
 const charactersCollection = collection(db, 'characters');
 
 /**
  * Saves a new character to Firestore.
+ * Stores only BASE data (base stats, chosen proficiencies, etc.).
+ * Derived values are calculated on load/display.
  * @param characterData - The character data to save (without ID).
  * @returns The ID of the newly created character.
  */
@@ -35,9 +38,10 @@ export async function saveCharacter(characterData: Omit<Character, 'id' | 'creat
   }
   try {
     // Save the base data as provided by the creation wizard.
-    // Derived stats (after applying features) are typically handled on load/display.
     const docRef = await addDoc(charactersCollection, {
       ...characterData,
+      // Ensure only base stats are saved
+      stats: characterData.stats || { strength: 10, dexterity: 10, constitution: 10, intelligence: 10, wisdom: 10, charisma: 10 },
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
@@ -59,6 +63,7 @@ export async function saveCharacter(characterData: Omit<Character, 'id' | 'creat
 
 /**
  * Updates an existing character in Firestore.
+ * Only saves base data fields.
  * @param characterId - The ID of the character to update.
  * @param characterData - The character data fields to update.
  */
@@ -74,11 +79,20 @@ export async function updateCharacter(characterId: string, characterData: Partia
       return; // No changes to apply
   }
   const characterDoc = doc(db, 'characters', characterId);
+
+  // Ensure we only try to update fields that should be persisted (base stats, etc.)
+  const dataToUpdate: Record<string, any> = { ...characterData };
+  // Explicitly remove any derived fields if they accidentally got included
+  // delete dataToUpdate.derivedStats; // Example if derivedStats existed
+  delete dataToUpdate.stats; // Ensure base stats are not overwritten by derived calculations accidentally sent here
+  if (characterData.stats) { // Only update base stats if explicitly provided in the partial update
+      dataToUpdate.stats = characterData.stats;
+  }
+
+  dataToUpdate.updatedAt = serverTimestamp();
+
   try {
-    await updateDoc(characterDoc, {
-      ...characterData,
-      updatedAt: serverTimestamp(),
-    });
+    await updateDoc(characterDoc, dataToUpdate);
     console.log('Character updated with ID: ', characterId);
   } catch (e) {
      const error = e instanceof Error ? e : new Error(String(e));
@@ -94,9 +108,9 @@ export async function updateCharacter(characterId: string, characterData: Partia
 
 /**
  * Loads a specific character from Firestore.
- * Applies feature rules to the loaded data before returning.
+ * Returns the raw character data including base stats. Derived values are calculated client-side.
  * @param characterId - The ID of the character to load.
- * @returns The processed character data with derived values, or null if not found.
+ * @returns The raw character data, or null if not found.
  */
 export async function loadCharacter(characterId: string): Promise<Character | null> {
    if (!characterId) {
@@ -109,12 +123,13 @@ export async function loadCharacter(characterId: string): Promise<Character | nu
     const docSnap = await getDoc(characterDoc);
     if (docSnap.exists()) {
         const data = docSnap.data();
+        // Return the base character data as stored in Firestore
         const baseCharacter: Character = {
             ...data,
             id: docSnap.id,
             createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : undefined,
             updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : undefined,
-            stats: data.stats || {},
+            stats: data.stats || {}, // Ensure base stats are present
             skills: data.skills || {},
             hitPoints: data.hitPoints || { max: 0, current: 0, temporary: 0 },
             hitDice: data.hitDice || { total: 0, remaining: 0, dieType: null },
@@ -123,9 +138,7 @@ export async function loadCharacter(characterId: string): Promise<Character | nu
             features: Array.isArray(data.features) ? data.features : [],
         } as Character;
 
-        // Apply feature rules to the loaded base character data
-        const derivedCharacter = await applyFeatureRules(baseCharacter);
-        return derivedCharacter;
+        return baseCharacter;
 
     } else {
       console.log(`No character document found for ID: ${characterId}`);
@@ -133,7 +146,7 @@ export async function loadCharacter(characterId: string): Promise<Character | nu
     }
   } catch (e) {
      const error = e instanceof Error ? e : new Error(String(e));
-     console.error(`Error in loadCharacter for ID ${characterId}: Firestore operation failed or feature application failed.`, error);
+     console.error(`Error in loadCharacter for ID ${characterId}: Firestore operation failed.`, error);
       await logError(error, {
           function: 'loadCharacter',
           characterId: characterId,
@@ -144,24 +157,25 @@ export async function loadCharacter(characterId: string): Promise<Character | nu
 
 /**
  * Loads all characters (or potentially characters for a specific player if auth is added).
- * Applies feature rules to each loaded character.
- * @returns An array of processed character data.
+ * Returns raw character data. Derived values are calculated client-side.
+ * @returns An array of raw character data.
  */
 export async function loadAllCharacters(): Promise<Character[]> {
   // TODO: Add filtering by player ID if authentication is implemented
   const q = query(charactersCollection); // Simple query for all characters for now
   try {
     const querySnapshot = await getDocs(q);
-    const characterPromises: Promise<Character | null>[] = [];
+    const characters: Character[] = [];
 
     querySnapshot.forEach((docSnap) => {
        const data = docSnap.data();
+        // Return the base character data as stored in Firestore
         const baseCharacter: Character = {
             ...data,
             id: docSnap.id,
             createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : undefined,
             updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : undefined,
-            stats: data.stats || {},
+            stats: data.stats || {}, // Ensure base stats are present
             skills: data.skills || {},
             hitPoints: data.hitPoints || { max: 0, current: 0, temporary: 0 },
             hitDice: data.hitDice || { total: 0, remaining: 0, dieType: null },
@@ -169,16 +183,10 @@ export async function loadAllCharacters(): Promise<Character[]> {
             proficiencies: data.proficiencies || { armor: [], weapons: [], tools: [], savingThrows: [] },
             features: Array.isArray(data.features) ? data.features : [],
         } as Character;
-        // Apply rules to each character - can be parallelized
-        characterPromises.push(applyFeatureRules(baseCharacter).catch(err => {
-            logError(err, { function: 'loadAllCharacters.applyFeatureRules', characterId: baseCharacter.id });
-            return null; // Return null on error for a specific character
-        }));
+        characters.push(baseCharacter);
     });
 
-    const results = await Promise.all(characterPromises);
-    // Filter out any characters that failed processing
-    return results.filter((char): char is Character => char !== null);
+    return characters;
 
   } catch (e) {
     const error = e instanceof Error ? e : new Error(String(e));
@@ -213,5 +221,3 @@ export async function deleteCharacter(characterId: string): Promise<void> {
     throw new Error('Failed to delete character.');
   }
 }
-
-// Removed old applyFeatureEffects function as it's replaced by applyFeatureRules in feature-service.ts

@@ -1,3 +1,4 @@
+
 "use client"
 
 import * as React from "react"
@@ -538,7 +539,7 @@ const SidebarMenuButton = React.forwardRef<
   React.ComponentProps<"button"> & {
     asChild?: boolean
     isActive?: boolean
-    tooltip?: string | React.ComponentProps<typeof TooltipContent>
+    tooltip?: string | Omit<React.ComponentProps<typeof TooltipContent>, 'children'> & { children?: React.ReactNode } // Allow full TooltipContent props or string
   } & VariantProps<typeof sidebarMenuButtonVariants>
 >(
   (
@@ -567,15 +568,14 @@ const SidebarMenuButton = React.forwardRef<
       />
     )
 
-    if (!tooltip) {
+    if (!tooltip || (state === "expanded" && !isMobile)) {
+        // Don't show tooltip if expanded on desktop or no tooltip provided
       return button
     }
 
-    if (typeof tooltip === "string") {
-      tooltip = {
-        children: tooltip,
-      }
-    }
+    const tooltipContentProps: Omit<React.ComponentProps<typeof TooltipContent>, 'children'> & { children?: React.ReactNode } =
+        typeof tooltip === 'string' ? { children: tooltip } : tooltip;
+
 
     return (
       <Tooltip>
@@ -583,8 +583,8 @@ const SidebarMenuButton = React.forwardRef<
         <TooltipContent
           side="right"
           align="center"
-          hidden={state !== "collapsed" || isMobile}
-          {...tooltip}
+          // hidden={state !== "collapsed" || isMobile} // Radix manages visibility, removed 'hidden' prop
+          {...tooltipContentProps}
         />
       </Tooltip>
     )

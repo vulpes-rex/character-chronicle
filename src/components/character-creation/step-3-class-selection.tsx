@@ -13,19 +13,19 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { AlertCircle, PlusCircle, Trash2 } from 'lucide-react';
 import { useQueries } from '@tanstack/react-query'; // Use useQueries for multiple feature fetches
 import type { PartialCharacterFormData } from './character-creation-wizard';
-import type { CharacterClass, Feature } from '@/lib/types';
+import type { CharacterClass, Feature, SourcePack } from '@/lib/types';
 import { getCumulativeClassFeatures } from '@/services/dnd-api'; // Keep using this
 
 
 interface Step3Props {
     data: PartialCharacterFormData;
-    // Update prop type to match changes in Step2
     updateData: (data: Partial<PartialCharacterFormData>) => void;
     setValidity: (isValid: boolean) => void;
     availableClasses: CharacterClass[];
+    combinedContent?: SourcePack['content']; // Add combinedContent prop
 }
 
-export function Step3ClassSelection({ data, updateData, setValidity, availableClasses }: Step3Props) {
+export function Step3ClassSelection({ data, updateData, setValidity, availableClasses, combinedContent }: Step3Props) {
     const [selectedClasses, setSelectedClasses] = useState<{ [key: string]: number }>(data.selectedClasses || {});
     const [featureError, setFeatureError] = useState<string | null>(null);
 
@@ -36,15 +36,15 @@ export function Step3ClassSelection({ data, updateData, setValidity, availableCl
      const featureQueries = useMemo(() => Object.entries(selectedClasses)
         .filter(([_, level]) => level > 0)
         .map(([className, level]) => ({
-            queryKey: ['classFeatures', className, level],
-            queryFn: () => getCumulativeClassFeatures(className, level),
-            enabled: level > 0,
-            staleTime: Infinity, // Features are generally static
-        })), [selectedClasses]);
+            queryKey: ['classFeatures', className, level, combinedContent], // Include combinedContent in key
+            queryFn: () => getCumulativeClassFeatures(className, level, combinedContent), // Pass combinedContent
+            enabled: level > 0 && !!combinedContent, // Enable only when content is ready
+            staleTime: Infinity, // Features are generally static for a given content set
+        })), [selectedClasses, combinedContent]); // Depend on selectedClasses and combinedContent
 
     const featureResults = useQueries({ queries: featureQueries });
 
-    const isLoadingFeatures = featureResults.some(result => result.isLoading);
+    const isLoadingFeatures = featureResults.some(result => result.isLoading && result.fetchStatus !== 'idle');
     const allClassFeatures = useMemo(() => {
         const featuresByClass: { [key: string]: Feature[] } = {};
         featureResults.forEach((result, index) => {
@@ -53,7 +53,6 @@ export function Step3ClassSelection({ data, updateData, setValidity, availableCl
                 const className = queryKey[1] as string; // Extract class name from query key
                 featuresByClass[className] = result.data;
             } else if (result.isError) {
-                 // Handle individual query errors if necessary
                  console.error(`Error fetching features for ${featureQueries[index].queryKey[1]}:`, result.error);
                  setFeatureError(`Failed to load features for ${featureQueries[index].queryKey[1]}.`);
             }
@@ -73,28 +72,32 @@ export function Step3ClassSelection({ data, updateData, setValidity, availableCl
             armor: [...(data.tempProficiencies?.armor?.filter(p => !p.endsWith('(Class)')) ?? [])],
             weapons: [...(data.tempProficiencies?.weapons?.filter(p => !p.endsWith('(Class)')) ?? [])],
             tools: [...(data.tempProficiencies?.tools?.filter(p => !p.endsWith('(Class)')) ?? [])],
-            savingThrows: [], // Start fresh, only add first class's throws
+            savingThrows: [],
         };
 
         let isFirstClass = true;
         Object.entries(selectedClasses).forEach(([className, level]) => {
+            // Use availableClasses which should now be sourced from combinedContent by the parent
             const classData = availableClasses.find(c => c.name === className);
-            const features = allClassFeatures[className]; // Use memoized features
+            const features = allClassFeatures[className];
 
             if (!classData || level <= 0) return;
 
+            // Add fetched features
             if (features) {
                 allFeatures.push(...features.map(f => ({ ...f, source: 'Class' })));
             }
 
-            // Add class proficiencies (handle potential duplicates)
-            baseProficiencies.armor = [...new Set([...baseProficiencies.armor, ...classData.proficiencies.armor.map(p => `${p} (Class)`)])];
-            baseProficiencies.weapons = [...new Set([...baseProficiencies.weapons, ...classData.proficiencies.weapons.map(p => `${p} (Class)`)])];
-            baseProficiencies.tools = [...new Set([...baseProficiencies.tools, ...(classData.proficiencies.tools ?? []).map(p => `${p} (Class)`)])];
+            // Add class proficiencies
+             if (classData.proficiencies) {
+                 baseProficiencies.armor = [...new Set([...baseProficiencies.armor, ...classData.proficiencies.armor.map(p => `${p} (Class)`)])];
+                 baseProficiencies.weapons = [...new Set([...baseProficiencies.weapons, ...classData.proficiencies.weapons.map(p => `${p} (Class)`)])];
+                 baseProficiencies.tools = [...new Set([...baseProficiencies.tools, ...(classData.proficiencies.tools ?? []).map(p => `${p} (Class)`)])];
 
-            if (isFirstClass) {
-                baseProficiencies.savingThrows = [...new Set([...classData.proficiencies.savingThrows])];
-                isFirstClass = false;
+                 if (isFirstClass) {
+                     baseProficiencies.savingThrows = [...new Set([...classData.proficiencies.savingThrows])];
+                     isFirstClass = false;
+                 }
             }
         });
 
@@ -106,19 +109,16 @@ export function Step3ClassSelection({ data, updateData, setValidity, availableCl
             tempProficiencies: baseProficiencies,
         };
 
-        // Compare specific parts of the state to decide if an update is needed
+        // Compare specific parts before updating
         const selectedClassesChanged = JSON.stringify(updatePayload.selectedClasses) !== JSON.stringify(data.selectedClasses);
         const featuresChanged = JSON.stringify(updatePayload.tempFeatures) !== JSON.stringify(data.tempFeatures);
         const proficienciesChanged = JSON.stringify(updatePayload.tempProficiencies) !== JSON.stringify(data.tempProficiencies);
 
         if (selectedClassesChanged || featuresChanged || proficienciesChanged) {
-             console.log("Step 3: Updating parent data"); // Debug log
+             console.log("Step 3: Updating parent data");
             updateData(updatePayload);
         }
 
-    // Depend on the states that directly influence the calculation and validity.
-    // Also depend on the stable callback functions.
-    // Include relevant parts of `data` used in comparison.
     }, [
         selectedClasses,
         totalLevel,
@@ -126,7 +126,7 @@ export function Step3ClassSelection({ data, updateData, setValidity, availableCl
         featureError,
         setValidity,
         updateData,
-        availableClasses,
+        availableClasses, // Depends on this prop which comes from parent's query
         allClassFeatures,
         data.selectedClasses,
         data.tempFeatures,
@@ -135,7 +135,6 @@ export function Step3ClassSelection({ data, updateData, setValidity, availableCl
 
 
     const handleAddClass = () => {
-        // Find the first available class not already selected
         const firstAvailable = availableClasses.find(c => !selectedClasses[c.name]);
         if (firstAvailable && !maxLevelReached) {
             setSelectedClasses(prev => ({ ...prev, [firstAvailable.name]: 1 }));
@@ -146,16 +145,12 @@ export function Step3ClassSelection({ data, updateData, setValidity, availableCl
         setSelectedClasses(prev => {
             const newState = { ...prev };
             delete newState[className];
-            // If removing the last class, ensure state reflects it properly
-            if (Object.keys(newState).length === 0) {
-                // Optionally reset related fields in parent via updateData if needed
-            }
             return newState;
         });
     };
 
     const handleClassChange = (oldName: string, newName: string) => {
-        if (newName === oldName || selectedClasses[newName]) return; // No change or already selected
+        if (newName === oldName || selectedClasses[newName]) return;
         setSelectedClasses(prev => {
             const newState = { ...prev };
             const level = newState[oldName];
@@ -171,22 +166,20 @@ export function Step3ClassSelection({ data, updateData, setValidity, availableCl
          const newTotalLevel = totalLevel + levelDifference;
 
          if (newTotalLevel > 20) {
-             // Adjust newLevel so total doesn't exceed 20
              newLevel = newLevel - (newTotalLevel - 20);
          }
-         if (newLevel < 1) newLevel = 1; // Minimum level 1
+         if (newLevel < 1) newLevel = 1;
 
         setSelectedClasses(prev => ({ ...prev, [className]: newLevel }));
     };
 
 
-    // Pre-calculate derived proficiencies for display to avoid doing it inside the render function directly
     const derivedProficienciesForDisplay = useMemo(() => {
-        const profs = { armor: [], weapons: [], tools: [], savingThrows: [] };
+        const profs: { armor: string[]; weapons: string[]; tools: string[]; savingThrows: string[] } = { armor: [], weapons: [], tools: [], savingThrows: [] };
         let isFirst = true;
         Object.entries(selectedClasses).forEach(([className, level]) => {
             const classData = availableClasses.find(c => c.name === className);
-            if (!classData || level <= 0) return;
+            if (!classData || level <= 0 || !classData.proficiencies) return;
              profs.armor = [...new Set([...profs.armor, ...classData.proficiencies.armor])];
              profs.weapons = [...new Set([...profs.weapons, ...classData.proficiencies.weapons])];
              profs.tools = [...new Set([...profs.tools, ...(classData.proficiencies.tools ?? [])])];
@@ -225,9 +218,9 @@ export function Step3ClassSelection({ data, updateData, setValidity, availableCl
                                     <SelectContent>
                                         {availableClasses.map(c => (
                                             <SelectItem
-                                                key={c.name} // Use stable key
+                                                key={c.name}
                                                 value={c.name}
-                                                disabled={selectedClasses[c.name] !== undefined && c.name !== className} // Disable if already selected elsewhere
+                                                disabled={selectedClasses[c.name] !== undefined && c.name !== className}
                                             >
                                                 {c.name}
                                             </SelectItem>
@@ -247,7 +240,7 @@ export function Step3ClassSelection({ data, updateData, setValidity, availableCl
                                              const potentialTotal = totalLevel - level + lvl;
                                              const isDisabled = potentialTotal > 20;
                                              return (
-                                                <SelectItem key={lvl} value={String(lvl)} disabled={isDisabled}> {/* Use stable key */}
+                                                <SelectItem key={lvl} value={String(lvl)} disabled={isDisabled}>
                                                     Lvl {lvl}
                                                 </SelectItem>
                                              );
@@ -293,12 +286,10 @@ export function Step3ClassSelection({ data, updateData, setValidity, availableCl
                          )}
                     </CardContent>
                 </Card>
-                 {/* Display calculated proficiencies */}
                  <Card>
                     <CardHeader className='pb-2'>
                         <CardTitle className='text-base'>Proficiencies Gained</CardTitle>
                     </CardHeader>
-                     {/* Use derivedProficienciesForDisplay here */}
                      <CardContent className='text-xs space-y-1'>
                          <p><strong>Saving Throws:</strong> {derivedProficienciesForDisplay.savingThrows?.join(', ') || 'None'}</p>
                          <p><strong>Armor:</strong> {derivedProficienciesForDisplay.armor?.join(', ') || 'None'}</p>
@@ -310,13 +301,13 @@ export function Step3ClassSelection({ data, updateData, setValidity, availableCl
 
             {/* Feature Display Area */}
             <div className="md:col-span-2">
-                <Card className="h-[600px] flex flex-col"> {/* Fixed height */}
+                <Card className="h-[600px] flex flex-col">
                     <CardHeader>
                         <CardTitle>Class Features (Up to Level {totalLevel})</CardTitle>
                         <CardDescription>Features gained from selected classes and levels.</CardDescription>
                     </CardHeader>
-                    <CardContent className="flex-grow overflow-hidden"> {/* Make content grow and hide overflow */}
-                        <ScrollArea className="h-full pr-4"> {/* ScrollArea needs defined height from parent */}
+                    <CardContent className="flex-grow overflow-hidden">
+                        <ScrollArea className="h-full pr-4">
                             {isLoadingFeatures && <Skeleton className="h-full w-full" />}
                             {!isLoadingFeatures && Object.keys(allClassFeatures).length === 0 && (
                                 <p className="text-sm text-muted-foreground text-center py-10">Select a class to see its features.</p>
@@ -324,7 +315,7 @@ export function Step3ClassSelection({ data, updateData, setValidity, availableCl
                             {!isLoadingFeatures && Object.keys(allClassFeatures).length > 0 && (
                                 <Accordion type="multiple" className="w-full">
                                     {Object.entries(allClassFeatures).map(([className, features]) => (
-                                        <AccordionItem value={className} key={className}> {/* Use stable key */}
+                                        <AccordionItem value={className} key={className}>
                                             <AccordionTrigger className="text-lg font-semibold">
                                                 {className} (Level {selectedClasses[className]})
                                             </AccordionTrigger>
@@ -334,7 +325,7 @@ export function Step3ClassSelection({ data, updateData, setValidity, availableCl
                                                 ) : (
                                                      <Accordion type="multiple" className="w-full">
                                                          {features.map((feature, index) => (
-                                                            <AccordionItem value={`${className}-feature-${index}`} key={feature.name} className="border-b-0 pl-4"> {/* Use stable key */}
+                                                            <AccordionItem value={`${className}-feature-${index}`} key={feature.name} className="border-b-0 pl-4">
                                                                 <AccordionTrigger className="text-sm py-2">{feature.name}</AccordionTrigger>
                                                                 <AccordionContent className="text-xs text-muted-foreground pb-2">
                                                                     {feature.description}

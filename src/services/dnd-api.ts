@@ -1,333 +1,396 @@
 
-import type { CharacterClass as CharacterClassType, CharacterRace, Feature, CharacterLevel, EquipmentItem, HitPoints, BackgroundInfo } from '@/lib/types';
+import type { CharacterClass as CharacterClassType, CharacterRace, Feature, CharacterLevel, EquipmentItem, HitPoints, BackgroundInfo, SourcePack } from '@/lib/types';
+import { logError, logMessage } from './logging-service'; // Import logging service
+import { getMultipleFeatureDefinitions } from './feature-service'; // Import feature service
 
 // Re-export types from lib/types to ensure consistency
 export type { CharacterClass, CharacterRace, Feature, CharacterLevel, EquipmentItem, HitPoints, BackgroundInfo };
 
 
 /**
- * Fetches available character classes from the D\&D 5e API.
+ * Fetches available character classes, prioritizing source pack content.
+ * @param combinedContent - Optional combined content from active source packs.
  * @returns A promise that resolves to an array of character classes.
  */
-export async function getCharacterClasses(): Promise<CharacterClassType[]> {
-  console.log("getCharacterClasses: Using placeholder data.");
-  // TODO: Implement this by calling an API. Using placeholder data.
-  await new Promise(resolve => setTimeout(resolve, 100)); // Simulate network delay
-  return [
-    {
-      name: 'Fighter',
-      description: 'A master of martial combat, skilled with a variety of weapons and armor.',
-      hitDie: 'd10',
-      proficiencies: {
-        armor: ['Light', 'Medium', 'Heavy', 'Shields'],
-        weapons: ['Simple', 'Martial'],
-        savingThrows: ['Strength', 'Constitution'],
-        skills: { choose: 2, options: ['Acrobatics', 'Animal Handling', 'Athletics', 'History', 'Insight', 'Intimidation', 'Perception', 'Survival'] },
-      },
-    },
-    {
-      name: 'Wizard',
-      description: 'A scholarly magic-user capable of manipulating the structures of reality.',
-      hitDie: 'd6',
-      proficiencies: {
-        armor: [],
-        weapons: ['Daggers', 'Darts', 'Slings', 'Quarterstaffs', 'Light Crossbows'], // Specific weapons
-        savingThrows: ['Intelligence', 'Wisdom'],
-        skills: { choose: 2, options: ['Arcana', 'History', 'Insight', 'Investigation', 'Medicine', 'Religion'] },
-        tools: [],
-      },
-    },
-    {
-      name: 'Rogue',
-      description: 'Master of stealth and subtlety.',
-      hitDie: 'd8',
-       proficiencies: {
-         armor: ['Light'],
-         weapons: ['Simple', 'Hand Crossbows', 'Longswords', 'Rapiers', 'Shortswords'],
-         tools: ["Thieves' Tools"],
-         savingThrows: ['Dexterity', 'Intelligence'],
-         skills: { choose: 4, options: ['Acrobatics', 'Athletics', 'Deception', 'Insight', 'Intimidation', 'Investigation', 'Perception', 'Performance', 'Persuasion', 'Sleight of Hand', 'Stealth'] },
-       },
-    },
-    {
-      name: 'Cleric',
-      description: 'Wielder of divine magic.',
-      hitDie: 'd8',
-       proficiencies: {
-         armor: ['Light', 'Medium', 'Shields'],
-         weapons: ['Simple'],
-         savingThrows: ['Wisdom', 'Charisma'],
-         skills: { choose: 2, options: ['History', 'Insight', 'Medicine', 'Persuasion', 'Religion'] },
-         tools: [],
-       },
-    },
-  ];
+export async function getCharacterClasses(combinedContent?: SourcePack['content']): Promise<CharacterClassType[]> {
+    logMessage('debug', 'getCharacterClasses: Fetching character classes.');
+    let classes: CharacterClassType[] = [];
+
+    // 1. Get classes from combined source pack content
+    if (combinedContent?.classes) {
+        classes = Object.values(combinedContent.classes);
+        logMessage('debug', `getCharacterClasses: Found ${classes.length} classes in source packs.`);
+    }
+
+    // 2. TODO: Optionally merge/override with base SRD classes if needed.
+    // For now, we assume source packs contain complete definitions if they exist.
+    // If no classes were found in packs, load base SRD data.
+    if (classes.length === 0) {
+        logMessage('debug', 'getCharacterClasses: No classes in source packs, using base SRD placeholders.');
+        await new Promise(resolve => setTimeout(resolve, 50)); // Simulate network delay
+        classes = [
+            // Add base SRD class definitions here if needed as fallback
+             {
+                name: 'Fighter',
+                description: 'A master of martial combat, skilled with a variety of weapons and armor.',
+                hitDie: 'd10',
+                proficiencies: {
+                    armor: ['Light', 'Medium', 'Heavy', 'Shields'],
+                    weapons: ['Simple', 'Martial'],
+                    savingThrows: ['Strength', 'Constitution'],
+                    skills: { choose: 2, options: ['Acrobatics', 'Animal Handling', 'Athletics', 'History', 'Insight', 'Intimidation', 'Perception', 'Survival'] },
+                },
+                 featuresByLevel: { // Example feature mapping
+                    1: ['FightingStyleArchery', 'SecondWind'], // Feature keys
+                    2: ['ActionSurge'],
+                    // ... add more levels
+                 }
+            },
+             {
+                name: 'Wizard',
+                description: 'A scholarly magic-user capable of manipulating the structures of reality.',
+                hitDie: 'd6',
+                proficiencies: {
+                    armor: [],
+                    weapons: ['Daggers', 'Darts', 'Slings', 'Quarterstaffs', 'Light Crossbows'],
+                    savingThrows: ['Intelligence', 'Wisdom'],
+                    skills: { choose: 2, options: ['Arcana', 'History', 'Insight', 'Investigation', 'Medicine', 'Religion'] },
+                    tools: [],
+                },
+                  featuresByLevel: {
+                    1: ['Spellcasting', 'ArcaneRecovery'],
+                    2: ['ArcaneTradition'],
+                    // ...
+                 }
+            },
+             {
+                name: 'Rogue',
+                description: 'Master of stealth and subtlety.',
+                hitDie: 'd8',
+                proficiencies: {
+                    armor: ['Light'],
+                    weapons: ['Simple', 'Hand Crossbows', 'Longswords', 'Rapiers', 'Shortswords'],
+                    tools: ["Thieves' Tools"],
+                    savingThrows: ['Dexterity', 'Intelligence'],
+                    skills: { choose: 4, options: ['Acrobatics', 'Athletics', 'Deception', 'Insight', 'Intimidation', 'Investigation', 'Perception', 'Performance', 'Persuasion', 'Sleight of Hand', 'Stealth'] },
+                },
+                 featuresByLevel: {
+                    1: ['Expertise', 'SneakAttack', 'ThievesCant'],
+                    2: ['CunningAction'],
+                     // ...
+                 }
+            },
+        ];
+    }
+
+    return classes.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /**
- * Fetches available character races from the D\&D 5e API.
+ * Fetches available character races, prioritizing source pack content.
+ * @param combinedContent - Optional combined content from active source packs.
  * @returns A promise that resolves to an array of character races.
  */
-export async function getCharacterRaces(): Promise<CharacterRace[]> {
-  console.log("getCharacterRaces: Using placeholder data.");
-  // TODO: Implement this by calling an API. Using placeholder data.
-  await new Promise(resolve => setTimeout(resolve, 100)); // Simulate network delay
-  return [
-    {
-      name: 'Human',
-      description: 'Humans are the most common people in the worlds of D\&D, but they live nearly everywhere.',
-      traits: ['Ability Score Increase', 'Extra Language'],
-    },
-    {
-      name: 'Elf',
-      description: 'Elves are a magical people of otherworldly grace, living in the world but not entirely part of it.',
-      traits: ['Darkvision', 'Fey Ancestry', 'Trance'],
-    },
-    {
-      name: 'Dwarf',
-      description: 'Resilient and sturdy.',
-      traits: ['Darkvision', 'Dwarven Resilience', 'Stonecunning'],
-    },
-    {
-      name: 'Halfling',
-      description: 'Small and lucky.',
-      traits: ['Lucky', 'Brave', 'Halfling Nimbleness'],
-    },
-  ];
+export async function getCharacterRaces(combinedContent?: SourcePack['content']): Promise<CharacterRace[]> {
+    logMessage('debug', 'getCharacterRaces: Fetching character races.');
+    let races: CharacterRace[] = [];
+
+     // 1. Get races from combined source pack content
+    if (combinedContent?.races) {
+        races = Object.values(combinedContent.races);
+        logMessage('debug', `getCharacterRaces: Found ${races.length} races in source packs.`);
+    }
+
+    // 2. Fallback to base SRD data if none found in packs.
+    if (races.length === 0) {
+        logMessage('debug', 'getCharacterRaces: No races in source packs, using base SRD placeholders.');
+        await new Promise(resolve => setTimeout(resolve, 50)); // Simulate delay
+        races = [
+            {
+                name: 'Human',
+                description: 'Humans are the most common people in the worlds of D\&D, but they live nearly everywhere.',
+                traits: ['HumanASI', 'ExtraLanguage'], // Feature keys
+            },
+            {
+                name: 'Elf',
+                description: 'Elves are a magical people of otherworldly grace, living in the world but not entirely part of it.',
+                traits: ['Darkvision', 'FeyAncestry', 'Trance'],
+            },
+            {
+                name: 'Dwarf',
+                description: 'Resilient and sturdy.',
+                traits: ['Darkvision', 'DwarvenResilience', 'Stonecunning'],
+            },
+             {
+                name: 'Halfling',
+                description: 'Small and lucky.',
+                traits: ['Lucky', 'Brave', 'HalflingNimbleness'],
+             },
+        ];
+    }
+
+    return races.sort((a, b) => a.name.localeCompare(b.name));
 }
 
+
 /**
- * Fetches level up options for a specific character class and level from the D\&D 5e API.
- * This function simulates fetching ONLY the features gained AT the target level.
+ * Fetches level up options for a specific character class and level.
+ * This function now primarily focuses on identifying features gained AT the target level.
+ * It relies on the class definition (potentially from source packs) having a 'featuresByLevel' map.
+ *
  * @param className The name of the character class.
  * @param targetLevel The level the character is advancing TO.
- * @returns A promise that resolves to the details for the target level.
+ * @param combinedContent Optional combined content for looking up class/feature definitions.
+ * @returns A promise that resolves to the details (features, proficiency bonus) for the target level.
  */
-export async function getLevelUpOptions(className: string, targetLevel: number): Promise<CharacterLevel> {
-  console.log(`getLevelUpOptions: Using placeholder data for ${className} level ${targetLevel}.`);
-  // TODO: Implement this by calling a real API based on className and targetLevel.
-  // This is placeholder data simulating features gained *at* targetLevel.
-  await new Promise(resolve => setTimeout(resolve, 50)); // Simulate network delay (reduced for cumulative fetch)
+export async function getLevelUpOptions(
+    className: string,
+    targetLevel: number,
+    combinedContent?: SourcePack['content']
+): Promise<CharacterLevel> {
+    logMessage('debug', `getLevelUpOptions: Fetching options for ${className} level ${targetLevel}.`);
 
-  let features: Feature[] = [];
-  let proficiencyBonus: number | undefined = undefined;
+    let featuresAtLevel: Feature[] = [];
+    let proficiencyBonus: number | undefined = undefined;
 
-  // Basic proficiency bonus progression
-  if (targetLevel >= 1 && targetLevel <= 4) proficiencyBonus = 2;
-  else if (targetLevel >= 5 && targetLevel <= 8) proficiencyBonus = 3;
-  else if (targetLevel >= 9 && targetLevel <= 12) proficiencyBonus = 4;
-  else if (targetLevel >= 13 && targetLevel <= 16) proficiencyBonus = 5;
-  else if (targetLevel >= 17 && targetLevel <= 20) proficiencyBonus = 6;
+    // 1. Determine Proficiency Bonus (Standard 5e progression)
+    if (targetLevel >= 1 && targetLevel <= 4) proficiencyBonus = 2;
+    else if (targetLevel >= 5 && targetLevel <= 8) proficiencyBonus = 3;
+    else if (targetLevel >= 9 && targetLevel <= 12) proficiencyBonus = 4;
+    else if (targetLevel >= 13 && targetLevel <= 16) proficiencyBonus = 5;
+    else if (targetLevel >= 17 && targetLevel <= 20) proficiencyBonus = 6;
 
+    // 2. Find features gained AT this specific level
+    const classData = combinedContent?.classes?.[className];
+    let featureKeysAtLevel: string[] = [];
 
-  switch (className) {
-    case 'Fighter':
-      if (targetLevel === 1) {
-        features = [
-          { name: 'Fighting Style', description: 'You adopt a particular style of fighting as your specialty (e.g., Archery, Dueling). Choose one.', source: 'Fighter Class' },
-          { name: 'Second Wind', description: 'On your turn, you can use a bonus action to regain hit points equal to 1d10 + your fighter level. Once you use this feature, you must finish a short or long rest before you can use it again.', source: 'Fighter Class', isActionable: true, maxUses: 1, usesResetOn: 'short-rest' }, // Add usage info
-        ];
-      } else if (targetLevel === 2) {
-        features = [
-          { name: 'Action Surge', description: 'On your turn, you can take one additional action. Once you use this feature, you must finish a short or long rest before you can use it again.', source: 'Fighter Class', isActionable: true, maxUses: 1, usesResetOn: 'short-rest' }, // Add usage info (Reset can vary based on level)
-        ];
-      } else if (targetLevel === 3) {
-        features = [
-          { name: 'Martial Archetype', description: 'You choose an archetype that you strive to emulate in your combat styles and techniques (e.g., Battle Master, Champion).', source: 'Fighter Class' },
-          // Note: Specific archetype features would also be listed here in a real implementation.
-        ];
-      }
-      // Add more levels...
-      break;
-    case 'Wizard':
-       if (targetLevel === 1) {
-         features = [
-           { name: 'Spellcasting', description: 'You have learned to untangle and reshape the fabric of reality in harmony with your wishes and expectations.', source: 'Wizard Class' }, // Not directly an action, but enables spell actions
-           { name: 'Arcane Recovery', description: 'You have learned to regain some of your magical energy by studying your spellbook. Once per day when you finish a short rest, you can choose expended spell slots to recover.', source: 'Wizard Class', maxUses: 1, usesResetOn: 'long-rest' }, // Typically used during rest, once per long rest
-         ];
-       } else if (targetLevel === 2) {
-         features = [
-           { name: 'Arcane Tradition', description: 'You choose an arcane tradition, shaping your practice of magic (e.g., School of Evocation, School of Illusion).', source: 'Wizard Class' },
-           // Note: Specific tradition features would also be listed here. Some might be actions.
-         ];
-       }
-       // Add more levels...
-      break;
-     case 'Rogue':
-        if (targetLevel === 1) {
-            features = [
-                { name: 'Expertise', description: 'Choose two of your skill proficiencies, or one skill proficiency and thieves\' tools proficiency. Your proficiency bonus is doubled for any ability check you make that uses either of the chosen proficiencies.', source: 'Rogue Class' },
-                { name: 'Sneak Attack', description: 'Once per turn, you can deal an extra 1d6 damage to one creature you hit with an attack if you have advantage on the attack roll. The attack must use a finesse or a ranged weapon. You don\'t need advantage on the attack roll if another enemy of the target is within 5 feet of it, that enemy isn\'t incapacitated, and you don\'t have disadvantage on the attack roll. The amount of the extra damage increases as you gain levels in this class.', source: 'Rogue Class' }, // This modifies attacks, not a separate action itself
-                { name: 'Thieves\' Cant', description: 'You learn thieves\' cant, a secret mix of dialect, jargon, and code that allows you to hide messages in seemingly normal conversation.', source: 'Rogue Class' },
-            ];
-        } else if (targetLevel === 2) {
-            features = [
-                { name: 'Cunning Action', description: 'Your quick thinking and agility allow you to move and act quickly. You can take a bonus action on each of your turns in combat. This action can be used only to take the Dash, Disengage, or Hide action.', source: 'Rogue Class', isActionable: true }, // Provides bonus actions, no "uses"
-            ];
+    if (classData?.featuresByLevel?.[targetLevel]) {
+         // Use data from source pack if available
+         featureKeysAtLevel = classData.featuresByLevel[targetLevel];
+         logMessage('debug', `Found features for ${className} level ${targetLevel} in source pack: ${featureKeysAtLevel.join(', ')}`);
+    } else {
+        // Fallback to base SRD feature keys for this level (Example)
+        logMessage('debug', `No level ${targetLevel} features for ${className} in source pack, using base definitions.`);
+         switch (className) {
+            case 'Fighter':
+                if (targetLevel === 1) featureKeysAtLevel = ['FightingStyleArchery', 'SecondWind'];
+                else if (targetLevel === 2) featureKeysAtLevel = ['ActionSurge'];
+                // else if (targetLevel === 3) featureKeysAtLevel = ['MartialArchetype']; // Placeholder key
+                break;
+             case 'Rogue':
+                 if (targetLevel === 1) featureKeysAtLevel = ['Expertise', 'SneakAttack', 'ThievesCant'];
+                 else if (targetLevel === 2) featureKeysAtLevel = ['CunningAction'];
+                 break;
+            // Add other base classes and levels
         }
-        // Add more levels...
-       break;
-    case 'Cleric':
-        if (targetLevel === 1) {
-            features = [
-                { name: 'Spellcasting', description: 'As a conduit for divine power, you can cast cleric spells.', source: 'Cleric Class' },
-                { name: 'Divine Domain', description: 'Choose one domain related to your deity (e.g., Life, Knowledge, War). Your choice grants you domain spells and other features.', source: 'Cleric Class' },
-                // Note: Specific domain features (like heavy armor proficiency for War) would be listed here. Some might be actions (like Channel Divinity options).
-            ];
-        } else if (targetLevel === 2) {
-            features = [
-                 { name: 'Channel Divinity', description: 'You gain the ability to channel divine energy directly from your deity, using that energy to fuel magical effects. You start with two such effects: Turn Undead and an effect determined by your domain. Some domains grant you additional effects as you advance in levels. When you use your Channel Divinity, you choose which effect to create. You must then finish a short or long rest to use your Channel Divinity again.', source: 'Cleric Class', isActionable: true, maxUses: 1, usesResetOn: 'short-rest' }, // Combined description, usage tied to the overall feature
-                 // Individual effects like Turn Undead aren't separate use-limited features, they consume the main Channel Divinity use.
-            ];
+    }
+
+    // 3. Fetch full definitions for the features gained at this level
+    if (featureKeysAtLevel.length > 0) {
+        try {
+            featuresAtLevel = await getMultipleFeatureDefinitions(featureKeysAtLevel, combinedContent);
+        } catch (error) {
+             const e = error instanceof Error ? error : new Error(String(error));
+             logError(e, {
+                function: 'getLevelUpOptions',
+                className: className,
+                targetLevel: targetLevel,
+                featureKeys: featureKeysAtLevel,
+             });
+             // Depending on requirements, might throw or return empty features
+             featuresAtLevel = []; // Return empty on error
         }
-        // Add more levels...
-       break;
-    default:
-      features = [{ name: `Placeholder Feature for ${className}`, description: `Feature gained at level ${targetLevel}.`, source: `${className} Class`}];
-      break;
-  }
+    }
 
-  // Simulate an error for testing
-  // if (className === 'Rogue' && targetLevel === 2) {
-  //   throw new Error("Network error simulating API failure for Rogue level 2.");
-  // }
-
-  return {
-    level: targetLevel,
-    features: features,
-    proficiencyBonus: proficiencyBonus,
-    // Add spellcasting details if relevant for the class/level
-  };
+    return {
+        level: targetLevel,
+        features: featuresAtLevel,
+        proficiencyBonus: proficiencyBonus,
+    };
 }
 
 
 /**
- * Fetches detailed descriptions for a list of race trait names.
- * @param traitNames - An array of trait names to fetch details for.
+ * Fetches detailed descriptions for a list of race trait names, using source packs.
+ * @param traitNames - An array of trait keys/names to fetch details for.
+ * @param combinedContent - Combined content from active source packs.
  * @returns A promise that resolves to an array of Feature objects representing the traits.
  */
-export async function getRaceTraitsDetails(traitNames: string[]): Promise<Feature[]> {
-    console.log(`getRaceTraitsDetails: Using placeholder data for traits: ${traitNames.join(', ')}`);
-    // TODO: Implement this by calling a real API based on traitNames.
-    // This is placeholder data.
-    await new Promise(resolve => setTimeout(resolve, 50)); // Simulate network delay
-
-    // Mark some traits as potentially actionable if they grant specific actions/abilities
-    const allTraitDetails: Record<string, Feature> = {
-        'Ability Score Increase': { name: 'Ability Score Increase', description: 'Your ability scores each increase by 1.', source: 'Human Race' },
-        'Extra Language': { name: 'Extra Language', description: 'You can speak, read, and write one extra language of your choice.', source: 'Human Race' },
-        'Darkvision': { name: 'Darkvision', description: 'Accustomed to twilit forests and the night sky, you have superior vision in dark and dim conditions. You can see in dim light within 60 feet of you as if it were bright light, and in darkness as if it were dim light.', source: 'Elf/Dwarf Race' }, // Passive ability
-        'Fey Ancestry': { name: 'Fey Ancestry', description: "You have advantage on saving throws against being charmed, and magic can't put you to sleep.", source: 'Elf Race' }, // Passive resistance
-        'Trance': { name: 'Trance', description: 'Elves don’t need to sleep. Instead, they meditate deeply, remaining semiconscious, for 4 hours a day.', source: 'Elf Race' }, // Affects rest
-        'Dwarven Resilience': { name: 'Dwarven Resilience', description: 'You have advantage on saving throws against poison, and you have resistance against poison damage.', source: 'Dwarf Race' }, // Passive resistance
-        'Stonecunning': { name: 'Stonecunning', description: 'Whenever you make an Intelligence (History) check related to the origin of stonework, you are considered proficient in the History skill and add double your proficiency bonus to the check, instead of your normal proficiency bonus.', source: 'Dwarf Race' }, // Affects skill checks
-        'Lucky': { name: 'Lucky', description: 'When you roll a 1 on an attack roll, ability check, or saving throw, you can reroll the die and must use the new roll.', source: 'Halfling Race', isActionable: true, maxUses: null, usesResetOn: null }, // Actionable, but uses are situational/reaction based, not tracked numerically like class features. Set maxUses/usesResetOn to null.
-        'Brave': { name: 'Brave', description: 'You have advantage on saving throws against being frightened.', source: 'Halfling Race' }, // Passive resistance
-        'Halfling Nimbleness': { name: 'Halfling Nimbleness', description: 'You can move through the space of any creature that is of a size larger than yours.', source: 'Halfling Race' }, // Affects movement
-    };
-
-    return traitNames
-        .map(name => allTraitDetails[name])
-        .filter((trait): trait is Feature => trait !== undefined); // Type guard to filter out undefined
+export async function getRaceTraitsDetails(
+    traitNames: string[],
+    combinedContent?: SourcePack['content']
+): Promise<Feature[]> {
+    logMessage('debug', `getRaceTraitsDetails: Fetching details for traits: ${traitNames.join(', ')}`);
+    if (!traitNames || traitNames.length === 0) {
+        return [];
+    }
+    // Use getMultipleFeatureDefinitions which already handles combinedContent fallback
+    return getMultipleFeatureDefinitions(traitNames, combinedContent);
 }
 
+
 /**
- * Fetches all cumulative class features up to a certain level.
- * This requires multiple calls to getLevelUpOptions (or a dedicated API endpoint).
+ * Fetches all cumulative class features up to a certain level, using source packs.
  * @param className The name of the character class.
  * @param maxLevel The maximum level to fetch features for.
+ * @param combinedContent Optional combined content from active source packs.
  * @returns A promise that resolves to an array of all features gained up to maxLevel.
  */
-export async function getCumulativeClassFeatures(className: string, maxLevel: number): Promise<Feature[]> {
-    let allFeatures: Feature[] = [];
-    if (!className || maxLevel < 1) {
-        console.warn("getCumulativeClassFeatures: Invalid class name or level provided.");
-        return []; // Guard clause
+export async function getCumulativeClassFeatures(
+    className: string,
+    maxLevel: number,
+    combinedContent?: SourcePack['content']
+): Promise<Feature[]> {
+    if (!className || maxLevel < 1 || !combinedContent) {
+        logMessage('warn', "getCumulativeClassFeatures: Invalid class name, level, or missing combinedContent.");
+        return [];
     }
 
-    console.log(`getCumulativeClassFeatures: Fetching features for ${className} up to level ${maxLevel}.`);
-    // Use Promise.all for potentially faster fetching if the API supports concurrent requests
-    const levelPromises: Promise<CharacterLevel>[] = [];
-    for (let level = 1; level <= maxLevel; level++) {
-        levelPromises.push(getLevelUpOptions(className, level));
+    logMessage('debug', `getCumulativeClassFeatures: Fetching cumulative features for ${className} up to level ${maxLevel}.`);
+    const classData = combinedContent.classes?.[className];
+    let allFeatureKeys: string[] = [];
+
+    if (classData?.featuresByLevel) {
+        // Preferred: Use featuresByLevel from source pack
+        for (let level = 1; level <= maxLevel; level++) {
+            if (classData.featuresByLevel[level]) {
+                allFeatureKeys.push(...classData.featuresByLevel[level]);
+            }
+        }
+    } else {
+        // Fallback: Manually map base SRD features level by level
+        logMessage('debug', `Class "${className}" lacks featuresByLevel in source pack, using base definitions.`);
+        for (let level = 1; level <= maxLevel; level++) {
+             // This requires duplicating the logic from getLevelUpOptions fallback
+             let keysThisLevel: string[] = [];
+             switch (className) {
+                 case 'Fighter':
+                     if (level === 1) keysThisLevel = ['FightingStyleArchery', 'SecondWind'];
+                     else if (level === 2) keysThisLevel = ['ActionSurge'];
+                     // Add more levels...
+                     break;
+                  case 'Rogue':
+                      if (level === 1) keysThisLevel = ['Expertise', 'SneakAttack', 'ThievesCant'];
+                      else if (level === 2) keysThisLevel = ['CunningAction'];
+                      // Add more levels...
+                     break;
+                // Add other base classes
+             }
+             allFeatureKeys.push(...keysThisLevel);
+        }
     }
 
+    // Fetch full definitions for all unique collected keys
+    const uniqueFeatureKeys = [...new Set(allFeatureKeys)];
     try {
-        const levelResults = await Promise.all(levelPromises);
-        levelResults.forEach(levelData => {
-            allFeatures = allFeatures.concat(levelData.features);
-        });
+        return await getMultipleFeatureDefinitions(uniqueFeatureKeys, combinedContent);
     } catch (error) {
-        console.error(`Error in getCumulativeClassFeatures for ${className} up to level ${maxLevel}:`, error);
-        // Handle the error appropriately - maybe return partial data or throw
-        throw new Error(`Failed to fetch all features for ${className}.`);
+         const e = error instanceof Error ? error : new Error(String(error));
+         logError(e, {
+            function: 'getCumulativeClassFeatures',
+            className: className,
+            maxLevel: maxLevel,
+            uniqueFeatureKeys: uniqueFeatureKeys,
+         });
+        throw new Error(`Failed to fetch cumulative features for ${className}.`);
     }
-
-    return allFeatures;
 }
 
+
 /**
- * Fetches a list of available equipment items from the database/API.
+ * Fetches a list of available equipment items, prioritizing source pack content.
+ * @param combinedContent - Optional combined content from active source packs.
  * @returns A promise that resolves to an array of EquipmentItem objects.
  */
-export async function getAvailableEquipmentItems(): Promise<EquipmentItem[]> {
-  console.log('getAvailableEquipmentItems: Using placeholder data.');
-  // TODO: Implement this by calling a real API or database. Using placeholder data.
-  await new Promise(resolve => setTimeout(resolve, 100)); // Simulate network delay
+export async function getAvailableEquipmentItems(combinedContent?: SourcePack['content']): Promise<EquipmentItem[]> {
+    logMessage('debug', 'getAvailableEquipmentItems: Fetching equipment items.');
+    let items: EquipmentItem[] = [];
 
-  return [
-    { name: 'Backpack', description: 'Holds adventuring gear', weight: 5, cost: '2 gp', type: 'Adventuring Gear' },
-    { name: 'Bedroll', description: 'For sleeping', weight: 7, cost: '1 gp', type: 'Adventuring Gear' },
-    { name: 'Rope (50 feet)', description: 'Hempen rope', weight: 10, cost: '1 gp', type: 'Adventuring Gear' },
-    { name: 'Torch', description: 'Provides light', weight: 1, cost: '1 cp', type: 'Adventuring Gear' },
-    { name: 'Rations (1 day)', description: 'Food for one day', weight: 2, cost: '5 sp', type: 'Adventuring Gear' },
-    { name: 'Waterskin', description: 'Holds water (4 pints)', weight: 5, cost: '2 sp', type: 'Adventuring Gear' },
-    { name: 'Longsword', description: 'Versatile martial weapon', weight: 3, cost: '15 gp', type: 'Weapon', weaponCategory: 'Martial Melee', damageDice: '1d8', damageType: 'Slashing', properties: ['Versatile (1d10)'] },
-    { name: 'Dagger', description: 'Simple melee weapon', weight: 1, cost: '2 gp', type: 'Weapon', weaponCategory: 'Simple Melee', damageDice: '1d4', damageType: 'Piercing', properties: ['Finesse', 'Light', 'Thrown (range 20/60)'] },
-    { name: 'Shortsword', description: 'Simple melee weapon', weight: 2, cost: '10 gp', type: 'Weapon', weaponCategory: 'Martial Melee', damageDice: '1d6', damageType: 'Piercing', properties: ['Finesse', 'Light'] },
-    { name: 'Rapier', description: 'Martial melee weapon', weight: 2, cost: '25 gp', type: 'Weapon', weaponCategory: 'Martial Melee', damageDice: '1d8', damageType: 'Piercing', properties: ['Finesse'] },
-    { name: 'Shortbow', description: 'Simple ranged weapon', weight: 2, cost: '25 gp', type: 'Weapon', weaponCategory: 'Simple Ranged', damageDice: '1d6', damageType: 'Piercing', properties: ['Ammunition (range 80/320)', 'Two-Handed'] },
-    { name: 'Light Crossbow', description: 'Simple ranged weapon', weight: 5, cost: '25 gp', type: 'Weapon', weaponCategory: 'Simple Ranged', damageDice: '1d8', damageType: 'Piercing', properties: ['Ammunition (range 80/320)', 'Loading', 'Two-Handed'] },
-    { name: 'Leather Armor', description: 'Light armor', weight: 10, cost: '10 gp', type: 'Armor', armorCategory: 'Light', baseAC: 11, addDexModifier: true, maxDexBonus: null, strengthRequirement: null, stealthDisadvantage: false },
-    { name: 'Scale Mail', description: 'Medium armor', weight: 45, cost: '50 gp', type: 'Armor', armorCategory: 'Medium', baseAC: 14, addDexModifier: true, maxDexBonus: 2, strengthRequirement: null, stealthDisadvantage: true },
-    { name: 'Chain Mail', description: 'Heavy armor', weight: 55, cost: '75 gp', type: 'Armor', armorCategory: 'Heavy', baseAC: 16, addDexModifier: false, maxDexBonus: null, strengthRequirement: 13, stealthDisadvantage: true },
-    { name: 'Shield', description: 'Increases AC by 2', weight: 6, cost: '10 gp', type: 'Armor', armorCategory: 'Shield', baseAC: 2, addDexModifier: false, maxDexBonus: null, strengthRequirement: null, stealthDisadvantage: false }, // Shield gives a bonus, not base AC
-    { name: 'Healing Potion', description: 'Regain 2d4+2 hit points', weight: 0.5, cost: '50 gp', type: 'Potion' },
-    { name: 'Thieves\' Tools', description: 'Tools for disarming traps and opening locks', weight: 1, cost: '25 gp', type: 'Tool' },
-  ].sort((a, b) => a.name.localeCompare(b.name)); // Sort alphabetically
+     // 1. Get items from combined source pack content
+    if (combinedContent?.items) {
+        items = Object.entries(combinedContent.items).map(([name, data]) => ({ name, ...data }));
+        logMessage('debug', `getAvailableEquipmentItems: Found ${items.length} items in source packs.`);
+    }
+
+    // 2. Fallback to base SRD data if none found in packs.
+    if (items.length === 0) {
+        logMessage('debug', 'getAvailableEquipmentItems: No items in source packs, using base SRD placeholders.');
+        await new Promise(resolve => setTimeout(resolve, 50)); // Simulate delay
+        items = [
+            // Add base SRD item definitions here
+            { name: 'Backpack', description: 'Holds adventuring gear', weight: 5, cost: '2 gp', type: 'Adventuring Gear' },
+            { name: 'Bedroll', description: 'For sleeping', weight: 7, cost: '1 gp', type: 'Adventuring Gear' },
+            { name: 'Rope (50 feet)', description: 'Hempen rope', weight: 10, cost: '1 gp', type: 'Adventuring Gear' },
+            { name: 'Torch', description: 'Provides light', weight: 1, cost: '1 cp', type: 'Adventuring Gear' },
+            { name: 'Rations (1 day)', description: 'Food for one day', weight: 2, cost: '5 sp', type: 'Adventuring Gear' },
+            { name: 'Waterskin', description: 'Holds water (4 pints)', weight: 5, cost: '2 sp', type: 'Adventuring Gear' },
+            { name: 'Longsword', description: 'Versatile martial weapon', weight: 3, cost: '15 gp', type: 'Weapon', weaponCategory: 'Martial Melee', damageDice: '1d8', damageType: 'Slashing', properties: ['Versatile (1d10)'] },
+            { name: 'Dagger', description: 'Simple melee weapon', weight: 1, cost: '2 gp', type: 'Weapon', weaponCategory: 'Simple Melee', damageDice: '1d4', damageType: 'Piercing', properties: ['Finesse', 'Light', 'Thrown (range 20/60)'] },
+            { name: 'Shortsword', description: 'Simple melee weapon', weight: 2, cost: '10 gp', type: 'Weapon', weaponCategory: 'Martial Melee', damageDice: '1d6', damageType: 'Piercing', properties: ['Finesse', 'Light'] },
+            { name: 'Rapier', description: 'Martial melee weapon', weight: 2, cost: '25 gp', type: 'Weapon', weaponCategory: 'Martial Melee', damageDice: '1d8', damageType: 'Piercing', properties: ['Finesse'] },
+            { name: 'Shortbow', description: 'Simple ranged weapon', weight: 2, cost: '25 gp', type: 'Weapon', weaponCategory: 'Simple Ranged', damageDice: '1d6', damageType: 'Piercing', properties: ['Ammunition (range 80/320)', 'Two-Handed'] },
+            { name: 'Light Crossbow', description: 'Simple ranged weapon', weight: 5, cost: '25 gp', type: 'Weapon', weaponCategory: 'Simple Ranged', damageDice: '1d8', damageType: 'Piercing', properties: ['Ammunition (range 80/320)', 'Loading', 'Two-Handed'] },
+            { name: 'Leather Armor', description: 'Light armor', weight: 10, cost: '10 gp', type: 'Armor', armorCategory: 'Light', baseAC: 11, addDexModifier: true, maxDexBonus: null, strengthRequirement: null, stealthDisadvantage: false },
+            { name: 'Scale Mail', description: 'Medium armor', weight: 45, cost: '50 gp', type: 'Armor', armorCategory: 'Medium', baseAC: 14, addDexModifier: true, maxDexBonus: 2, strengthRequirement: null, stealthDisadvantage: true },
+            { name: 'Chain Mail', description: 'Heavy armor', weight: 55, cost: '75 gp', type: 'Armor', armorCategory: 'Heavy', baseAC: 16, addDexModifier: false, maxDexBonus: null, strengthRequirement: 13, stealthDisadvantage: true },
+            { name: 'Shield', description: 'Increases AC by 2', weight: 6, cost: '10 gp', type: 'Armor', armorCategory: 'Shield', baseAC: 2, addDexModifier: false, maxDexBonus: null, strengthRequirement: null, stealthDisadvantage: false },
+            { name: 'Healing Potion', description: 'Regain 2d4+2 hit points', weight: 0.5, cost: '50 gp', type: 'Potion' },
+            { name: 'Thieves\' Tools', description: 'Tools for disarming traps and opening locks', weight: 1, cost: '25 gp', type: 'Tool' },
+        ];
+    }
+
+  return items.sort((a, b) => a.name.localeCompare(b.name));
 }
 
 
 /**
- * Fetches background details based on name.
+ * Fetches background details based on name, prioritizing source pack content.
  * @param backgroundName The name of the background.
+ * @param combinedContent - Optional combined content from active source packs.
  * @returns A promise resolving to background info or null.
  */
-export async function getBackgroundDetails(backgroundName: string): Promise<BackgroundInfo | null> {
-    console.log(`getBackgroundDetails: Using placeholder data for background: ${backgroundName}`);
-    await new Promise(resolve => setTimeout(resolve, 50)); // Simulate delay
+export async function getBackgroundDetails(
+    backgroundName: string,
+    combinedContent?: SourcePack['content']
+): Promise<BackgroundInfo | null> {
+    logMessage('debug', `getBackgroundDetails: Fetching details for background: ${backgroundName}`);
 
-    // MOCK_BACKGROUNDS constant defined in step-5-background.tsx or moved to a shared location
-    const MOCK_BACKGROUNDS: BackgroundInfo[] = [
-        {
+    // 1. Check combined content
+    if (combinedContent?.backgrounds?.[backgroundName]) {
+         logMessage('debug', `Found background "${backgroundName}" in source packs.`);
+        return combinedContent.backgrounds[backgroundName];
+    }
+
+    // 2. Fallback to base SRD data
+    logMessage('debug', `Background "${backgroundName}" not found in source packs, using base SRD placeholders.`);
+    await new Promise(resolve => setTimeout(resolve, 50)); // Simulate delay
+    const BASE_BACKGROUNDS: Record<string, BackgroundInfo> = {
+        "Acolyte": {
             name: "Acolyte",
+            description: "You have spent your life in the service of a temple...",
             skillProficiencies: ["Insight", "Religion"],
-            // Add other properties if needed based on BackgroundInfo type
+            languages: { choose: 2 },
+            feature: { name: "Shelter of the Faithful", description: "..." },
+            equipment: ["Holy symbol", "Prayer book", "5 sticks incense", "Vestments", "Common clothes", "15 gp"],
         },
-        {
+        "Urchin": {
             name: "Urchin",
+            description: "You grew up on the streets alone...",
             skillProficiencies: ["Sleight of Hand", "Stealth"],
             toolProficiencies: ["Disguise kit", "Thieves' tools"],
+            feature: { name: "City Secrets", description: "..." },
+            equipment: ["Small knife", "Map of city", "Pet mouse", "Token", "Common clothes", "10 gp"],
         },
-         {
+         "Soldier": {
              name: "Soldier",
+             description: "War has been your life...",
              skillProficiencies: ["Athletics", "Intimidation"],
              toolProficiencies: ["One type of gaming set", "Vehicles (land)"],
+             feature: { name: "Military Rank", description: "..." },
+             equipment: ["Insignia of rank", "Trophy", "Gaming set", "Common clothes", "10 gp"],
          }
-        // Add more backgrounds
-    ];
+        // Add more base backgrounds
+    };
 
-
-    const background = MOCK_BACKGROUNDS.find(bg => bg.name === backgroundName);
-    return background || null;
+    return BASE_BACKGROUNDS[backgroundName] || null;
 }

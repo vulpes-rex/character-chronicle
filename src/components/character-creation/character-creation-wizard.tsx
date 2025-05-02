@@ -6,14 +6,16 @@ import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { saveCharacter, updateCharacter } from '@/services/character-service'; // Import updateCharacter
-import type { Character, EquipmentItem, Feature, HitPointsState, HitDiceState, CharacterClass as CharacterClassType } from '@/lib/types';
-import { getCharacterClasses, getCharacterRaces, getCumulativeClassFeatures, getRaceTraitsDetails, getAvailableEquipmentItems, getBackgroundDetails } from '@/services/dnd-api';
+import type { Character, EquipmentItem, Feature, HitPointsState, HitDiceState, CharacterClass as CharacterClassType, SourcePack } from '@/lib/types';
+import { getCharacterClasses, getCharacterRaces, getCumulativeClassFeatures, getRaceTraitsDetails, getAvailableEquipmentItems, getBackgroundDetails, getBackgroundFeatures } from '@/services/dnd-api'; // Updated imports
 import { calculateSkillModifier, SKILL_ABILITY_MAP, ALL_SKILLS, rollDice } from '@/lib/types';
 import { useQuery } from '@tanstack/react-query';
 import { Progress } from '@/components/ui/progress';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { AlertCircle, Loader2 } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
+import { getCombinedContentFromPacks } from '@/services/campaign-service'; // Import function to get combined content
+import { applyFeatureEffects } from '@/services/feature-service'; // Import feature application service
 
 // Import step components
 import { Step1BasicInfo } from './step-1-basic-info';
@@ -31,6 +33,7 @@ export type PartialCharacterFormData = Partial<Omit<Character, 'id' | 'createdAt
     selectedClasses?: { [key: string]: number }; // Track selected classes and levels
     tempFeatures?: Feature[]; // Temporary holding for features
     tempProficiencies?: Partial<Character['proficiencies']>; // Temporary holding for proficiencies
+    activeSourcePackIds?: string[]; // Track selected source packs (relevant if selectable during creation)
 }>;
 
 // Helper to map full Character to PartialCharacterFormData for initialization
@@ -47,12 +50,13 @@ const mapCharacterToFormData = (char: Character): PartialCharacterFormData => ({
     equipment: char.equipment as Partial<EquipmentItem>[], // Cast needed
     backstory: char.backstory,
     appearance: char.appearance,
-    // Reconstruct selectedClasses from primary class and level for simplicity in editing single class
-    // TODO: Handle multiclass editing properly if needed
-    selectedClasses: { [char.class]: char.level },
+    selectedClasses: { [char.class]: char.level }, // Simple single class representation
     tempFeatures: char.features,
     tempProficiencies: char.proficiencies,
+    // activeSourcePackIds: char.campaignId ? (await loadCampaign(char.campaignId))?.activeSourcePackIds : ['srd'], // Needs async logic if loading campaign packs
+    activeSourcePackIds: ['srd'], // Default or needs fetching based on context
 });
+
 
 interface CharacterCreationWizardProps {
     initialData?: Character; // Optional initial data for editing
@@ -62,7 +66,6 @@ interface CharacterCreationWizardProps {
 export function CharacterCreationWizard({ initialData, editMode = false }: CharacterCreationWizardProps) {
     const TOTAL_STEPS = editMode ? 5 : 6; // Skip equipment step in edit mode
     const [currentStep, setCurrentStep] = useState(1);
-    // Initialize state with initialData if provided, otherwise default empty state
     const [characterData, setCharacterData] = useState<PartialCharacterFormData>(
         initialData ? mapCharacterToFormData(initialData) : {
             playerName: '',
@@ -80,6 +83,7 @@ export function CharacterCreationWizard({ initialData, editMode = false }: Chara
             selectedClasses: {},
             tempFeatures: [],
             tempProficiencies: { armor: [], weapons: [], tools: [], savingThrows: [] },
+            activeSourcePackIds: ['srd'], // Default to SRD
         }
     );
     const [isValid, setIsValid] = useState(false); // Track if current step data is valid
@@ -88,20 +92,32 @@ export function CharacterCreationWizard({ initialData, editMode = false }: Chara
     const router = useRouter();
     const { toast } = useToast();
 
-    // Fetch data needed across steps
-    const { data: availableClasses = [], isLoading: isLoadingClasses } = useQuery<CharacterClassType[], Error>({
-        queryKey: ['characterClasses'],
-        queryFn: getCharacterClasses,
+    // Fetch combined content based on active packs (defaults to 'srd')
+    // Use characterData.activeSourcePackIds which might be updated by a campaign selection step if added later
+    const { data: combinedContent, isLoading: isLoadingContent } = useQuery<SourcePack['content'], Error>({
+        queryKey: ['combinedContent', characterData.activeSourcePackIds],
+        queryFn: () => getCombinedContentFromPacks(characterData.activeSourcePackIds || ['srd']),
+        staleTime: 5 * 60 * 1000, // Cache for 5 minutes
+        enabled: true, // Always enabled, will refetch if activeSourcePackIds changes
+    });
+
+
+    // Fetch classes, races, etc. using the combined content
+     const { data: availableClasses = [], isLoading: isLoadingClasses } = useQuery<CharacterClassType[], Error>({
+        queryKey: ['characterClasses', combinedContent], // Include combinedContent in key
+        queryFn: () => getCharacterClasses(combinedContent),
+        enabled: !!combinedContent, // Enable only when content is loaded
         staleTime: Infinity,
     });
 
     const { data: availableRaces = [], isLoading: isLoadingRaces } = useQuery<Awaited<ReturnType<typeof getCharacterRaces>>, Error>({
-        queryKey: ['characterRaces'],
-        queryFn: getCharacterRaces,
+        queryKey: ['characterRaces', combinedContent], // Include combinedContent in key
+        queryFn: () => getCharacterRaces(combinedContent),
+        enabled: !!combinedContent, // Enable only when content is loaded
         staleTime: Infinity,
     });
 
-    const isFetchingInitialData = isLoadingClasses || isLoadingRaces;
+    const isFetchingInitialData = isLoadingContent || isLoadingClasses || isLoadingRaces;
 
     // Memoize updateCharacterData to prevent re-renders in child components
      const updateCharacterData = useCallback((newData: Partial<PartialCharacterFormData>) => {
@@ -142,103 +158,111 @@ export function CharacterCreationWizard({ initialData, editMode = false }: Chara
             toast({ variant: 'destructive', title: 'Incomplete Step', description: 'Please complete the final step.' });
             return;
         }
+        if (!combinedContent) {
+             toast({ variant: 'destructive', title: 'Data Error', description: 'Core content data failed to load. Cannot save character.' });
+             return;
+        }
         setIsLoading(true);
         setApiError(null);
 
         try {
-             // --- Final Data Calculation (Same as creation for now) ---
+             // --- Re-calculate final derived data based on choices ---
              const finalLevel = Object.values(characterData.selectedClasses ?? {}).reduce((sum, lvl) => sum + lvl, 0) || 1;
-             const primaryClass = Object.keys(characterData.selectedClasses ?? {})[0] ?? characterData.class ?? '';
-             const selectedClassData = availableClasses.find(c => c.name === primaryClass);
+             const primaryClassKey = Object.keys(characterData.selectedClasses ?? {})[0] ?? characterData.class ?? '';
+             const primaryClassData = combinedContent.classes?.[primaryClassKey];
 
-             if (!characterData.race || !primaryClass || !selectedClassData) {
-                throw new Error("Core character information (race, class) is missing.");
+             if (!characterData.race || !primaryClassKey || !primaryClassData) {
+                throw new Error("Core character information (race, class) is missing or invalid in content packs.");
              }
 
-             const proficiencyBonus = calculateProficiencyBonus(finalLevel);
-             const conModifier = Math.floor(((characterData.stats?.constitution ?? 10) - 10) / 2);
+            // Fetch final features based on race and class/level choices
+            const raceFeatures = await getRaceFeatures(characterData.race, combinedContent);
+            const classFeatures = await getCumulativeClassFeatures(primaryClassKey, finalLevel, combinedContent);
+            const backgroundFeatures = characterData.background ? await getBackgroundFeatures(characterData.background, combinedContent) : [];
+            const allBaseFeatures = [...raceFeatures, ...classFeatures, ...backgroundFeatures];
 
-             // Recalculate HP based on final multiclass levels
-             let maxHp = 0;
-             let hitDice: HitDiceState = { total: finalLevel, remaining: finalLevel, dieType: null };
-
-             // Calculate HP level by level for multiclassing
-             Object.entries(characterData.selectedClasses ?? {}).forEach(([className, level], index) => {
-                 const classData = availableClasses.find(c => c.name === className);
-                 if (!classData) return;
-
-                 const classHitDieSides = parseInt(classData.hitDie.substring(1), 10);
-
-                 if (index === 0) {
-                      maxHp = classHitDieSides + conModifier;
-                      hitDice.dieType = classData.hitDie;
-                      if (level > 1) {
-                          maxHp += (level - 1) * (Math.ceil((classHitDieSides + 1) / 2) + conModifier);
-                      }
-                 } else {
-                     for (let i = 0; i < level; i++) {
-                          maxHp += Math.ceil((classHitDieSides + 1) / 2) + conModifier;
-                     }
-                 }
-             });
-             maxHp = Math.max(1, maxHp);
-
-             // Keep existing current/temp HP if editing, otherwise start full
-             const finalHitPoints: HitPointsState = {
-                 max: maxHp,
-                 current: initialData?.hitPoints?.current ?? maxHp,
-                 temporary: initialData?.hitPoints?.temporary ?? 0,
-             };
-
-             // Keep existing remaining hit dice if editing
-             hitDice.remaining = initialData?.hitDice?.remaining ?? finalLevel;
-
-             // Final Skill Proficiencies
-            const finalSkills: Record<string, boolean> = {};
-            ALL_SKILLS.forEach(skill => {
-                finalSkills[skill] = !!characterData.skills?.[skill];
-            });
-
-            // Construct final Character object (or partial for update)
-            // Note: When updating, only send changed fields if possible, but for simplicity sending most fields.
-            const characterToSave: Partial<Omit<Character, 'id' | 'createdAt'>> & {id?: string} = {
-                id: initialData?.id, // Include ID for update
-                playerName: characterData.playerName || '',
-                characterName: characterData.characterName || '',
-                race: characterData.race || '',
-                class: primaryClass,
-                level: finalLevel,
-                background: characterData.background || '',
-                alignment: characterData.alignment || '',
-                stats: {
-                    strength: characterData.stats?.strength ?? 10,
-                    dexterity: characterData.stats?.dexterity ?? 10,
-                    constitution: characterData.stats?.constitution ?? 10,
-                    intelligence: characterData.stats?.intelligence ?? 10,
-                    wisdom: characterData.stats?.wisdom ?? 10,
-                    charisma: characterData.stats?.charisma ?? 10,
-                },
-                skills: finalSkills,
-                hitPoints: finalHitPoints,
-                hitDice: hitDice,
-                // Only include equipment if NOT editing or if it's the last step in creation mode
-                ...(!editMode && currentStep === TOTAL_STEPS && { equipment: (characterData.equipment as EquipmentItem[])?.map(item => ({
+             // Construct a temporary full Character object with BASE data to apply effects
+             const baseCharacterForCalc: Character = {
+                 // Use base values from the form state
+                 id: initialData?.id || 'temp-calc-id', // Temporary ID for calculation
+                 playerName: characterData.playerName || '',
+                 characterName: characterData.characterName || '',
+                 race: characterData.race || '',
+                 class: primaryClassKey,
+                 level: finalLevel,
+                 background: characterData.background || '',
+                 alignment: characterData.alignment || '',
+                 stats: characterData.stats || { strength: 10, dexterity: 10, constitution: 10, intelligence: 10, wisdom: 10, charisma: 10 },
+                 skills: characterData.skills || {}, // Base skill choices from form
+                 hitPoints: { max: 0, current: 0, temporary: 0 }, // Will be calculated
+                 hitDice: { total: finalLevel, remaining: finalLevel, dieType: primaryClassData.hitDie }, // Set die type
+                 equipment: (characterData.equipment as EquipmentItem[])?.map(item => ({ // Ensure full item structure
                      ...item,
                      quantity: item.quantity ?? 1,
                      isEquipped: item.isEquipped ?? false,
-                 })) || [] }),
-                 // If editing, equipment might be managed elsewhere (character sheet) or loaded initially
-                 ...(editMode && initialData?.equipment && { equipment: initialData.equipment }),
-                proficiencies: {
-                     armor: characterData.tempProficiencies?.armor ?? [],
-                     weapons: characterData.tempProficiencies?.weapons ?? [],
-                     tools: characterData.tempProficiencies?.tools ?? [],
-                     savingThrows: characterData.tempProficiencies?.savingThrows ?? [],
-                 },
-                features: characterData.tempFeatures || [],
-                backstory: characterData.backstory || '',
-                appearance: characterData.appearance || '',
-                campaignId: initialData?.campaignId, // Preserve campaign ID if editing
+                 })) || [],
+                 proficiencies: characterData.tempProficiencies || { armor: [], weapons: [], tools: [], savingThrows: [] }, // Base proficiencies from form steps
+                 features: allBaseFeatures, // Use freshly fetched features
+                 backstory: characterData.backstory || '',
+                 appearance: characterData.appearance || '',
+             };
+
+              // Apply feature effects to get final calculated values
+              const derivedCharacter = await applyFeatureEffects(baseCharacterForCalc);
+
+
+             // Recalculate HP based on final CON and class levels
+             const finalConModifier = Math.floor(((derivedCharacter.stats.constitution ?? 10) - 10) / 2);
+             let finalMaxHp = 0;
+             let finalHitDice: HitDiceState = { ...derivedCharacter.hitDice, total: finalLevel, remaining: finalLevel }; // Start with correct total/remaining
+
+            Object.entries(characterData.selectedClasses ?? {}).forEach(([className, level], index) => {
+                const classData = combinedContent.classes?.[className];
+                if (!classData) return;
+                const classHitDieSides = parseInt(classData.hitDie.substring(1), 10);
+
+                if (index === 0) { // First class
+                    finalMaxHp = classHitDieSides + finalConModifier;
+                     finalHitDice.dieType = classData.hitDie; // Ensure primary hit die is set
+                    if (level > 1) {
+                        finalMaxHp += (level - 1) * (Math.ceil((classHitDieSides + 1) / 2) + finalConModifier);
+                    }
+                } else { // Multiclass levels
+                    for (let i = 0; i < level; i++) {
+                        finalMaxHp += Math.ceil((classHitDieSides + 1) / 2) + finalConModifier;
+                    }
+                }
+            });
+             finalMaxHp = Math.max(1, finalMaxHp);
+
+             const finalHitPoints: HitPointsState = {
+                 max: finalMaxHp,
+                 current: initialData?.hitPoints?.current ?? finalMaxHp, // Preserve current HP if editing
+                 temporary: initialData?.hitPoints?.temporary ?? 0, // Preserve temp HP if editing
+             };
+             finalHitDice.remaining = initialData?.hitDice?.remaining ?? finalLevel; // Preserve remaining dice if editing
+
+
+            // Construct final Character object for saving
+            const characterToSave: Partial<Omit<Character, 'id' | 'createdAt'>> & {id?: string} = {
+                id: initialData?.id,
+                playerName: derivedCharacter.playerName,
+                characterName: derivedCharacter.characterName,
+                race: derivedCharacter.race,
+                class: derivedCharacter.class,
+                level: derivedCharacter.level,
+                background: derivedCharacter.background,
+                alignment: derivedCharacter.alignment,
+                stats: derivedCharacter.stats, // Save the final base stats (potentially affected by features)
+                skills: derivedCharacter.skills, // Save final skill proficiency map
+                hitPoints: finalHitPoints, // Save calculated HP
+                hitDice: finalHitDice, // Save calculated Hit Dice
+                equipment: derivedCharacter.equipment,
+                proficiencies: derivedCharacter.proficiencies, // Save final calculated proficiencies
+                features: derivedCharacter.features, // Save final list of features
+                backstory: derivedCharacter.backstory,
+                appearance: derivedCharacter.appearance,
+                campaignId: initialData?.campaignId,
             };
 
             if (editMode && initialData?.id) {
@@ -263,22 +287,22 @@ export function CharacterCreationWizard({ initialData, editMode = false }: Chara
     };
 
     const renderStep = () => {
+        // Pass combinedContent to steps that need it
         switch (currentStep) {
             case 1:
                 return <Step1BasicInfo data={characterData} updateData={updateCharacterData} setValidity={setValidityCallback} />;
             case 2:
-                return <Step2RaceSelection data={characterData} updateData={updateCharacterData} setValidity={setValidityCallback} availableRaces={availableRaces} />;
+                return <Step2RaceSelection data={characterData} updateData={updateCharacterData} setValidity={setValidityCallback} availableRaces={availableRaces} combinedContent={combinedContent} />;
             case 3:
-                return <Step3ClassSelection data={characterData} updateData={updateCharacterData} setValidity={setValidityCallback} availableClasses={availableClasses} />;
+                return <Step3ClassSelection data={characterData} updateData={updateCharacterData} setValidity={setValidityCallback} availableClasses={availableClasses} combinedContent={combinedContent} />;
             case 4:
                 return <Step4AbilityScores data={characterData} updateData={updateCharacterData} setValidity={setValidityCallback} availableRaces={availableRaces}/>;
             case 5:
-                return <Step5Background data={characterData} updateData={updateCharacterData} setValidity={setValidityCallback} />;
+                return <Step5Background data={characterData} updateData={updateCharacterData} setValidity={setValidityCallback} combinedContent={combinedContent} />;
             case 6: // Only shown in creation mode
                  if (!editMode) {
-                    return <Step6Equipment data={characterData} updateData={updateCharacterData} setValidity={setValidityCallback} />;
+                    return <Step6Equipment data={characterData} updateData={updateCharacterData} setValidity={setValidityCallback} combinedContent={combinedContent} />;
                  }
-                 // Fall through or return null if step 6 is reached in edit mode (shouldn't happen with TOTAL_STEPS adjustment)
                  return <div>Invalid Step for Edit Mode</div>;
             default:
                 return <div>Invalid Step</div>;
@@ -321,11 +345,11 @@ export function CharacterCreationWizard({ initialData, editMode = false }: Chara
                     Previous
                 </Button>
                 {currentStep < TOTAL_STEPS ? (
-                    <Button onClick={handleNext} disabled={!isValid || isLoading}>
+                    <Button onClick={handleNext} disabled={!isValid || isLoading || isFetchingInitialData}>
                         Next
                     </Button>
                 ) : (
-                    <Button onClick={handleFinalSubmit} disabled={!isValid || isLoading}>
+                    <Button onClick={handleFinalSubmit} disabled={!isValid || isLoading || isFetchingInitialData}>
                         {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                         {editMode ? 'Save Changes' : 'Finish & Create Character'}
                     </Button>

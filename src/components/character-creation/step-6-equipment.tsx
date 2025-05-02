@@ -10,10 +10,10 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Input } from '@/components/ui/input';
 import { Trash2, PlusCircle } from 'lucide-react';
 import type { PartialCharacterFormData } from './character-creation-wizard';
-import type { EquipmentItem } from '@/lib/types';
+import type { EquipmentItem, SourcePack } from '@/lib/types'; // Added SourcePack type
 import { useQuery } from '@tanstack/react-query';
-import { getAvailableEquipmentItems } from '@/services/dnd-api'; // Assuming this fetches all items
-import { AddEquipmentDialog } from '@/components/add-equipment-dialog'; // Reuse dialog
+import { getAvailableEquipmentItems } from '@/services/dnd-api'; // Keep using this
+import { AddEquipmentDialog } from '@/components/add-equipment-dialog';
 
 // Mock starting equipment (replace with logic based on selected class/background)
 const MOCK_STARTING_EQUIPMENT: EquipmentItem[] = [
@@ -29,52 +29,94 @@ interface Step6Props {
     data: PartialCharacterFormData;
     updateData: (data: Pick<PartialCharacterFormData, 'equipment'>) => void;
     setValidity: (isValid: boolean) => void;
+    combinedContent?: SourcePack['content']; // Add combinedContent prop
 }
 
-export function Step6Equipment({ data, updateData, setValidity }: Step6Props) {
+export function Step6Equipment({ data, updateData, setValidity, combinedContent }: Step6Props) {
     const [selectionMode, setSelectionMode] = useState<'starting' | 'manual'>('starting');
     const [manualEquipment, setManualEquipment] = useState<EquipmentItem[]>(data.equipment as EquipmentItem[] || []);
     const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
 
-     // Fetch all available items for the manual selection dialog
+     // Fetch all available items using combinedContent
      const { data: allItems = [], isLoading: isLoadingItems } = useQuery<EquipmentItem[], Error>({
-         queryKey: ['availableEquipment'],
-         queryFn: getAvailableEquipmentItems,
+         queryKey: ['availableEquipment', combinedContent], // Include combinedContent in key
+         queryFn: () => getAvailableEquipmentItems(combinedContent), // Pass combinedContent
+         enabled: !!combinedContent, // Enable only when content is loaded
          staleTime: 60 * 60 * 1000, // Cache for an hour
      });
 
-    // Update parent data based on mode and manual list
+    // TODO: Calculate actual starting equipment based on class/background from combinedContent
+    const calculatedStartingEquipment = useMemo(() => {
+        // Placeholder: Use mock data for now
+        // In a real implementation, look up classData and backgroundData in combinedContent
+        // and determine the starting equipment based on their definitions.
+        const classData = combinedContent?.classes?.[data.class || ''];
+        const backgroundData = combinedContent?.backgrounds?.[data.background || ''];
+        let startingItems: EquipmentItem[] = [...MOCK_STARTING_EQUIPMENT]; // Start with mock or default
+        let startingGold = 0;
+
+        if (backgroundData) {
+             startingGold = backgroundData.startingGold || 0;
+             // Add background equipment (need to fetch full item details from allItems)
+             (backgroundData.equipment || []).forEach(itemName => {
+                const itemDef = allItems.find(i => i.name === itemName);
+                if (itemDef) {
+                    startingItems.push({ ...itemDef, quantity: 1 }); // Assume quantity 1 for background items
+                } else {
+                     startingItems.push({ name: itemName, quantity: 1, type: 'Adventuring Gear' }); // Add as basic item if definition not found
+                }
+             });
+        }
+        // TODO: Add logic for class starting equipment choices
+
+         // Add starting gold as an item
+        if (startingGold > 0) {
+            startingItems.push({ name: 'Gold Pieces (gp)', quantity: startingGold, type: 'Currency' });
+        }
+
+         // Consolidate items by name
+        const consolidated: Record<string, EquipmentItem> = {};
+        startingItems.forEach(item => {
+             if (consolidated[item.name]) {
+                 consolidated[item.name].quantity = (consolidated[item.name].quantity || 1) + (item.quantity || 1);
+             } else {
+                 consolidated[item.name] = { ...item, quantity: item.quantity || 1 };
+             }
+        });
+
+
+        return Object.values(consolidated).map(item => ({ ...item, isEquipped: false }));
+
+    }, [data.class, data.background, combinedContent, allItems]); // Depend on relevant data
+
+
     useEffect(() => {
         let equipmentToUpdate: EquipmentItem[];
 
         if (selectionMode === 'starting') {
-            // TODO: Replace MOCK_STARTING_EQUIPMENT with actual calculated starting gear
-            // based on data.class and data.background
-            equipmentToUpdate = MOCK_STARTING_EQUIPMENT.map(item => ({ ...item, isEquipped: false, quantity: item.quantity || 1 }));
+            equipmentToUpdate = calculatedStartingEquipment;
         } else {
             equipmentToUpdate = manualEquipment;
         }
 
-        // Only update parent if the equipment list has actually changed
         if (JSON.stringify(equipmentToUpdate) !== JSON.stringify(data.equipment)) {
-             console.log("Step 6: Updating parent data"); // Debug log
+             console.log("Step 6: Updating parent data");
             updateData({ equipment: equipmentToUpdate });
         }
 
-        // Validity is always true for this step as selection is always possible
-        setValidity(true);
-    }, [selectionMode, manualEquipment, updateData, setValidity, data.equipment]); // Include data.equipment in dependencies for comparison
+        setValidity(true); // Step is always valid
+
+    }, [selectionMode, manualEquipment, calculatedStartingEquipment, updateData, setValidity, data.equipment]);
+
 
     const handleAddItem = (item: EquipmentItem) => {
          setManualEquipment(prev => {
              const existingIndex = prev.findIndex(i => i.name === item.name);
              if (existingIndex > -1) {
-                 // Update quantity if item exists
                  const updated = [...prev];
                  updated[existingIndex] = { ...updated[existingIndex], quantity: (updated[existingIndex].quantity || 1) + (item.quantity || 1) };
                  return updated;
              } else {
-                 // Add new item
                  return [...prev, { ...item, isEquipped: false, quantity: item.quantity || 1 }];
              }
          });
@@ -85,11 +127,11 @@ export function Step6Equipment({ data, updateData, setValidity }: Step6Props) {
     };
 
      const handleUpdateQuantity = (itemName: string, quantity: number) => {
-        const newQuantity = Math.max(0, quantity); // Ensure quantity is not negative
+        const newQuantity = Math.max(0, quantity);
          setManualEquipment(prev =>
             prev.map(item =>
                 item.name === itemName ? { ...item, quantity: newQuantity } : item
-            ).filter(item => item.quantity > 0) // Remove if quantity becomes 0
+            ).filter(item => item.quantity > 0)
          );
     };
 
@@ -116,16 +158,19 @@ export function Step6Equipment({ data, updateData, setValidity }: Step6Props) {
                         <Card className="bg-secondary/50">
                             <CardHeader>
                                 <CardTitle className="text-lg">Starting Package</CardTitle>
-                                <CardDescription>Based on your selected class and background (placeholder).</CardDescription>
+                                <CardDescription>Based on your selected class ({data.class || 'None'}) and background ({data.background || 'None'}).</CardDescription>
                             </CardHeader>
                             <CardContent>
-                                <ul className="list-disc pl-5 space-y-1 text-sm">
-                                    {MOCK_STARTING_EQUIPMENT.map((item, index) => (
-                                        <li key={index}>{item.name} {item.quantity && item.quantity > 1 ? `(x${item.quantity})` : ''} {item.description ? `- ${item.description}`: ''}</li>
-                                    ))}
-                                    {/* TODO: Add starting gold based on background */}
-                                    <li>15 gp (from Acolyte background)</li>
-                                </ul>
+                                {isLoadingItems ? (
+                                    <Skeleton className="h-20 w-full" />
+                                ) : (
+                                     <ul className="list-disc pl-5 space-y-1 text-sm">
+                                        {calculatedStartingEquipment.map((item, index) => (
+                                             <li key={index}>{item.name} {item.quantity && item.quantity > 1 ? `(x${item.quantity})` : ''} {item.description ? `- ${item.description}`: ''}</li>
+                                        ))}
+                                        {calculatedStartingEquipment.length === 0 && <li className='italic text-muted-foreground'>No starting equipment defined.</li>}
+                                    </ul>
+                                )}
                             </CardContent>
                         </Card>
                     )}
@@ -134,7 +179,7 @@ export function Step6Equipment({ data, updateData, setValidity }: Step6Props) {
                         <Card>
                             <CardHeader className='flex flex-row justify-between items-center pb-2'>
                                 <CardTitle className="text-lg">Manual Selection</CardTitle>
-                                <Button variant="outline" size="sm" onClick={() => setIsAddDialogOpen(true)}>
+                                <Button variant="outline" size="sm" onClick={() => setIsAddDialogOpen(true)} disabled={isLoadingItems}>
                                      <PlusCircle className="mr-2 h-4 w-4"/> Add Item
                                 </Button>
                             </CardHeader>
@@ -145,7 +190,7 @@ export function Step6Equipment({ data, updateData, setValidity }: Step6Props) {
                                     <ScrollArea className="h-[300px] w-full pr-4">
                                         <ul className="space-y-2">
                                              {manualEquipment.map((item, index) => (
-                                                <li key={`${item.name}-${index}`} className="flex items-center justify-between group border-b pb-2 last:border-b-0"> {/* Use stable key */}
+                                                <li key={`${item.name}-${index}`} className="flex items-center justify-between group border-b pb-2 last:border-b-0">
                                                      <div className='flex items-center gap-2 flex-grow min-w-0'>
                                                         <Input
                                                             type="number"
@@ -184,7 +229,6 @@ export function Step6Equipment({ data, updateData, setValidity }: Step6Props) {
                 </CardContent>
             </Card>
 
-            {/* Add Equipment Dialog */}
             <AddEquipmentDialog
                  isOpen={isAddDialogOpen}
                  onOpenChange={setIsAddDialogOpen}

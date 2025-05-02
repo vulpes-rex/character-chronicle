@@ -1,4 +1,5 @@
 
+
 /**
  * Represents the core data structure for a D&D character.
  */
@@ -62,6 +63,8 @@ type ProficiencyGrantMetadata = {
   effectType: 'proficiencyGrant';
   type: 'armor' | 'weapon' | 'tool' | 'skill' | 'savingThrow';
   proficiencies: string[]; // List of specific proficiencies granted (e.g., ["Longsword", "Stealth"])
+  choose?: number; // Optional: Number of choices allowed from the list
+  options?: string[]; // Optional: List of options if 'choose' is present
   condition?: string;
 };
 
@@ -164,7 +167,10 @@ export interface CharacterClass {
     savingThrows: string[]; // Stat names ('Strength', 'Dexterity', etc.)
     skills?: { choose: number; options: string[] }; // Skill choices provided by the class
   };
-  // features?: Feature[]; // Features gained at level 1 (optional here, often fetched dynamically)
+  featuresByLevel?: { // Optional: Detailed feature progression
+      [level: number]: string[]; // Array of feature keys/names gained at this level
+  };
+  // features?: Feature[]; // Deprecated: Features should ideally be defined centrally or fetched dynamically
 }
 
 /**
@@ -173,28 +179,29 @@ export interface CharacterClass {
 export interface CharacterRace {
   name: string;
   description: string;
-  // Traits are now Features stored in the Character.features array
-  // traitNames?: string[]; // Names of traits (could still be useful for reference)
+  traits?: string[]; // Names/Keys of traits/features granted by this race
   baseSpeed?: number; // e.g., 30, 25
   size?: string; // e.g., "Medium", "Small"
-  // Initial stat bonuses could be modeled as features with metadata
+  // Stat bonuses can be represented by features with 'statBonus' metadata included in 'traits'
 }
 
 /**
  * Represents a character background in D&D 5e.
- * (Simplified for now, effects modeled as Features)
  */
 export interface BackgroundInfo {
     name: string;
     description: string;
-    // Skill/tool proficiencies granted are modeled as Features with metadata
-    // feature: { name: string; description: string }; // Background feature modeled as a Feature
-    // suggestedTraits?: string[];
-    // suggestedIdeals?: string[];
-    // suggestedBonds?: string[];
-    // suggestedFlaws?: string[];
-    // startingEquipment?: EquipmentItem[]; // Could be added here or derived
-    // startingGold?: number;
+    skillProficiencies: string[];
+    toolProficiencies?: string[];
+    languages?: { choose: number; options?: string[] }; // e.g., choose 2 from list
+    feature: { name: string; description: string }; // Core background feature
+    equipment?: string[]; // List of starting equipment names/descriptions
+    startingGold?: number;
+    // Suggested personality traits are usually handled separately or embedded in description
+    suggestedTraits?: string[];
+    suggestedIdeals?: string[];
+    suggestedBonds?: string[];
+    suggestedFlaws?: string[];
 }
 
 
@@ -320,13 +327,13 @@ export interface Monster {
     description: string;
     creatorId: string; // 'system' or DM's user ID
     content: {
-        races?: Record<string, Omit<CharacterRace, 'description'>>; // Simplified for storage example
-        classes?: Record<string, Omit<CharacterClass, 'description'>>;
-        items?: Record<string, Omit<EquipmentItem, 'description' | 'isEquipped'>>;
-        monsters?: Record<string, Omit<Monster, 'id'>>; // Omit internal ID for storage
+        races?: Record<string, CharacterRace>; // Store full race definition
+        classes?: Record<string, CharacterClass>; // Store full class definition
+        items?: Record<string, Omit<EquipmentItem, 'isEquipped'>>; // Store item definitions
+        monsters?: Record<string, Omit<Monster, 'id'>>;
         npcs?: Record<string, Omit<NPC, 'id'>>;
-        backgrounds?: Record<string, Omit<BackgroundInfo, 'description'>>;
-        features?: Record<string, Omit<Feature, 'description' | 'source'>>; // Allow storing generic features/traits
+        backgrounds?: Record<string, BackgroundInfo>; // Store full background info
+        features?: Record<string, Omit<Feature, 'name' | 'source'>>; // Allow storing standalone features, keyed by name
     };
     createdAt: Date;
     updatedAt: Date;
@@ -450,12 +457,23 @@ export const calculateSkillModifier = (
     const skillLower = skillName.toLowerCase();
     const ability = SKILL_ABILITY_MAP[skillLower];
 
-    if (!stats || !ability || typeof stats[ability] !== 'number') {
-        // Handle direct skill modifiers from monsters/NPCs
-        if (stats && typeof (stats as any)[skillLower] === 'number') {
-            return (stats as any)[skillLower] as number;
+    if (!stats) {
+        console.warn(`Stats object is missing for skill calculation: ${skillName}.`);
+        return 0;
+    }
+
+    // Handle direct skill modifiers from monsters/NPCs if available
+    if ((stats as any).skills && typeof (stats as any).skills[skillLower] === 'number') {
+        return (stats as any).skills[skillLower] as number;
+    }
+
+    // Calculate based on ability score if skill override not present
+     if (!ability || typeof stats[ability] !== 'number') {
+        // Log only if the ability mapping itself is the issue
+        if (!ability) {
+             console.warn(`Could not find ability mapping for skill: ${skillName}.`);
         }
-        // console.warn(`Could not find ability score for skill: ${skillName} or stats are missing.`);
+        // Don't warn if stats just aren't present for that ability (e.g., monster with low INT)
         return 0;
     }
 

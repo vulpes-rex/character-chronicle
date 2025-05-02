@@ -9,30 +9,31 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/
 import { Skeleton } from '@/components/ui/skeleton';
 import { cn } from '@/lib/utils';
 import type { PartialCharacterFormData } from './character-creation-wizard';
-import type { CharacterRace, Feature } from '@/lib/types';
+import type { CharacterRace, Feature, SourcePack } from '@/lib/types';
 import { getRaceTraitsDetails } from '@/services/dnd-api';
 import { useQuery } from '@tanstack/react-query';
 
 
 interface Step2Props {
     data: PartialCharacterFormData;
-    // Update the prop type to reflect it receives the full partial data
     updateData: (data: Partial<PartialCharacterFormData>) => void;
     setValidity: (isValid: boolean) => void;
     availableRaces: CharacterRace[];
+    combinedContent?: SourcePack['content']; // Add combinedContent prop
 }
 
-export function Step2RaceSelection({ data, updateData, setValidity, availableRaces }: Step2Props) {
+export function Step2RaceSelection({ data, updateData, setValidity, availableRaces, combinedContent }: Step2Props) {
     const [selectedRaceName, setSelectedRaceName] = useState<string | null>(data.race || null);
     const selectedRace = availableRaces.find(r => r.name === selectedRaceName);
 
-    // Fetch trait details when a race is selected
+    // Fetch trait details using the race's trait keys and the combinedContent
     const { data: traitDetails, isLoading: isLoadingTraits } = useQuery<Feature[], Error>({
-        queryKey: ['raceTraits', selectedRace?.name],
-        queryFn: () => selectedRace ? getRaceTraitsDetails(selectedRace.traits) : Promise.resolve([]),
-        enabled: !!selectedRace,
-        staleTime: Infinity, // Trait details are static
+        queryKey: ['raceTraits', selectedRace?.name, combinedContent], // Include combinedContent in key
+        queryFn: () => selectedRace?.traits ? getRaceTraitsDetails(selectedRace.traits, combinedContent) : Promise.resolve([]),
+        enabled: !!selectedRace && !!combinedContent, // Enable only when race and content are available
+        staleTime: Infinity, // Trait details are static for a given content set
     });
+
 
     // Update parent data and validity when selection changes or derived data changes
     useEffect(() => {
@@ -52,13 +53,32 @@ export function Step2RaceSelection({ data, updateData, setValidity, availableRac
         let finalProficiencies = { ...baseProficiencies };
 
         if (selectedRaceName && traitDetails) {
-            const newFeatures = traitDetails.map(t => ({ ...t, source: 'Race' }));
-            finalFeatures = [...baseFeatures, ...newFeatures];
-            // TODO: Extract proficiencies granted by race traits (this needs more data in dnd-api mocks)
-            // const newProficiencies = { armor: [], weapons: [], tools: [] }; // Placeholder
-            // finalProficiencies.armor = [...baseProficiencies.armor, ...newProficiencies.armor.map(p => `${p} (Race)`)];
-            // finalProficiencies.weapons = [...baseProficiencies.weapons, ...newProficiencies.weapons.map(p => `${p} (Race)`)];
-            // finalProficiencies.tools = [...baseProficiencies.tools, ...newProficiencies.tools.map(p => `${p} (Race)`)];
+             // Traits are now full Feature objects, directly add them with source marking
+             finalFeatures = [...baseFeatures, ...traitDetails.map(t => ({ ...t, source: 'Race' }))];
+
+            // Extract proficiencies granted by race traits with metadata
+             traitDetails.forEach(trait => {
+                if (trait.metadata?.effectType === 'proficiencyGrant') {
+                    const marker = '(Race)';
+                     switch (trait.metadata.type) {
+                         case 'armor':
+                             finalProficiencies.armor.push(...trait.metadata.proficiencies.map(p => `${p} ${marker}`));
+                             break;
+                         case 'weapon':
+                             finalProficiencies.weapons.push(...trait.metadata.proficiencies.map(p => `${p} ${marker}`));
+                             break;
+                         case 'tool':
+                             finalProficiencies.tools.push(...trait.metadata.proficiencies.map(p => `${p} ${marker}`));
+                             break;
+                         // Note: Race traits typically don't grant saving throw or skill proficiencies directly,
+                         // those usually come from class/background. Handle if needed.
+                     }
+                }
+            });
+             // Ensure uniqueness
+            finalProficiencies.armor = [...new Set(finalProficiencies.armor)];
+            finalProficiencies.weapons = [...new Set(finalProficiencies.weapons)];
+            finalProficiencies.tools = [...new Set(finalProficiencies.tools)];
         }
 
         // Create the update object
@@ -68,40 +88,35 @@ export function Step2RaceSelection({ data, updateData, setValidity, availableRac
             tempProficiencies: finalProficiencies,
         };
 
-        // IMPORTANT: Check if the relevant parts actually changed before updating
-        // Using JSON.stringify for comparison is a simple way to check for value changes in nested structures,
-        // but be aware of its limitations (key order, performance). For complex state, consider libraries like Immer or deep-equal.
+        // Compare relevant parts before updating
         const raceChanged = updatePayload.race !== data.race;
         const featuresChanged = JSON.stringify(updatePayload.tempFeatures) !== JSON.stringify(data.tempFeatures);
         const proficienciesChanged = JSON.stringify(updatePayload.tempProficiencies) !== JSON.stringify(data.tempProficiencies);
 
         if (raceChanged || featuresChanged || proficienciesChanged) {
-             console.log("Step 2: Updating parent data"); // Debug log
+             console.log("Step 2: Updating parent data");
             updateData(updatePayload);
         }
 
-    // Depend on the direct inputs that cause changes and the stable callback functions.
-    // Include relevant parts of `data` used in the comparison to ensure the effect runs when those parts change.
     }, [
         selectedRaceName,
         traitDetails,
         setValidity,
         updateData,
-        data.race, // Compare against previous race
-        data.tempFeatures, // Compare against previous features
-        data.tempProficiencies // Compare against previous proficiencies
+        data.race,
+        data.tempFeatures,
+        data.tempProficiencies
     ]);
 
 
     return (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {/* Race Gallery */}
-             {/* Ensure ScrollArea itself doesn't cause re-renders unnecessarily */}
              <ScrollArea className="h-[500px] md:col-span-2 border rounded-lg p-4">
                 <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
                     {availableRaces.map((race) => (
                         <Card
-                            key={race.name} // Stable key is important
+                            key={race.name}
                             className={cn(
                                 "cursor-pointer transition-all hover:shadow-lg hover:scale-[1.02]",
                                 selectedRaceName === race.name ? "ring-2 ring-primary shadow-lg scale-[1.02]" : "shadow-sm"
@@ -109,14 +124,13 @@ export function Step2RaceSelection({ data, updateData, setValidity, availableRac
                             onClick={() => setSelectedRaceName(race.name)}
                         >
                             <CardHeader className="p-0 relative aspect-square overflow-hidden rounded-t-lg">
-                                {/* Placeholder Image */}
                                 <Image
                                     src={`https://picsum.photos/seed/${race.name}/300/300`}
                                     alt={race.name}
                                     fill
                                     style={{ objectFit: 'cover' }}
                                     sizes="(max-width: 768px) 50vw, (max-width: 1024px) 33vw, 25vw"
-                                    priority={false} // Only prioritize above-the-fold images if needed
+                                    priority={false}
                                     data-ai-hint={`${race.name.toLowerCase()} fantasy race`}
                                 />
                                 <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent p-2">
@@ -145,10 +159,10 @@ export function Step2RaceSelection({ data, updateData, setValidity, availableRac
                          </div>
                      )}
                     {selectedRace && traitDetails && traitDetails.length > 0 && (
-                         <ScrollArea className="h-[400px]"> {/* Add ScrollArea here */}
+                         <ScrollArea className="h-[400px]">
                              <Accordion type="multiple" className="w-full">
                                 {traitDetails.map((trait, index) => (
-                                     <AccordionItem value={`trait-${index}`} key={trait.name}> {/* Use stable key */}
+                                     <AccordionItem value={`trait-${index}`} key={trait.name}>
                                          <AccordionTrigger className="text-sm">{trait.name}</AccordionTrigger>
                                          <AccordionContent className="text-xs text-muted-foreground">
                                              {trait.description}

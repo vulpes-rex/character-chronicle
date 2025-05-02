@@ -1,7 +1,7 @@
 
 'use client';
 
-import { useEffect, useState, useMemo } from 'react'; // Added useMemo
+import { useEffect, useState, useMemo } from 'react'; // Keep useMemo for potential future optimization if needed elsewhere
 import Image from 'next/image';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -34,8 +34,12 @@ export function Step2RaceSelection({ data, updateData, setValidity, availableRac
         staleTime: Infinity, // Trait details are static
     });
 
-    // Memoize the derived features and proficiencies to prevent unnecessary updates if objects are structurally the same
-    const derivedUpdate = useMemo(() => {
+    // Update parent data and validity when selection changes or derived data changes
+    useEffect(() => {
+        // Validity depends only on selection
+        setValidity(!!selectedRaceName);
+
+        // Calculate the update data inside the effect based on current state
         const baseFeatures = data.tempFeatures?.filter(f => f.source !== 'Race') ?? [];
         const baseProficiencies = {
             armor: data.tempProficiencies?.armor?.filter(p => !p.endsWith('(Race)')) ?? [],
@@ -57,31 +61,47 @@ export function Step2RaceSelection({ data, updateData, setValidity, availableRac
             // finalProficiencies.tools = [...baseProficiencies.tools, ...newProficiencies.tools.map(p => `${p} (Race)`)];
         }
 
-        return {
+        // Create the update object
+        const updatePayload: Partial<PartialCharacterFormData> = {
             race: selectedRaceName || '',
             tempFeatures: finalFeatures,
             tempProficiencies: finalProficiencies,
         };
-    // Depend on the inputs that determine the calculation
-    }, [selectedRaceName, traitDetails, data.tempFeatures, data.tempProficiencies]);
 
-    // Update parent data and validity when selection changes or derived data changes
-    useEffect(() => {
-        setValidity(!!selectedRaceName);
-        // Pass the memoized update object
-        updateData(derivedUpdate);
-    // Depend only on the memoized derived data and the functions
-    }, [derivedUpdate, setValidity, updateData, selectedRaceName]);
+        // IMPORTANT: Check if the relevant parts actually changed before updating
+        // Using JSON.stringify for comparison is a simple way to check for value changes in nested structures,
+        // but be aware of its limitations (key order, performance). For complex state, consider libraries like Immer or deep-equal.
+        const raceChanged = updatePayload.race !== data.race;
+        const featuresChanged = JSON.stringify(updatePayload.tempFeatures) !== JSON.stringify(data.tempFeatures);
+        const proficienciesChanged = JSON.stringify(updatePayload.tempProficiencies) !== JSON.stringify(data.tempProficiencies);
+
+        if (raceChanged || featuresChanged || proficienciesChanged) {
+             console.log("Step 2: Updating parent data"); // Debug log
+            updateData(updatePayload);
+        }
+
+    // Depend on the direct inputs that cause changes and the stable callback functions.
+    // Include relevant parts of `data` used in the comparison to ensure the effect runs when those parts change.
+    }, [
+        selectedRaceName,
+        traitDetails,
+        setValidity,
+        updateData,
+        data.race, // Compare against previous race
+        data.tempFeatures, // Compare against previous features
+        data.tempProficiencies // Compare against previous proficiencies
+    ]);
 
 
     return (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {/* Race Gallery */}
-            <ScrollArea className="h-[500px] md:col-span-2 border rounded-lg p-4">
+             {/* Ensure ScrollArea itself doesn't cause re-renders unnecessarily */}
+             <ScrollArea className="h-[500px] md:col-span-2 border rounded-lg p-4">
                 <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
                     {availableRaces.map((race) => (
                         <Card
-                            key={race.name}
+                            key={race.name} // Stable key is important
                             className={cn(
                                 "cursor-pointer transition-all hover:shadow-lg hover:scale-[1.02]",
                                 selectedRaceName === race.name ? "ring-2 ring-primary shadow-lg scale-[1.02]" : "shadow-sm"
@@ -128,7 +148,7 @@ export function Step2RaceSelection({ data, updateData, setValidity, availableRac
                          <ScrollArea className="h-[400px]"> {/* Add ScrollArea here */}
                              <Accordion type="multiple" className="w-full">
                                 {traitDetails.map((trait, index) => (
-                                     <AccordionItem value={`trait-${index}`} key={trait.name}>
+                                     <AccordionItem value={`trait-${index}`} key={trait.name}> {/* Use stable key */}
                                          <AccordionTrigger className="text-sm">{trait.name}</AccordionTrigger>
                                          <AccordionContent className="text-xs text-muted-foreground">
                                              {trait.description}

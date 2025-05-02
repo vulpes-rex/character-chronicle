@@ -1,7 +1,7 @@
 
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react'; // Added useMemo
+import { useState, useEffect, useCallback, useMemo } from 'react'; // Keep useMemo for potential future optimizations
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
@@ -61,8 +61,13 @@ export function Step3ClassSelection({ data, updateData, setValidity, availableCl
         return featuresByClass;
     }, [featureResults, featureQueries]);
 
-    // --- Memoize Derived Update Data ---
-    const derivedUpdate = useMemo(() => {
+
+    // Update overall validity and parent state
+    useEffect(() => {
+        // Update Validity
+        setValidity(totalLevel > 0 && totalLevel <= 20 && !isLoadingFeatures && !featureError);
+
+        // Calculate Derived Update Data inside the effect
         const allFeatures: Feature[] = [...(data.tempFeatures?.filter(f => f.source !== 'Class') ?? [])];
         const baseProficiencies = {
             armor: [...(data.tempProficiencies?.armor?.filter(p => !p.endsWith('(Class)')) ?? [])],
@@ -74,7 +79,7 @@ export function Step3ClassSelection({ data, updateData, setValidity, availableCl
         let isFirstClass = true;
         Object.entries(selectedClasses).forEach(([className, level]) => {
             const classData = availableClasses.find(c => c.name === className);
-            const features = allClassFeatures[className];
+            const features = allClassFeatures[className]; // Use memoized features
 
             if (!classData || level <= 0) return;
 
@@ -93,23 +98,40 @@ export function Step3ClassSelection({ data, updateData, setValidity, availableCl
             }
         });
 
-        return {
+        const updatePayload: Partial<PartialCharacterFormData> = {
             class: Object.keys(selectedClasses)[0] || '',
             level: totalLevel || 1,
             selectedClasses: selectedClasses,
             tempFeatures: allFeatures,
             tempProficiencies: baseProficiencies,
         };
-    // Depend on the inputs that determine the calculation
-    }, [selectedClasses, availableClasses, allClassFeatures, totalLevel, data.tempFeatures, data.tempProficiencies]);
 
+        // Compare specific parts of the state to decide if an update is needed
+        const selectedClassesChanged = JSON.stringify(updatePayload.selectedClasses) !== JSON.stringify(data.selectedClasses);
+        const featuresChanged = JSON.stringify(updatePayload.tempFeatures) !== JSON.stringify(data.tempFeatures);
+        const proficienciesChanged = JSON.stringify(updatePayload.tempProficiencies) !== JSON.stringify(data.tempProficiencies);
 
-    // Update overall validity and parent state
-    useEffect(() => {
-        setValidity(totalLevel > 0 && totalLevel <= 20 && !isLoadingFeatures && !featureError);
-        updateData(derivedUpdate);
-    // Depend on the memoized derived data and control states
-    }, [totalLevel, isLoadingFeatures, featureError, setValidity, updateData, derivedUpdate]);
+        if (selectedClassesChanged || featuresChanged || proficienciesChanged) {
+             console.log("Step 3: Updating parent data"); // Debug log
+            updateData(updatePayload);
+        }
+
+    // Depend on the states that directly influence the calculation and validity.
+    // Also depend on the stable callback functions.
+    // Include relevant parts of `data` used in comparison.
+    }, [
+        selectedClasses,
+        totalLevel,
+        isLoadingFeatures,
+        featureError,
+        setValidity,
+        updateData,
+        availableClasses,
+        allClassFeatures,
+        data.selectedClasses,
+        data.tempFeatures,
+        data.tempProficiencies
+    ]);
 
 
     const handleAddClass = () => {
@@ -124,6 +146,10 @@ export function Step3ClassSelection({ data, updateData, setValidity, availableCl
         setSelectedClasses(prev => {
             const newState = { ...prev };
             delete newState[className];
+            // If removing the last class, ensure state reflects it properly
+            if (Object.keys(newState).length === 0) {
+                // Optionally reset related fields in parent via updateData if needed
+            }
             return newState;
         });
     };
@@ -154,6 +180,25 @@ export function Step3ClassSelection({ data, updateData, setValidity, availableCl
     };
 
 
+    // Pre-calculate derived proficiencies for display to avoid doing it inside the render function directly
+    const derivedProficienciesForDisplay = useMemo(() => {
+        const profs = { armor: [], weapons: [], tools: [], savingThrows: [] };
+        let isFirst = true;
+        Object.entries(selectedClasses).forEach(([className, level]) => {
+            const classData = availableClasses.find(c => c.name === className);
+            if (!classData || level <= 0) return;
+             profs.armor = [...new Set([...profs.armor, ...classData.proficiencies.armor])];
+             profs.weapons = [...new Set([...profs.weapons, ...classData.proficiencies.weapons])];
+             profs.tools = [...new Set([...profs.tools, ...(classData.proficiencies.tools ?? [])])];
+             if (isFirst) {
+                 profs.savingThrows = [...new Set([...classData.proficiencies.savingThrows])];
+                 isFirst = false;
+             }
+        });
+        return profs;
+    }, [selectedClasses, availableClasses]);
+
+
     return (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {/* Class Selection Controls */}
@@ -180,7 +225,7 @@ export function Step3ClassSelection({ data, updateData, setValidity, availableCl
                                     <SelectContent>
                                         {availableClasses.map(c => (
                                             <SelectItem
-                                                key={c.name}
+                                                key={c.name} // Use stable key
                                                 value={c.name}
                                                 disabled={selectedClasses[c.name] !== undefined && c.name !== className} // Disable if already selected elsewhere
                                             >
@@ -202,7 +247,7 @@ export function Step3ClassSelection({ data, updateData, setValidity, availableCl
                                              const potentialTotal = totalLevel - level + lvl;
                                              const isDisabled = potentialTotal > 20;
                                              return (
-                                                <SelectItem key={lvl} value={String(lvl)} disabled={isDisabled}>
+                                                <SelectItem key={lvl} value={String(lvl)} disabled={isDisabled}> {/* Use stable key */}
                                                     Lvl {lvl}
                                                 </SelectItem>
                                              );
@@ -210,6 +255,7 @@ export function Step3ClassSelection({ data, updateData, setValidity, availableCl
                                       </SelectContent>
                                 </Select>
                                 <Button
+                                    type="button"
                                     variant="ghost"
                                     size="icon"
                                     className="text-destructive h-8 w-8"
@@ -252,12 +298,13 @@ export function Step3ClassSelection({ data, updateData, setValidity, availableCl
                     <CardHeader className='pb-2'>
                         <CardTitle className='text-base'>Proficiencies Gained</CardTitle>
                     </CardHeader>
-                    <CardContent className='text-xs space-y-1'>
-                        <p><strong>Saving Throws:</strong> {derivedUpdate.tempProficiencies?.savingThrows?.join(', ') || 'None'}</p>
-                        <p><strong>Armor:</strong> {derivedUpdate.tempProficiencies?.armor?.map(p=>p.replace(' (Class)','')).join(', ') || 'None'}</p>
-                        <p><strong>Weapons:</strong> {derivedUpdate.tempProficiencies?.weapons?.map(p=>p.replace(' (Class)','')).join(', ') || 'None'}</p>
-                        <p><strong>Tools:</strong> {derivedUpdate.tempProficiencies?.tools?.map(p=>p.replace(' (Class)','')).join(', ') || 'None'}</p>
-                    </CardContent>
+                     {/* Use derivedProficienciesForDisplay here */}
+                     <CardContent className='text-xs space-y-1'>
+                         <p><strong>Saving Throws:</strong> {derivedProficienciesForDisplay.savingThrows?.join(', ') || 'None'}</p>
+                         <p><strong>Armor:</strong> {derivedProficienciesForDisplay.armor?.join(', ') || 'None'}</p>
+                         <p><strong>Weapons:</strong> {derivedProficienciesForDisplay.weapons?.join(', ') || 'None'}</p>
+                         <p><strong>Tools:</strong> {derivedProficienciesForDisplay.tools?.join(', ') || 'None'}</p>
+                     </CardContent>
                  </Card>
             </div>
 
@@ -277,7 +324,7 @@ export function Step3ClassSelection({ data, updateData, setValidity, availableCl
                             {!isLoadingFeatures && Object.keys(allClassFeatures).length > 0 && (
                                 <Accordion type="multiple" className="w-full">
                                     {Object.entries(allClassFeatures).map(([className, features]) => (
-                                        <AccordionItem value={className} key={className}>
+                                        <AccordionItem value={className} key={className}> {/* Use stable key */}
                                             <AccordionTrigger className="text-lg font-semibold">
                                                 {className} (Level {selectedClasses[className]})
                                             </AccordionTrigger>
@@ -287,7 +334,7 @@ export function Step3ClassSelection({ data, updateData, setValidity, availableCl
                                                 ) : (
                                                      <Accordion type="multiple" className="w-full">
                                                          {features.map((feature, index) => (
-                                                            <AccordionItem value={`${className}-feature-${index}`} key={feature.name} className="border-b-0 pl-4">
+                                                            <AccordionItem value={`${className}-feature-${index}`} key={feature.name} className="border-b-0 pl-4"> {/* Use stable key */}
                                                                 <AccordionTrigger className="text-sm py-2">{feature.name}</AccordionTrigger>
                                                                 <AccordionContent className="text-xs text-muted-foreground pb-2">
                                                                     {feature.description}

@@ -71,34 +71,50 @@ export function Step4AbilityScores({ data, updateData, setValidity, availableRac
         return bonuses;
     }, [selectedRace, useTashasRules, tashasBonuses]);
 
-    // Calculate final scores including racial bonuses
-    const finalScores = useMemo(() => {
+    // Use react-hook-form for Zod validation, but don't drive state from it
+    const { formState: { isValid }, trigger, watch, reset } = useForm<Step4FormData>({
+        resolver: zodResolver(z.object({ stats: statsSchema })), // Validate final scores schema
+        mode: 'onChange',
+    });
+
+     // Validation logic: All scores must be assigned
+     const allScoresAssigned = useMemo(() => Object.values(assignedScores).every(score => score !== null), [assignedScores]);
+
+    useEffect(() => {
+        // Calculate final scores inside the effect
         const final: Partial<Record<keyof Step4FormData['stats'], number>> = {};
         ABILITIES.forEach(ability => {
             const base = assignedScores[ability] ?? 10; // Default to 10 if not assigned
             const bonus = racialBonuses[ability] ?? 0;
             final[ability] = base + bonus;
         });
-        return final as Record<keyof Step4FormData['stats'], number>; // Assert non-partial
-    }, [assignedScores, racialBonuses]);
+        const finalScores = final as Record<keyof Step4FormData['stats'], number>; // Assert non-partial
 
-    // Form specifically for validation of final scores (optional but good practice)
-    const { formState: { isValid }, trigger } = useForm<Step4FormData>({
-        resolver: zodResolver(z.object({ stats: statsSchema })), // Validate final scores
-        mode: 'onChange',
-        values: { stats: finalScores }, // Use calculated final scores for validation
-    });
+        // Check if final scores actually changed before updating
+        if (JSON.stringify(finalScores) !== JSON.stringify(data.stats)) {
+             console.log("Step 4: Updating parent data"); // Debug log
+            updateData({ stats: finalScores });
+        }
 
-     // Validation logic: All scores must be assigned
-     const allScoresAssigned = Object.values(assignedScores).every(score => score !== null);
+        // Update form values for validation purposes
+        reset({ stats: finalScores });
 
-    useEffect(() => {
-        // Update parent state with the *final* calculated scores
-        updateData({ stats: finalScores });
-        // Validity depends on all scores being assigned and passing Zod validation
+        // Validity depends on assignment and Zod validation
         setValidity(allScoresAssigned && isValid);
-        trigger(); // Trigger validation when finalScores change
-    }, [finalScores, updateData, setValidity, allScoresAssigned, isValid, trigger]);
+        // Trigger validation whenever dependencies change that might affect validity
+        trigger();
+
+    }, [
+        assignedScores,
+        racialBonuses,
+        updateData,
+        setValidity,
+        reset,
+        trigger,
+        allScoresAssigned,
+        isValid,
+        data.stats // Include previous stats for comparison
+    ]);
 
     const rollStat = useCallback((): number => {
         const rolls = Array.from({ length: 4 }, () => rollDice('1d6'));
@@ -111,7 +127,7 @@ export function Step4AbilityScores({ data, updateData, setValidity, availableRac
         const newScores = Array.from({ length: 6 }, rollStat).sort((a, b) => b - a); // Sort descending
         setRolledScores(newScores);
         // Reset assignments when re-rolling
-        setAssignedScores(ABILITIES.reduce((acc, ability) => { acc[ability] = null; return acc; }, {}));
+        setAssignedScores(ABILITIES.reduce((acc, ability) => { acc[ability] = null; return acc; }, {} as Partial<Record<keyof Step4FormData['stats'], number | null>>));
         toast({ title: "Stats Rolled!", description: "Assign the rolled scores to abilities." });
     }, [rollStat, toast]);
 
@@ -157,6 +173,9 @@ export function Step4AbilityScores({ data, updateData, setValidity, availableRac
         return Math.floor(((statValue ?? 10) - 10) / 2);
     };
 
+    // Get final scores directly from form state for display, as it's synced in useEffect
+    const displayScores = watch('stats') || data.stats || {};
+
 
     return (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -175,7 +194,7 @@ export function Step4AbilityScores({ data, updateData, setValidity, availableRac
                          ) : (
                              <div className="flex flex-wrap gap-4 justify-center">
                                  {rolledScores.map((score, index) => (
-                                     <Card key={index} className="p-4 text-center font-bold text-2xl bg-secondary">
+                                     <Card key={`${score}-${index}`} className="p-4 text-center font-bold text-2xl bg-secondary"> {/* Add index to key for potential duplicates */}
                                          {score}
                                      </Card>
                                  ))}
@@ -190,7 +209,7 @@ export function Step4AbilityScores({ data, updateData, setValidity, availableRac
                     </CardHeader>
                     <CardContent className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                         {ABILITIES.map(ability => (
-                             <div key={ability} className="space-y-1">
+                             <div key={ability} className="space-y-1"> {/* Use stable key */}
                                  <Label htmlFor={`assign-${ability}`} className="uppercase text-xs font-semibold">{ability}</Label>
                                  <Select
                                       value={assignedScores[ability]?.toString() ?? ""}
@@ -213,7 +232,7 @@ export function Step4AbilityScores({ data, updateData, setValidity, availableRac
                                            )}
                                            {/* Show available rolled scores */}
                                            {rolledScores.map((score, index) => (
-                                               <SelectItem key={`${score}-${index}`} value={String(score)}>
+                                               <SelectItem key={`${score}-${index}`} value={String(score)}> {/* Add index to key for potential duplicates */}
                                                    {score}
                                                </SelectItem>
                                            ))}
@@ -295,14 +314,14 @@ export function Step4AbilityScores({ data, updateData, setValidity, availableRac
                     </CardHeader>
                     <CardContent className="grid grid-cols-2 gap-3">
                          {ABILITIES.map((ability) => (
-                            <div key={`final-${ability}`} className="text-center p-2 border rounded-md bg-secondary/30 relative pt-5">
+                            <div key={`final-${ability}`} className="text-center p-2 border rounded-md bg-secondary/30 relative pt-5"> {/* Use stable key */}
                                 <Label className="uppercase text-[0.65rem] font-semibold tracking-wider text-muted-foreground absolute top-1 left-1/2 transform -translate-x-1/2 capitalize">{ability}</Label>
                                 <div className="relative mt-0.5">
                                     <div className="text-3xl font-bold text-center h-auto p-0 border-none bg-transparent">
-                                       {finalScores[ability] ?? '-'}
+                                       {displayScores[ability] ?? '-'}
                                     </div>
                                     <div className="absolute -bottom-2.5 left-1/2 transform -translate-x-1/2 border border-primary bg-background rounded-full w-7 h-7 flex items-center justify-center text-xs font-semibold text-primary shadow-sm">
-                                        {getModifier(finalScores[ability]) >= 0 ? '+' : ''}{getModifier(finalScores[ability])}
+                                        {getModifier(displayScores[ability]) >= 0 ? '+' : ''}{getModifier(displayScores[ability])}
                                     </div>
                                 </div>
                                 <div className='text-[0.6rem] text-muted-foreground h-3 mt-1'>

@@ -1,7 +1,7 @@
 
 'use client';
 
-import { useState, useEffect, useMemo } from 'react'; // Added useMemo
+import { useState, useEffect, useMemo } from 'react'; // Keep useMemo for potential future optimizations
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -86,10 +86,10 @@ export function Step5Background({ data, updateData, setValidity }: Step5Props) {
          defaultValues: {
              background: data.background || '',
              // Initialize personality fields from combined backstory or defaults
-             personalityTrait: data.backstory?.split('---')[0] || '',
-             ideal: data.backstory?.split('---')[1] || '',
-             bond: data.backstory?.split('---')[2] || '',
-             flaw: data.backstory?.split('---')[3] || '',
+             personalityTrait: data.backstory?.split('\n---\n')[0].replace('Trait: ', '') || '',
+             ideal: data.backstory?.split('\n---\n')[1]?.replace('Ideal: ', '') || '',
+             bond: data.backstory?.split('\n---\n')[2]?.replace('Bond: ', '') || '',
+             flaw: data.backstory?.split('\n---\n')[3]?.replace('Flaw: ', '') || '',
          }
     });
 
@@ -107,9 +107,12 @@ export function Step5Background({ data, updateData, setValidity }: Step5Props) {
     const currentBgData = selectedBgData || MOCK_BACKGROUNDS.find(bg => bg.name === selectedBgName);
 
 
-    // Memoize the derived update data
-    const derivedUpdate = useMemo(() => {
-        // Combine personality fields into backstory string
+    // Update parent data and validity when selection or form fields change
+    useEffect(() => {
+        // Update Validity
+        setValidity(!!selectedBgName && formIsValid);
+
+        // Calculate Derived Update Data inside the effect
         const backstoryString = [
             `Trait: ${watchedPersonality[0] || 'None'}`,
             `Ideal: ${watchedPersonality[1] || 'None'}`,
@@ -117,7 +120,6 @@ export function Step5Background({ data, updateData, setValidity }: Step5Props) {
             `Flaw: ${watchedPersonality[3] || 'None'}`
         ].join('\n---\n'); // Use a separator
 
-        // Update skills and proficiencies based on selected background
         const newSkills = { ...(data.skills || {}) };
         const newProficiencies = {
             armor: [...(data.tempProficiencies?.armor ?? [])],
@@ -143,21 +145,39 @@ export function Step5Background({ data, updateData, setValidity }: Step5Props) {
              }
         }
 
-        return {
+        const updatePayload: Partial<PartialCharacterFormData> = {
             background: selectedBgName || '',
             backstory: backstoryString,
             skills: newSkills,
             tempProficiencies: newProficiencies,
         };
-    // Depend only on the inputs for this calculation
-    }, [selectedBgName, watchedPersonality, currentBgData, data.skills, data.tempProficiencies]);
 
-    // Update parent data and validity when selection or form fields change
-    useEffect(() => {
-        setValidity(!!selectedBgName && formIsValid);
-        updateData(derivedUpdate);
-    // Depend on the memoized data and functions
-    }, [selectedBgName, formIsValid, setValidity, updateData, derivedUpdate]);
+        // Compare specific parts of the state to decide if an update is needed
+        const backgroundChanged = updatePayload.background !== data.background;
+        const backstoryChanged = updatePayload.backstory !== data.backstory;
+        const skillsChanged = JSON.stringify(updatePayload.skills) !== JSON.stringify(data.skills);
+        const proficienciesChanged = JSON.stringify(updatePayload.tempProficiencies) !== JSON.stringify(data.tempProficiencies);
+
+        if (backgroundChanged || backstoryChanged || skillsChanged || proficienciesChanged) {
+            console.log("Step 5: Updating parent data"); // Debug log
+            updateData(updatePayload);
+        }
+
+    // Depend on the states that directly influence the calculation and validity.
+    // Also depend on the stable callback functions.
+    // Include relevant parts of `data` used in comparison.
+    }, [
+        selectedBgName,
+        formIsValid,
+        watchedPersonality,
+        currentBgData,
+        setValidity,
+        updateData,
+        data.background,
+        data.backstory,
+        data.skills,
+        data.tempProficiencies
+    ]);
 
 
     const randomizeField = (fieldName: keyof Step5FormData, options?: string[]) => {

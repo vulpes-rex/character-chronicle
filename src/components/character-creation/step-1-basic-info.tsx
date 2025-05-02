@@ -35,12 +35,14 @@ export function Step1BasicInfo({ data, updateData, setValidity }: Step1Props) {
 
     const watchedFields = watch(); // Watch all fields
 
-    // Update parent component's data state whenever form data changes
+    // Update parent component's data state whenever form data changes and is valid
     useEffect(() => {
-        // Only call updateData if the watched fields actually change
-        // This comparison might need refinement if dealing with complex objects
-        if (watchedFields.playerName !== data.playerName || watchedFields.characterName !== data.characterName) {
-             updateData(watchedFields);
+        // Check if the watched fields actually changed from the parent's data
+        const changed = watchedFields.playerName !== data.playerName || watchedFields.characterName !== data.characterName;
+
+        if (changed) {
+             console.log("Step 1: Updating parent data"); // Debug log
+            updateData(watchedFields);
         }
     }, [watchedFields.playerName, watchedFields.characterName, updateData, data.playerName, data.characterName]); // Depend on specific watched fields and updateData
 
@@ -48,7 +50,9 @@ export function Step1BasicInfo({ data, updateData, setValidity }: Step1Props) {
     useEffect(() => {
          setValidity(formIsValid);
          // Trigger initial validation once on mount
-         trigger(); // Trigger validation on mount to check initial state
+         if (!formIsValid) {
+             trigger(); // Trigger validation on mount only if initially invalid
+         }
     }, [formIsValid, setValidity, trigger]);
 
 

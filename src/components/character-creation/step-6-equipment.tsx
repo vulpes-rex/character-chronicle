@@ -45,16 +45,25 @@ export function Step6Equipment({ data, updateData, setValidity }: Step6Props) {
 
     // Update parent data based on mode and manual list
     useEffect(() => {
+        let equipmentToUpdate: EquipmentItem[];
+
         if (selectionMode === 'starting') {
             // TODO: Replace MOCK_STARTING_EQUIPMENT with actual calculated starting gear
-             // based on data.class and data.background
-            updateData({ equipment: MOCK_STARTING_EQUIPMENT.map(item => ({ ...item, isEquipped: false, quantity: item.quantity || 1 })) });
+            // based on data.class and data.background
+            equipmentToUpdate = MOCK_STARTING_EQUIPMENT.map(item => ({ ...item, isEquipped: false, quantity: item.quantity || 1 }));
         } else {
-            updateData({ equipment: manualEquipment });
+            equipmentToUpdate = manualEquipment;
         }
+
+        // Only update parent if the equipment list has actually changed
+        if (JSON.stringify(equipmentToUpdate) !== JSON.stringify(data.equipment)) {
+             console.log("Step 6: Updating parent data"); // Debug log
+            updateData({ equipment: equipmentToUpdate });
+        }
+
         // Validity is always true for this step as selection is always possible
         setValidity(true);
-    }, [selectionMode, manualEquipment, updateData, setValidity]);
+    }, [selectionMode, manualEquipment, updateData, setValidity, data.equipment]); // Include data.equipment in dependencies for comparison
 
     const handleAddItem = (item: EquipmentItem) => {
          setManualEquipment(prev => {
@@ -136,7 +145,7 @@ export function Step6Equipment({ data, updateData, setValidity }: Step6Props) {
                                     <ScrollArea className="h-[300px] w-full pr-4">
                                         <ul className="space-y-2">
                                              {manualEquipment.map((item, index) => (
-                                                <li key={`${item.name}-${index}`} className="flex items-center justify-between group border-b pb-2 last:border-b-0">
+                                                <li key={`${item.name}-${index}`} className="flex items-center justify-between group border-b pb-2 last:border-b-0"> {/* Use stable key */}
                                                      <div className='flex items-center gap-2 flex-grow min-w-0'>
                                                         <Input
                                                             type="number"

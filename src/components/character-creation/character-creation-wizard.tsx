@@ -80,10 +80,11 @@ export function CharacterCreationWizard() {
         setCharacterData(prev => ({ ...prev, ...newData }));
     }, []); // No dependencies, function identity is stable
 
-    // Memoize setValidity
-    const setIsValid = useCallback((valid: boolean) => {
+    // Memoize setValidity using useCallback
+    const setValidity = useCallback((valid: boolean) => {
         _setIsValid(valid);
-    }, []);
+    }, []); // _setIsValid is stable
+
 
     const handleNext = () => {
         if (isValid) {

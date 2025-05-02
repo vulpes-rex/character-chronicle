@@ -233,9 +233,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
       </Sidebar>
       <SidebarInset>
          {children}
-         <FloatingDiceRoller />
       </SidebarInset>
     </SidebarProvider>
   );
 }
-

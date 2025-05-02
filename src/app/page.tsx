@@ -8,6 +8,7 @@ import { AppLayout } from '@/components/app-layout';
 import { Button } from '@/components/ui/button';
 import Link from 'next/link';
 import { PlusCircle, Loader2 } from 'lucide-react'; // Added Loader2
+// import { FloatingDiceRoller } from '@/components/floating-dice-roller'; // Import FloatingDiceRoller
 
 export default function Home() {
   const { user, userProfile, loading } = useAuth();
@@ -55,4 +56,3 @@ export default function Home() {
     </AppLayout>
   );
 }
-

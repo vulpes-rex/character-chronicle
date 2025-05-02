@@ -1,38 +1,87 @@
-import React, {useState, useRef, useEffect} from 'react';
-import Dice from 'react-dice-complete';
-import 'react-dice-complete/dist/dice.css';
+'use client';
+
+import React, {useState, useRef, useEffect, useCallback} from 'react';
 import {Button} from "@/components/ui/button";
 import {Input} from "@/components/ui/input";
 import {Card, CardContent} from "@/components/ui/card";
+import { useToast } from '@/hooks/use-toast'; // Import useToast
+import { Dices } from 'lucide-react';
+
+interface FloatingDiceRollerProps {
+}
 
 const FloatingDiceRoller = () => {
-    const [numDice, setNumDice] = useState(1);
-    const [sides, setSides] = useState(6);
+    const [numDiceD4, setNumDiceD4] = useState(0);
+    const [numDiceD6, setNumDiceD6] = useState(0);
+    const [numDiceD8, setNumDiceD8] = useState(0);
+    const [numDiceD10, setNumDiceD10] = useState(0);
+    const [numDiceD12, setNumDiceD12] = useState(0);
+    const [numDiceD20, setNumDiceD20] = useState(0);
     const [modifier, setModifier] = useState(0);
-    const [roll, setRoll] = useState(0);
+    const [result, setResult] = useState<number | null>(null);
     const [show, setShow] = useState(false);
-    const diceRef = useRef<Dice>(null);
+    const { toast } = useToast();
 
-    useEffect(() => {
-        // Initialize dice roll if component is visible
-        if (show && diceRef.current) {
-            rollDice();
-        }
-    }, [show]);
-
-    const rollDice = () => {
-        if (diceRef.current) {
-            diceRef.current.rollAll();
-        }
-    };
-
-    const onRollDone = () => {
+    const rollDice = useCallback(() => {
         let total = 0;
-        if (diceRef.current) {
-            total = diceRef.current.diceResults.reduce((a, b) => a + b, 0) + modifier;
-        }
-        setRoll(total);
-    };
+        const rollD4 = () => {
+            for (let i = 0; i < numDiceD4; i++) {
+                total += Math.floor(Math.random() * 4) + 1;
+            }
+        };
+        const rollD6 = () => {
+            for (let i = 0; i < numDiceD6; i++) {
+                total += Math.floor(Math.random() * 6) + 1;
+            }
+        };
+        const rollD8 = () => {
+            for (let i = 0; i < numDiceD8; i++) {
+                total += Math.floor(Math.random() * 8) + 1;
+            }
+        };
+        const rollD10 = () => {
+            for (let i = 0; i < numDiceD10; i++) {
+                total += Math.floor(Math.random() * 10) + 1;
+            }
+        };
+         const rollD12 = () => {
+            for (let i = 0; i < numDiceD12; i++) {
+                total += Math.floor(Math.random() * 12) + 1;
+            }
+        };
+        const rollD20 = () => {
+            for (let i = 0; i < numDiceD20; i++) {
+                total += Math.floor(Math.random() * 20) + 1;
+            }
+        };
+
+        rollD4();
+        rollD6();
+        rollD8();
+        rollD10();
+        rollD12();
+        rollD20();
+
+        total += modifier;
+        setResult(total);
+
+        let description = '';
+        if (numDiceD4 > 0) description += `${numDiceD4}d4`;
+        if (numDiceD6 > 0) description += description.length > 0 ? ` + ${numDiceD6}d6` : `${numDiceD6}d6`;
+        if (numDiceD8 > 0) description += description.length > 0 ? ` + ${numDiceD8}d8` : `${numDiceD8}d8`;
+        if (numDiceD10 > 0) description += description.length > 0 ? ` + ${numDiceD10}d10` : `${numDiceD10}d10`;
+        if (numDiceD12 > 0) description += description.length > 0 ? ` + ${numDiceD12}d12` : `${numDiceD12}d12`;
+        if (numDiceD20 > 0) description += description.length > 0 ? ` + ${numDiceD20}d20` : `${numDiceD20}d20`;
+        if (modifier !== 0) description += description.length > 0 ? ` + ${modifier}` : `${modifier}`;
+
+        description = description.length > 0 ? description : 'No dice specified';
+
+        toast({
+            title: "Dice Roll",
+            description: `${description} = ${total}`,
+        });
+
+    }, [numDiceD4, numDiceD6, numDiceD8, numDiceD10, numDiceD12, numDiceD20, modifier, toast]);
 
     return (
         <div style={{
@@ -54,51 +103,99 @@ const FloatingDiceRoller = () => {
                         boxShadow: '0 0 10px rgba(0, 0, 0, 0.2)',
                     }}>
                         <div style={{display: 'flex', flexDirection: 'row', marginBottom: '10px'}}>
-                            <Input
-                                type="number"
-                                value={numDice}
-                                onChange={e => setNumDice(parseInt(e.target.value))}
-                                style={{width: '50px', marginRight: '5px'}}
-                                min="1"
-                            />
-                            d
-                            <Input
-                                type="number"
-                                value={sides}
-                                onChange={e => setSides(parseInt(e.target.value))}
-                                style={{width: '50px', marginLeft: '5px'}}
-                                min="1"
-                            />
-                            +
-                            <Input
-                                type="number"
-                                value={modifier}
-                                onChange={e => setModifier(parseInt(e.target.value))}
-                                style={{width: '50px', marginLeft: '5px'}}
-                            />
+                           <div>
+                                <Input
+                                    type="number"
+                                    value={numDiceD4}
+                                    onChange={e => setNumDiceD4(parseInt(e.target.value))}
+                                    style={{width: '40px', marginRight: '5px'}}
+                                    min="0"
+                                />
+                                d4
+                            </div>
+                            <div>
+                                <Input
+                                    type="number"
+                                    value={numDiceD6}
+                                    onChange={e => setNumDiceD6(parseInt(e.target.value))}
+                                    style={{width: '40px', marginRight: '5px'}}
+                                    min="0"
+                                />
+                                d6
+                            </div>
+                             <div>
+                                <Input
+                                    type="number"
+                                    value={numDiceD8}
+                                    onChange={e => setNumDiceD8(parseInt(e.target.value))}
+                                    style={{width: '40px', marginRight: '5px'}}
+                                    min="0"
+                                />
+                                d8
+                            </div>
+                            <div>
+                                <Input
+                                    type="number"
+                                    value={numDiceD10}
+                                    onChange={e => setNumDiceD10(parseInt(e.target.value))}
+                                    style={{width: '40px', marginRight: '5px'}}
+                                    min="0"
+                                />
+                                d10
+                            </div>
+                            <div>
+                                <Input
+                                    type="number"
+                                    value={numDiceD12}
+                                    onChange={e => setNumDiceD12(parseInt(e.target.value))}
+                                    style={{width: '40px', marginRight: '5px'}}
+                                    min="0"
+                                />
+                                d12
+                            </div>
+                            <div>
+                                <Input
+                                    type="number"
+                                    value={numDiceD20}
+                                    onChange={e => setNumDiceD20(parseInt(e.target.value))}
+                                    style={{width: '40px', marginRight: '5px'}}
+                                    min="0"
+                                />
+                                d20
+                            </div>
+                            <div>
+                                +
+                                <Input
+                                    type="number"
+                                    value={modifier}
+                                    onChange={e => setModifier(parseInt(e.target.value))}
+                                    style={{width: '50px', marginLeft: '5px'}}
+                                />
+                            </div>
                         </div>
 
-                        <div style={{marginBottom: '10px'}}>
-                            <Dice
-                                numDice={numDice}
-                                sides={sides}
-                                ref={diceRef}
-                                rollDoneCallback={onRollDone}
-                                // DieComponent={Die}
-                            />
-                        </div>
+                        <Button variant={"outline"} onClick={rollDice}>
+                            <Dices className="mr-2 h-4 w-4" />
+                            Roll Dice
+                        </Button>
 
-                        <Button variant={"outline"} onClick={rollDice}>Roll</Button>
-
-                        {roll > 0 && (
+                        {result !== null && (
                             <div style={{marginTop: '10px', fontSize: '1.2em'}}>
-                                Result: {roll}
+                                Result: {result}
                             </div>
                         )}
                         <Button variant={"secondary"} onClick={() => setShow(false)}>Close</Button>
                     </div>
                 </CardContent>
             </Card>
+            <Button
+                variant="secondary"
+                size="icon"
+                style={{position: 'absolute', top: '-10px', right: '-10px', borderRadius: '50%', backgroundColor: 'rgba(255, 255, 255, 0.8)'}}
+                onClick={() => setShow(!show)}
+            >
+                {show ? 'Close' : 'Open'}
+            </Button>
         </div>
     );
 };

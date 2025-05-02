@@ -1,13 +1,13 @@
 
 'use client';
 
-import { useState, useCallback, useEffect } from 'react'; // Import useEffect
+import { useState, useCallback, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { saveCharacter, updateCharacter } from '@/services/character-service'; // Import updateCharacter
 import type { Character, EquipmentItem, Feature, HitPointsState, HitDiceState, CharacterClass as CharacterClassType, SourcePack } from '@/lib/types';
-import { getCharacterClasses, getCharacterRaces, getCumulativeClassFeatures, getRaceTraitsDetails, getAvailableEquipmentItems, getBackgroundDetails } from '@/services/dnd-api'; // Removed getBackgroundFeatures
+import { getCharacterClasses, getCharacterRaces, getCumulativeClassFeatures, getRaceTraitsDetails, getAvailableEquipmentItems, getBackgroundDetails } from '@/services/dnd-api'; // Updated imports
 import { calculateSkillModifier, SKILL_ABILITY_MAP, ALL_SKILLS, rollDice } from '@/lib/types';
 import { useQuery } from '@tanstack/react-query';
 import { Progress } from '@/components/ui/progress';
@@ -15,7 +15,8 @@ import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { AlertCircle, Loader2 } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { getCombinedContentFromPacks } from '@/services/campaign-service'; // Import function to get combined content
-import { applyFeatureRules, getBackgroundFeatures, getRaceFeatures } from '@/services/feature-service'; // Import feature application service & getBackgroundFeatures
+import { applyFeatureRules } from '@/services/feature-service'; // Import feature application service
+import { getBackgroundFeatures } from '@/services/feature-service'; // Import feature application service
 
 // Import step components
 import { Step1BasicInfo } from './step-1-basic-info';
@@ -45,15 +46,14 @@ const mapCharacterToFormData = (char: Character): PartialCharacterFormData => ({
     level: char.level,
     background: char.background,
     alignment: char.alignment,
-    stats: char.stats,
+    stats: char.stats, // Save the base stats as they are stored
     skills: char.skills,
     equipment: (char.equipment as Partial<EquipmentItem>[])?.map(item => ({ ...item, name: item.name, quantity: item.quantity ?? 1})) || [], // Ensure name and quantity are present
     backstory: char.backstory,
     appearance: char.appearance,
-    selectedClasses: { [char.class]: char.level }, // Simple single class representation
+    selectedClasses: { [char.class]: char.level }, // Simple single class representation for now
     tempFeatures: char.features,
     tempProficiencies: char.proficiencies,
-    // activeSourcePackIds: char.campaignId ? (await loadCampaign(char.campaignId))?.activeSourcePackIds : ['srd'], // Needs async logic if loading campaign packs
     activeSourcePackIds: ['srd'], // Default or needs fetching based on context
 });
 
@@ -75,7 +75,7 @@ export function CharacterCreationWizard({ initialData, editMode = false }: Chara
             level: 1,
             background: '',
             alignment: '',
-            stats: { strength: 10, dexterity: 10, constitution: 10, intelligence: 10, wisdom: 10, charisma: 10 },
+            stats: { strength: 10, dexterity: 10, constitution: 10, intelligence: 10, wisdom: 10, charisma: 10 }, // Initial base stats
             skills: ALL_SKILLS.reduce((acc, skill) => { acc[skill] = false; return acc; }, {} as Record<string, boolean>),
             equipment: [],
             backstory: '',
@@ -121,6 +121,7 @@ export function CharacterCreationWizard({ initialData, editMode = false }: Chara
 
     // Memoize updateCharacterData to prevent re-renders in child components
      const updateCharacterData = useCallback((newData: Partial<PartialCharacterFormData>) => {
+        console.log("Wizard: Updating parent data with:", newData); // Debug log
         setCharacterData(prev => ({ ...prev, ...newData }));
     }, []); // No dependencies, function identity is stable
 
@@ -208,7 +209,7 @@ export function CharacterCreationWizard({ initialData, editMode = false }: Chara
                  appearance: characterData.appearance || '',
              };
 
-              // Apply feature effects to get final calculated values
+              // Apply feature rules to get final calculated values
               const derivedCharacter = await applyFeatureRules(baseCharacterForCalc); // Renamed function call
 
 
@@ -226,6 +227,7 @@ export function CharacterCreationWizard({ initialData, editMode = false }: Chara
                     finalMaxHp = classHitDieSides + finalConModifier;
                      finalHitDice.dieType = classData.hitDie; // Ensure primary hit die is set
                     if (level > 1) {
+                        // Average roll = (sides / 2) + 0.5. Use ceil for standard HP gain.
                         finalMaxHp += (level - 1) * (Math.ceil((classHitDieSides + 1) / 2) + finalConModifier);
                     }
                 } else { // Multiclass levels
@@ -238,32 +240,33 @@ export function CharacterCreationWizard({ initialData, editMode = false }: Chara
 
              const finalHitPoints: HitPointsState = {
                  max: finalMaxHp,
-                 current: initialData?.hitPoints?.current ?? finalMaxHp, // Preserve current HP if editing
-                 temporary: initialData?.hitPoints?.temporary ?? 0, // Preserve temp HP if editing
+                 // Preserve current/temp HP if editing, otherwise start at max
+                 current: editMode && initialData?.hitPoints?.current !== undefined ? initialData.hitPoints.current : finalMaxHp,
+                 temporary: editMode && initialData?.hitPoints?.temporary !== undefined ? initialData.hitPoints.temporary : 0,
              };
-             finalHitDice.remaining = initialData?.hitDice?.remaining ?? finalLevel; // Preserve remaining dice if editing
+             finalHitDice.remaining = editMode && initialData?.hitDice?.remaining !== undefined ? initialData.hitDice.remaining : finalLevel;
 
 
-            // Construct final Character object for saving
+            // Construct final Character object for saving - IMPORTANT: Save BASE stats, not derived ones
             const characterToSave: Partial<Omit<Character, 'id' | 'createdAt'>> & {id?: string} = {
                 id: initialData?.id,
                 playerName: derivedCharacter.playerName,
                 characterName: derivedCharacter.characterName,
                 race: derivedCharacter.race,
-                class: derivedCharacter.class,
+                class: derivedCharacter.class, // Store primary class key
                 level: derivedCharacter.level,
                 background: derivedCharacter.background,
                 alignment: derivedCharacter.alignment,
-                stats: derivedCharacter.stats, // Save the final base stats (potentially affected by features)
-                skills: derivedCharacter.skills, // Save final skill proficiency map
+                stats: characterData.stats, // Save the BASE stats from the wizard state
+                skills: derivedCharacter.skills, // Save final skill proficiency map (affected by background/class)
                 hitPoints: finalHitPoints, // Save calculated HP
                 hitDice: finalHitDice, // Save calculated Hit Dice
                 equipment: derivedCharacter.equipment,
                 proficiencies: derivedCharacter.proficiencies, // Save final calculated proficiencies
-                features: derivedCharacter.features, // Save final list of features
+                features: derivedCharacter.features, // Save final list of features (with source)
                 backstory: derivedCharacter.backstory,
                 appearance: derivedCharacter.appearance,
-                campaignId: initialData?.campaignId,
+                campaignId: initialData?.campaignId, // Preserve campaign ID if editing
             };
 
             if (editMode && initialData?.id) {
@@ -297,14 +300,15 @@ export function CharacterCreationWizard({ initialData, editMode = false }: Chara
             case 3:
                 return <Step3ClassSelection data={characterData} updateData={updateCharacterData} setValidity={setValidityCallback} availableClasses={availableClasses} combinedContent={combinedContent} />;
             case 4:
-                return <Step4AbilityScores data={characterData} updateData={updateCharacterData} setValidity={setValidityCallback} availableRaces={availableRaces}/>;
+                return <Step4AbilityScores data={characterData} updateData={updateCharacterData} setValidity={setValidityCallback} availableRaces={availableRaces} editMode={editMode} />;
             case 5:
                 return <Step5Background data={characterData} updateData={updateCharacterData} setValidity={setValidityCallback} combinedContent={combinedContent} />;
             case 6: // Only shown in creation mode
                  if (!editMode) {
                     return <Step6Equipment data={characterData} updateData={updateCharacterData} setValidity={setValidityCallback} combinedContent={combinedContent} />;
                  }
-                 return <div>Invalid Step for Edit Mode</div>;
+                 // In edit mode, step 5 is the last step
+                 return <div>Character details saved. Navigate back or view sheet.</div>;
             default:
                 return <div>Invalid Step</div>;
         }
@@ -359,5 +363,3 @@ export function CharacterCreationWizard({ initialData, editMode = false }: Chara
         </div>
     );
 }
-
-    

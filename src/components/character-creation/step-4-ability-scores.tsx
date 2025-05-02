@@ -1,4 +1,3 @@
-
 'use client';
 
 import { useState, useEffect, useMemo, useCallback } from 'react';
@@ -9,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'; // Import Select components
 import { useToast } from '@/hooks/use-toast';
 import { Dices } from 'lucide-react';
 import { Switch } from "@/components/ui/switch";
@@ -66,11 +65,18 @@ export function Step4AbilityScores({ data, updateData, setValidity, availableRac
     const [rolledScores, setRolledScores] = useState<number[]>([]);
     // assignedScores now ONLY holds the BASE scores (rolled or point-buy, pre-racial)
     const [assignedScores, setAssignedScores] = useState<Partial<Record<keyof Step4FormData['stats'], number | null>>>(
-        ABILITIES.reduce((acc, ability) => {
-            acc[ability] = null; // Initialize as null, will be populated later
-            return acc;
-        }, {} as Partial<Record<keyof Step4FormData['stats'], number | null>>)
+         // Initialize based on data.stats ONLY if not in edit mode, otherwise wait for effect
+        !editMode && data.stats
+            ? ABILITIES.reduce((acc, ability) => {
+                  acc[ability] = data.stats![ability]; // Assume data.stats is populated if passed
+                  return acc;
+              }, {} as Partial<Record<keyof Step4FormData['stats'], number | null>>)
+            : ABILITIES.reduce((acc, ability) => {
+                  acc[ability] = null; // Initialize as null
+                  return acc;
+              }, {} as Partial<Record<keyof Step4FormData['stats'], number | null>>)
     );
+
     const [useTashasRules, setUseTashasRules] = useState(false); // Tasha's Cauldron rule toggle
     const [tashasBonuses, setTashasBonuses] = useState<{ plusTwo: keyof Step4FormData['stats'] | null; plusOne: keyof Step4FormData['stats'] | null }>({ plusTwo: null, plusOne: null });
 
@@ -105,11 +111,9 @@ export function Step4AbilityScores({ data, updateData, setValidity, availableRac
             setAssignedScores(derivedBaseScores);
             // Disable Tasha's rules in edit mode to avoid complexity of reversing its choice
             setUseTashasRules(false);
-            // Trigger validation with derived base scores
-            trigger();
          }
      // eslint-disable-next-line react-hooks/exhaustive-deps
-     }, [editMode, data.stats, data.race, trigger]); // Run only when edit mode or initial data changes
+     }, [editMode, data.stats, data.race]); // Run only when edit mode or initial data changes
 
 
     // Determine racial bonuses based on ruleset (only applied for calculation, not stored in assignedScores)
@@ -200,12 +204,12 @@ export function Step4AbilityScores({ data, updateData, setValidity, availableRac
     }, [rollStat, toast, editMode]);
 
     // Handles assigning a rolled score to a BASE stat
-    const handleAssignScore = (ability: keyof Step4FormData['stats'], scoreValueString: string | null) => {
+     const handleAssignScore = (ability: keyof Step4FormData['stats'], scoreValueString: string | null) => {
          if (editMode) return; // Don't allow re-assignment in edit mode
 
          const score = scoreValueString ? parseInt(scoreValueString, 10) : null;
 
-         if (score === null) {
+         if (scoreValueString === UNASSIGN_VALUE || score === null) {
              // If unassigning, put the score back into rolledScores if it was there
              const currentBaseScore = assignedScores[ability];
              if (currentBaseScore !== null) {
@@ -213,6 +217,15 @@ export function Step4AbilityScores({ data, updateData, setValidity, availableRac
              }
              // Set base score back to null
              setAssignedScores(prev => ({ ...prev, [ability]: null }));
+             // Clear related Tasha's bonus if unassigning
+              if (useTashasRules) {
+                  setTashasBonuses(prev => {
+                      const newState = { ...prev };
+                      if (newState.plusTwo === ability) newState.plusTwo = null;
+                      if (newState.plusOne === ability) newState.plusOne = null;
+                      return newState;
+                  });
+              }
 
          } else {
              // Assigning a new score
@@ -239,18 +252,27 @@ export function Step4AbilityScores({ data, updateData, setValidity, availableRac
      };
 
 
-    const handleTashasBonusChange = (type: 'plusTwo' | 'plusOne', ability: keyof Step4FormData['stats'] | typeof UNASSIGN_VALUE) => {
+    const handleTashasBonusChange = (type: 'plusTwo' | 'plusOne', abilityValue: string) => {
         if (editMode) return; // Cannot change Tasha's in edit mode
 
-        const selectedAbility = ability === UNASSIGN_VALUE ? null : ability;
+         const selectedAbility = abilityValue === UNASSIGN_VALUE ? null : abilityValue as keyof Step4FormData['stats'];
 
         setTashasBonuses(prev => {
             const otherType = type === 'plusTwo' ? 'plusOne' : 'plusTwo';
+            const newState = { ...prev };
+
+            // If selecting 'None'
+            if (selectedAbility === null) {
+                 newState[type] = null;
+                 return newState;
+            }
+
             // Prevent assigning the same ability to both +2 and +1
             if (selectedAbility && prev[otherType] === selectedAbility) {
-                return { ...prev, [type]: selectedAbility, [otherType]: null };
+                newState[otherType] = null; // Clear the other bonus type
             }
-            return { ...prev, [type]: selectedAbility };
+            newState[type] = selectedAbility;
+            return newState;
         });
     };
 
@@ -308,7 +330,7 @@ export function Step4AbilityScores({ data, updateData, setValidity, availableRac
                                       ) : (
                                          // Select dropdown for assignment in create mode
                                          <Select
-                                              value={assignedScores[ability]?.toString() ?? ""}
+                                              value={assignedScores[ability]?.toString() ?? ""} // Use empty string for placeholder
                                               onValueChange={(value) => handleAssignScore(ability, value)}
                                               disabled={rolledScores.length === 0 && assignedScores[ability] === null} // Disable if no scores rolled and not already assigned
                                          >
@@ -316,7 +338,7 @@ export function Step4AbilityScores({ data, updateData, setValidity, availableRac
                                                   <SelectValue placeholder="Assign..." />
                                               </SelectTrigger>
                                               <SelectContent>
-                                                   {/* Option to unassign */}
+                                                   {/* Option to unassign - use UNASSIGN_VALUE */}
                                                    {assignedScores[ability] !== null && (
                                                        <SelectItem value={UNASSIGN_VALUE}>Unassign ({assignedScores[ability]})</SelectItem>
                                                    )}
@@ -358,7 +380,7 @@ export function Step4AbilityScores({ data, updateData, setValidity, availableRac
                                      <div className='space-y-2'>
                                          <div>
                                              <Label htmlFor="tashas-plus-two" className="text-xs">Assign +2 Bonus</Label>
-                                             <Select value={tashasBonuses.plusTwo ?? ""} onValueChange={(val) => handleTashasBonusChange('plusTwo', val as keyof Step4FormData['stats'] | typeof UNASSIGN_VALUE)}>
+                                             <Select value={tashasBonuses.plusTwo ?? ""} onValueChange={(val) => handleTashasBonusChange('plusTwo', val)}>
                                                  <SelectTrigger id="tashas-plus-two">
                                                      <SelectValue placeholder="Select Ability..." />
                                                  </SelectTrigger>
@@ -370,7 +392,7 @@ export function Step4AbilityScores({ data, updateData, setValidity, availableRac
                                          </div>
                                          <div>
                                               <Label htmlFor="tashas-plus-one" className="text-xs">Assign +1 Bonus</Label>
-                                              <Select value={tashasBonuses.plusOne ?? ""} onValueChange={(val) => handleTashasBonusChange('plusOne', val as keyof Step4FormData['stats'] | typeof UNASSIGN_VALUE)}>
+                                              <Select value={tashasBonuses.plusOne ?? ""} onValueChange={(val) => handleTashasBonusChange('plusOne', val)}>
                                                   <SelectTrigger id="tashas-plus-one">
                                                       <SelectValue placeholder="Select Ability..." />
                                                   </SelectTrigger>

@@ -1,7 +1,7 @@
 
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react'; // Added useMemo
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
@@ -11,7 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { AlertCircle, PlusCircle, Trash2 } from 'lucide-react';
-import { useQuery } from '@tanstack/react-query';
+import { useQueries } from '@tanstack/react-query'; // Use useQueries for multiple feature fetches
 import type { PartialCharacterFormData } from './character-creation-wizard';
 import type { CharacterClass, Feature } from '@/lib/types';
 import { getCumulativeClassFeatures } from '@/services/dnd-api'; // Keep using this
@@ -19,104 +19,97 @@ import { getCumulativeClassFeatures } from '@/services/dnd-api'; // Keep using t
 
 interface Step3Props {
     data: PartialCharacterFormData;
-    updateData: (data: Pick<PartialCharacterFormData, 'class' | 'level' | 'selectedClasses' | 'tempFeatures' | 'tempProficiencies'>) => void;
+    // Update prop type to match changes in Step2
+    updateData: (data: Partial<PartialCharacterFormData>) => void;
     setValidity: (isValid: boolean) => void;
     availableClasses: CharacterClass[];
 }
 
 export function Step3ClassSelection({ data, updateData, setValidity, availableClasses }: Step3Props) {
     const [selectedClasses, setSelectedClasses] = useState<{ [key: string]: number }>(data.selectedClasses || {});
-    const [allClassFeatures, setAllClassFeatures] = useState<{ [key: string]: Feature[] }>({});
-    const [isLoadingFeatures, setIsLoadingFeatures] = useState(false);
     const [featureError, setFeatureError] = useState<string | null>(null);
 
     const totalLevel = Object.values(selectedClasses).reduce((sum, lvl) => sum + lvl, 0);
     const maxLevelReached = totalLevel >= 20;
 
-    // Update overall validity
-    useEffect(() => {
-        setValidity(totalLevel > 0 && totalLevel <= 20 && !isLoadingFeatures);
-    }, [totalLevel, isLoadingFeatures, setValidity]);
+    // --- Fetch Features Concurrently ---
+     const featureQueries = useMemo(() => Object.entries(selectedClasses)
+        .filter(([_, level]) => level > 0)
+        .map(([className, level]) => ({
+            queryKey: ['classFeatures', className, level],
+            queryFn: () => getCumulativeClassFeatures(className, level),
+            enabled: level > 0,
+            staleTime: Infinity, // Features are generally static
+        })), [selectedClasses]);
 
+    const featureResults = useQueries({ queries: featureQueries });
 
-    // Function to fetch and update features for selected classes and levels
-    const fetchAndUpdateFeatures = useCallback(async () => {
-        setIsLoadingFeatures(true);
-        setFeatureError(null);
+    const isLoadingFeatures = featureResults.some(result => result.isLoading);
+    const allClassFeatures = useMemo(() => {
         const featuresByClass: { [key: string]: Feature[] } = {};
-        const allProficiencies: PartialCharacterFormData['tempProficiencies'] = {
+        featureResults.forEach((result, index) => {
+            if (result.isSuccess && result.data) {
+                const queryKey = featureQueries[index].queryKey;
+                const className = queryKey[1] as string; // Extract class name from query key
+                featuresByClass[className] = result.data;
+            } else if (result.isError) {
+                 // Handle individual query errors if necessary
+                 console.error(`Error fetching features for ${featureQueries[index].queryKey[1]}:`, result.error);
+                 setFeatureError(`Failed to load features for ${featureQueries[index].queryKey[1]}.`);
+            }
+        });
+        return featuresByClass;
+    }, [featureResults, featureQueries]);
+
+    // --- Memoize Derived Update Data ---
+    const derivedUpdate = useMemo(() => {
+        const allFeatures: Feature[] = [...(data.tempFeatures?.filter(f => f.source !== 'Class') ?? [])];
+        const baseProficiencies = {
             armor: [...(data.tempProficiencies?.armor?.filter(p => !p.endsWith('(Class)')) ?? [])],
             weapons: [...(data.tempProficiencies?.weapons?.filter(p => !p.endsWith('(Class)')) ?? [])],
             tools: [...(data.tempProficiencies?.tools?.filter(p => !p.endsWith('(Class)')) ?? [])],
-            savingThrows: [...(data.tempProficiencies?.savingThrows ?? [])], // Assume saving throws come only from the first class
+            savingThrows: [], // Start fresh, only add first class's throws
         };
-        const allFeatures: Feature[] = [...(data.tempFeatures?.filter(f => f.source !== 'Class') ?? [])];
 
-        try {
-            let isFirstClass = true;
-            for (const [className, level] of Object.entries(selectedClasses)) {
-                const classData = availableClasses.find(c => c.name === className);
-                if (!classData || level <= 0) continue;
+        let isFirstClass = true;
+        Object.entries(selectedClasses).forEach(([className, level]) => {
+            const classData = availableClasses.find(c => c.name === className);
+            const features = allClassFeatures[className];
 
-                const features = await getCumulativeClassFeatures(className, level);
-                featuresByClass[className] = features;
-                allFeatures.push(...features.map(f => ({ ...f, source: 'Class' }))); // Tag source
+            if (!classData || level <= 0) return;
 
-                // Add class proficiencies (handle potential duplicates)
-                allProficiencies.armor = [...new Set([...allProficiencies.armor!, ...classData.proficiencies.armor.map(p => `${p} (Class)`)])];
-                allProficiencies.weapons = [...new Set([...allProficiencies.weapons!, ...classData.proficiencies.weapons.map(p => `${p} (Class)`)])];
-                allProficiencies.tools = [...new Set([...allProficiencies.tools!, ...(classData.proficiencies.tools ?? []).map(p => `${p} (Class)`)])];
-
-                // Only add saving throws from the *first* class selected
-                if (isFirstClass) {
-                    allProficiencies.savingThrows = [...new Set([...allProficiencies.savingThrows!, ...classData.proficiencies.savingThrows])];
-                    isFirstClass = false;
-                }
+            if (features) {
+                allFeatures.push(...features.map(f => ({ ...f, source: 'Class' })));
             }
-            setAllClassFeatures(featuresByClass);
 
-            // Update parent state
-            updateData({
-                class: Object.keys(selectedClasses)[0] || '', // Set primary class
-                level: totalLevel || 1,
-                selectedClasses: selectedClasses,
-                tempFeatures: allFeatures,
-                tempProficiencies: allProficiencies,
-            });
+            // Add class proficiencies (handle potential duplicates)
+            baseProficiencies.armor = [...new Set([...baseProficiencies.armor, ...classData.proficiencies.armor.map(p => `${p} (Class)`)])];
+            baseProficiencies.weapons = [...new Set([...baseProficiencies.weapons, ...classData.proficiencies.weapons.map(p => `${p} (Class)`)])];
+            baseProficiencies.tools = [...new Set([...baseProficiencies.tools, ...(classData.proficiencies.tools ?? []).map(p => `${p} (Class)`)])];
 
-        } catch (error) {
-             console.error("Error fetching class features:", error);
-             setFeatureError(error instanceof Error ? error.message : "Failed to load class features.");
-        } finally {
-            setIsLoadingFeatures(false);
-        }
-    }, [selectedClasses, availableClasses, updateData, data.tempFeatures, data.tempProficiencies]);
+            if (isFirstClass) {
+                baseProficiencies.savingThrows = [...new Set([...classData.proficiencies.savingThrows])];
+                isFirstClass = false;
+            }
+        });
+
+        return {
+            class: Object.keys(selectedClasses)[0] || '',
+            level: totalLevel || 1,
+            selectedClasses: selectedClasses,
+            tempFeatures: allFeatures,
+            tempProficiencies: baseProficiencies,
+        };
+    // Depend on the inputs that determine the calculation
+    }, [selectedClasses, availableClasses, allClassFeatures, totalLevel, data.tempFeatures, data.tempProficiencies]);
 
 
-    // Re-fetch features when selected classes or levels change
+    // Update overall validity and parent state
     useEffect(() => {
-        if (Object.keys(selectedClasses).length > 0) {
-            fetchAndUpdateFeatures();
-        } else {
-             // Clear features and proficiencies if no classes are selected
-             setAllClassFeatures({});
-             updateData({
-                 class: '',
-                 level: 1,
-                 selectedClasses: {},
-                 tempFeatures: data.tempFeatures?.filter(f => f.source !== 'Class') ?? [],
-                 tempProficiencies: {
-                     ...data.tempProficiencies,
-                     armor: data.tempProficiencies?.armor?.filter(p => !p.endsWith('(Class)')) ?? [],
-                     weapons: data.tempProficiencies?.weapons?.filter(p => !p.endsWith('(Class)')) ?? [],
-                     tools: data.tempProficiencies?.tools?.filter(p => !p.endsWith('(Class)')) ?? [],
-                     savingThrows: [], // Clear saving throws if no class
-                 },
-             });
-             setIsLoadingFeatures(false);
-             setFeatureError(null);
-        }
-    }, [selectedClasses, fetchAndUpdateFeatures, updateData, data.tempFeatures, data.tempProficiencies]); // Dependency array includes selectedClasses and the fetch function
+        setValidity(totalLevel > 0 && totalLevel <= 20 && !isLoadingFeatures && !featureError);
+        updateData(derivedUpdate);
+    // Depend on the memoized derived data and control states
+    }, [totalLevel, isLoadingFeatures, featureError, setValidity, updateData, derivedUpdate]);
 
 
     const handleAddClass = () => {
@@ -260,10 +253,10 @@ export function Step3ClassSelection({ data, updateData, setValidity, availableCl
                         <CardTitle className='text-base'>Proficiencies Gained</CardTitle>
                     </CardHeader>
                     <CardContent className='text-xs space-y-1'>
-                        <p><strong>Saving Throws:</strong> {data.tempProficiencies?.savingThrows?.join(', ') || 'None'}</p>
-                        <p><strong>Armor:</strong> {data.tempProficiencies?.armor?.map(p=>p.replace(' (Class)','')).join(', ') || 'None'}</p>
-                        <p><strong>Weapons:</strong> {data.tempProficiencies?.weapons?.map(p=>p.replace(' (Class)','')).join(', ') || 'None'}</p>
-                        <p><strong>Tools:</strong> {data.tempProficiencies?.tools?.map(p=>p.replace(' (Class)','')).join(', ') || 'None'}</p>
+                        <p><strong>Saving Throws:</strong> {derivedUpdate.tempProficiencies?.savingThrows?.join(', ') || 'None'}</p>
+                        <p><strong>Armor:</strong> {derivedUpdate.tempProficiencies?.armor?.map(p=>p.replace(' (Class)','')).join(', ') || 'None'}</p>
+                        <p><strong>Weapons:</strong> {derivedUpdate.tempProficiencies?.weapons?.map(p=>p.replace(' (Class)','')).join(', ') || 'None'}</p>
+                        <p><strong>Tools:</strong> {derivedUpdate.tempProficiencies?.tools?.map(p=>p.replace(' (Class)','')).join(', ') || 'None'}</p>
                     </CardContent>
                  </Card>
             </div>
@@ -272,7 +265,7 @@ export function Step3ClassSelection({ data, updateData, setValidity, availableCl
             <div className="md:col-span-2">
                 <Card className="h-[600px] flex flex-col"> {/* Fixed height */}
                     <CardHeader>
-                        <CardTitle>Class Features</CardTitle>
+                        <CardTitle>Class Features (Up to Level {totalLevel})</CardTitle>
                         <CardDescription>Features gained from selected classes and levels.</CardDescription>
                     </CardHeader>
                     <CardContent className="flex-grow overflow-hidden"> {/* Make content grow and hide overflow */}

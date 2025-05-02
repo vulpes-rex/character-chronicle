@@ -1,7 +1,7 @@
 
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react'; // Added useMemo
 import Image from 'next/image';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -16,7 +16,8 @@ import { useQuery } from '@tanstack/react-query';
 
 interface Step2Props {
     data: PartialCharacterFormData;
-    updateData: (data: Pick<PartialCharacterFormData, 'race' | 'tempFeatures' | 'tempProficiencies'>) => void;
+    // Update the prop type to reflect it receives the full partial data
+    updateData: (data: Partial<PartialCharacterFormData>) => void;
     setValidity: (isValid: boolean) => void;
     availableRaces: CharacterRace[];
 }
@@ -33,48 +34,44 @@ export function Step2RaceSelection({ data, updateData, setValidity, availableRac
         staleTime: Infinity, // Trait details are static
     });
 
-    // Update parent data and validity when selection changes
-    useEffect(() => {
-        setValidity(!!selectedRaceName);
-        if (selectedRaceName) {
-            // Clear previous race features/proficiencies before adding new ones
-            const baseFeatures = data.tempFeatures?.filter(f => f.source !== 'Race') ?? [];
-            const baseProficiencies = {
-                armor: data.tempProficiencies?.armor?.filter(p => !p.endsWith('(Race)')) ?? [],
-                weapons: data.tempProficiencies?.weapons?.filter(p => !p.endsWith('(Race)')) ?? [],
-                tools: data.tempProficiencies?.tools?.filter(p => !p.endsWith('(Race)')) ?? [],
-                savingThrows: data.tempProficiencies?.savingThrows ?? [], // Races usually don't grant saving throw prof
-            };
+    // Memoize the derived features and proficiencies to prevent unnecessary updates if objects are structurally the same
+    const derivedUpdate = useMemo(() => {
+        const baseFeatures = data.tempFeatures?.filter(f => f.source !== 'Race') ?? [];
+        const baseProficiencies = {
+            armor: data.tempProficiencies?.armor?.filter(p => !p.endsWith('(Race)')) ?? [],
+            weapons: data.tempProficiencies?.weapons?.filter(p => !p.endsWith('(Race)')) ?? [],
+            tools: data.tempProficiencies?.tools?.filter(p => !p.endsWith('(Race)')) ?? [],
+            savingThrows: data.tempProficiencies?.savingThrows ?? [],
+        };
 
-            const newFeatures = traitDetails ? traitDetails.map(t => ({ ...t, source: 'Race' })) : [];
+        let finalFeatures = [...baseFeatures];
+        let finalProficiencies = { ...baseProficiencies };
 
+        if (selectedRaceName && traitDetails) {
+            const newFeatures = traitDetails.map(t => ({ ...t, source: 'Race' }));
+            finalFeatures = [...baseFeatures, ...newFeatures];
             // TODO: Extract proficiencies granted by race traits (this needs more data in dnd-api mocks)
             // const newProficiencies = { armor: [], weapons: [], tools: [] }; // Placeholder
-
-            updateData({
-                race: selectedRaceName,
-                tempFeatures: [...baseFeatures, ...newFeatures],
-                 tempProficiencies: {
-                     ...baseProficiencies,
-                     // armor: [...baseProficiencies.armor, ...newProficiencies.armor.map(p => `${p} (Race)`)],
-                     // weapons: [...baseProficiencies.weapons, ...newProficiencies.weapons.map(p => `${p} (Race)`)],
-                     // tools: [...baseProficiencies.tools, ...newProficiencies.tools.map(p => `${p} (Race)`)],
-                 }
-            });
-        } else {
-             // Clear race features/proficiencies if no race is selected
-            updateData({
-                 race: '',
-                 tempFeatures: data.tempFeatures?.filter(f => f.source !== 'Race') ?? [],
-                 tempProficiencies: {
-                      ...data.tempProficiencies,
-                     armor: data.tempProficiencies?.armor?.filter(p => !p.endsWith('(Race)')) ?? [],
-                     weapons: data.tempProficiencies?.weapons?.filter(p => !p.endsWith('(Race)')) ?? [],
-                     tools: data.tempProficiencies?.tools?.filter(p => !p.endsWith('(Race)')) ?? [],
-                 }
-            });
+            // finalProficiencies.armor = [...baseProficiencies.armor, ...newProficiencies.armor.map(p => `${p} (Race)`)];
+            // finalProficiencies.weapons = [...baseProficiencies.weapons, ...newProficiencies.weapons.map(p => `${p} (Race)`)];
+            // finalProficiencies.tools = [...baseProficiencies.tools, ...newProficiencies.tools.map(p => `${p} (Race)`)];
         }
-    }, [selectedRaceName, traitDetails, setValidity, updateData, data.tempFeatures, data.tempProficiencies]);
+
+        return {
+            race: selectedRaceName || '',
+            tempFeatures: finalFeatures,
+            tempProficiencies: finalProficiencies,
+        };
+    // Depend on the inputs that determine the calculation
+    }, [selectedRaceName, traitDetails, data.tempFeatures, data.tempProficiencies]);
+
+    // Update parent data and validity when selection changes or derived data changes
+    useEffect(() => {
+        setValidity(!!selectedRaceName);
+        // Pass the memoized update object
+        updateData(derivedUpdate);
+    // Depend only on the memoized derived data and the functions
+    }, [derivedUpdate, setValidity, updateData, selectedRaceName]);
 
 
     return (
@@ -128,16 +125,18 @@ export function Step2RaceSelection({ data, updateData, setValidity, availableRac
                          </div>
                      )}
                     {selectedRace && traitDetails && traitDetails.length > 0 && (
-                         <Accordion type="multiple" className="w-full">
-                            {traitDetails.map((trait, index) => (
-                                 <AccordionItem value={`trait-${index}`} key={trait.name}>
-                                     <AccordionTrigger className="text-sm">{trait.name}</AccordionTrigger>
-                                     <AccordionContent className="text-xs text-muted-foreground">
-                                         {trait.description}
-                                     </AccordionContent>
-                                 </AccordionItem>
-                             ))}
-                         </Accordion>
+                         <ScrollArea className="h-[400px]"> {/* Add ScrollArea here */}
+                             <Accordion type="multiple" className="w-full">
+                                {traitDetails.map((trait, index) => (
+                                     <AccordionItem value={`trait-${index}`} key={trait.name}>
+                                         <AccordionTrigger className="text-sm">{trait.name}</AccordionTrigger>
+                                         <AccordionContent className="text-xs text-muted-foreground">
+                                             {trait.description}
+                                         </AccordionContent>
+                                     </AccordionItem>
+                                 ))}
+                             </Accordion>
+                         </ScrollArea>
                     )}
                      {selectedRace && !isLoadingTraits && (!traitDetails || traitDetails.length === 0) && (
                         <p className='text-sm text-muted-foreground italic'>No detailed traits available.</p>
@@ -147,3 +146,4 @@ export function Step2RaceSelection({ data, updateData, setValidity, availableRac
         </div>
     );
 }
+

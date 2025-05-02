@@ -1,7 +1,7 @@
 
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react'; // Added useMemo
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -16,8 +16,9 @@ import { useQuery } from '@tanstack/react-query';
 import { Dices } from 'lucide-react';
 import type { PartialCharacterFormData } from './character-creation-wizard';
 import { ALL_SKILLS } from '@/lib/types'; // Import skill list
+import { getBackgroundDetails } from '@/services/dnd-api'; // Import API function
 
-// Mock Background Data (Replace with API call)
+// Mock Background Data (Replace with API call if not already done)
 const MOCK_BACKGROUNDS = [
     {
         name: "Acolyte",
@@ -73,16 +74,13 @@ type Step5FormData = z.infer<typeof step5Schema>;
 
 interface Step5Props {
     data: PartialCharacterFormData;
-    updateData: (data: Partial<Pick<PartialCharacterFormData, 'background' | 'backstory' | 'tempProficiencies' | 'skills'>>) => void;
+    updateData: (data: Partial<PartialCharacterFormData>) => void;
     setValidity: (isValid: boolean) => void;
 }
 
 export function Step5Background({ data, updateData, setValidity }: Step5Props) {
-    const [selectedBgName, setSelectedBgName] = useState<string | null>(data.background || null);
-    const selectedBgData = MOCK_BACKGROUNDS.find(bg => bg.name === selectedBgName);
-
     // Use react-hook-form for managing local state of this step (traits, ideals, etc.)
-    const { register, watch, setValue, getValues, formState: { errors, isValid: formIsValid } } = useForm<Step5FormData>({
+    const { register, watch, setValue, getValues, formState: { errors, isValid: formIsValid }, control } = useForm<Step5FormData>({ // Added control
          resolver: zodResolver(step5Schema),
          mode: 'onChange',
          defaultValues: {
@@ -95,61 +93,72 @@ export function Step5Background({ data, updateData, setValidity }: Step5Props) {
          }
     });
 
-     const watchedFields = watch();
+    const selectedBgName = watch('background');
+    const watchedPersonality = watch(['personalityTrait', 'ideal', 'bond', 'flaw']); // Watch personality fields
 
-    // Update parent data and validity when selection or form fields change
-    useEffect(() => {
-        setValidity(!!selectedBgName && formIsValid); // Step is valid if a background is chosen and form is valid
+    // Use query for background details (optional, can also use MOCK_BACKGROUNDS directly)
+    const { data: selectedBgData, isLoading: isLoadingBgDetails } = useQuery({
+        queryKey: ['backgroundDetails', selectedBgName],
+        queryFn: () => selectedBgName ? getBackgroundDetails(selectedBgName) : Promise.resolve(null),
+        enabled: !!selectedBgName,
+        staleTime: Infinity,
+    });
+    // Fallback to mock data if API fails or is not used
+    const currentBgData = selectedBgData || MOCK_BACKGROUNDS.find(bg => bg.name === selectedBgName);
 
-         // Combine personality fields into backstory string
-         const backstoryString = [
-             `Trait: ${watchedFields.personalityTrait || 'None'}`,
-             `Ideal: ${watchedFields.ideal || 'None'}`,
-             `Bond: ${watchedFields.bond || 'None'}`,
-             `Flaw: ${watchedFields.flaw || 'None'}`
-         ].join('\n---\n'); // Use a separator
+
+    // Memoize the derived update data
+    const derivedUpdate = useMemo(() => {
+        // Combine personality fields into backstory string
+        const backstoryString = [
+            `Trait: ${watchedPersonality[0] || 'None'}`,
+            `Ideal: ${watchedPersonality[1] || 'None'}`,
+            `Bond: ${watchedPersonality[2] || 'None'}`,
+            `Flaw: ${watchedPersonality[3] || 'None'}`
+        ].join('\n---\n'); // Use a separator
 
         // Update skills and proficiencies based on selected background
-         const newSkills = { ...(data.skills || {}) };
-         const newProficiencies = {
+        const newSkills = { ...(data.skills || {}) };
+        const newProficiencies = {
             armor: [...(data.tempProficiencies?.armor ?? [])],
             weapons: [...(data.tempProficiencies?.weapons ?? [])],
             tools: [...(data.tempProficiencies?.tools?.filter(p => !p.endsWith('(Background)')) ?? [])], // Remove old background tools
             savingThrows: [...(data.tempProficiencies?.savingThrows ?? [])],
-         };
+        };
 
-         // Clear previously selected background skills first (optional, depends on desired behavior)
-         // MOCK_BACKGROUNDS.forEach(bg => {
-         //    bg.skillProficiencies.forEach(skill => {
-         //       if (newSkills[skill.toLowerCase()] === true && bg.name !== selectedBgName) {
-         //          // Decide if you want to uncheck skills from *other* backgrounds
-         //          // newSkills[skill.toLowerCase()] = false;
-         //       }
-         //    });
-         // });
-
-
-         if (selectedBgData) {
-             // Add skill proficiencies
-             selectedBgData.skillProficiencies.forEach(skill => {
-                 if (ALL_SKILLS.includes(skill.toLowerCase())) {
-                     newSkills[skill.toLowerCase()] = true; // Mark as proficient
+        if (currentBgData) {
+            // Add skill proficiencies
+            currentBgData.skillProficiencies.forEach(skill => {
+                 // Ensure skill exists in ALL_SKILLS before marking true
+                 const skillLower = skill.toLowerCase();
+                 if (ALL_SKILLS.includes(skillLower)) {
+                     newSkills[skillLower] = true; // Mark as proficient
+                 } else {
+                     console.warn(`Background skill "${skill}" not found in standard skills list.`);
                  }
              });
              // Add tool proficiencies
-             if (selectedBgData.toolProficiencies) {
-                newProficiencies.tools = [...new Set([...newProficiencies.tools, ...selectedBgData.toolProficiencies.map(p => `${p} (Background)`)])];
+             if (currentBgData.toolProficiencies) {
+                newProficiencies.tools = [...new Set([...newProficiencies.tools, ...currentBgData.toolProficiencies.map(p => `${p} (Background)`)])];
              }
-         }
+        }
 
-        updateData({
+        return {
             background: selectedBgName || '',
             backstory: backstoryString,
             skills: newSkills,
             tempProficiencies: newProficiencies,
-        });
+        };
+    // Depend only on the inputs for this calculation
+    }, [selectedBgName, watchedPersonality, currentBgData, data.skills, data.tempProficiencies]);
 
-    }, [selectedBgName, formIsValid, setValidity, updateData, watchedFields, selectedBgData, data.skills, data.tempProficiencies]);
+    // Update parent data and validity when selection or form fields change
+    useEffect(() => {
+        setValidity(!!selectedBgName && formIsValid);
+        updateData(derivedUpdate);
+    // Depend on the memoized data and functions
+    }, [selectedBgName, formIsValid, setValidity, updateData, derivedUpdate]);
+
 
     const randomizeField = (fieldName: keyof Step5FormData, options?: string[]) => {
         if (options && options.length > 0) {
@@ -167,29 +176,43 @@ export function Step5Background({ data, updateData, setValidity }: Step5Props) {
                         <CardTitle>Select Background</CardTitle>
                     </CardHeader>
                     <CardContent>
-                        <Select
-                            value={selectedBgName ?? ""}
-                            onValueChange={(value) => setSelectedBgName(value || null)}
-                        >
-                            <SelectTrigger>
-                                <SelectValue placeholder="Choose a background..." />
-                            </SelectTrigger>
-                            <SelectContent>
-                                {MOCK_BACKGROUNDS.map(bg => (
-                                    <SelectItem key={bg.name} value={bg.name}>{bg.name}</SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
+                       <Controller
+                           name="background"
+                           control={control}
+                           render={({ field }) => (
+                                <Select
+                                    value={field.value ?? ""}
+                                    onValueChange={(value) => {
+                                         field.onChange(value);
+                                         // Optionally reset personality fields when background changes
+                                         // setValue('personalityTrait', '');
+                                         // setValue('ideal', '');
+                                         // setValue('bond', '');
+                                         // setValue('flaw', '');
+                                    }}
+                                >
+                                    <SelectTrigger>
+                                        <SelectValue placeholder="Choose a background..." />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {MOCK_BACKGROUNDS.map(bg => ( // Use mock or fetched list here
+                                            <SelectItem key={bg.name} value={bg.name}>{bg.name}</SelectItem>
+                                        ))}
+                                    </SelectContent>
+                                </Select>
+                            )}
+                       />
                         {errors.background && <p className="text-xs text-destructive mt-1">{errors.background.message}</p>}
 
-                        {selectedBgData && (
+                        {isLoadingBgDetails && <Skeleton className="h-20 w-full mt-4" />}
+                        {!isLoadingBgDetails && currentBgData && (
                              <div className="mt-4 space-y-2 text-sm text-muted-foreground">
-                                <p className="font-medium text-foreground">{selectedBgData.name}</p>
-                                <p>{selectedBgData.description}</p>
-                                <p><strong>Skills:</strong> {selectedBgData.skillProficiencies.join(', ')}</p>
-                                {selectedBgData.toolProficiencies && <p><strong>Tools:</strong> {selectedBgData.toolProficiencies.join(', ')}</p>}
-                                {selectedBgData.languages && <p><strong>Languages:</strong> Choose {selectedBgData.languages.choose}</p>}
-                                {selectedBgData.feature && <p><strong>Feature:</strong> {selectedBgData.feature.name}</p>}
+                                <p className="font-medium text-foreground">{currentBgData.name}</p>
+                                <p>{currentBgData.description}</p>
+                                <p><strong>Skills:</strong> {currentBgData.skillProficiencies.join(', ')}</p>
+                                {currentBgData.toolProficiencies && <p><strong>Tools:</strong> {currentBgData.toolProficiencies.join(', ')}</p>}
+                                {currentBgData.languages && <p><strong>Languages:</strong> Choose {currentBgData.languages.choose}</p>}
+                                {currentBgData.feature && <p><strong>Feature:</strong> {currentBgData.feature.name}</p>}
                              </div>
                         )}
                     </CardContent>
@@ -209,7 +232,7 @@ export function Step5Background({ data, updateData, setValidity }: Step5Props) {
                          <div className="space-y-1">
                              <Label htmlFor="personalityTrait" className="flex justify-between items-center">
                                  <span>Personality Trait</span>
-                                  <Button type="button" variant="ghost" size="xs" onClick={() => randomizeField('personalityTrait', selectedBgData?.traits)} disabled={!selectedBgData?.traits}>
+                                  <Button type="button" variant="ghost" size="xs" onClick={() => randomizeField('personalityTrait', currentBgData?.traits)} disabled={!currentBgData?.traits}>
                                       <Dices className="h-3 w-3 mr-1" /> Randomize
                                   </Button>
                              </Label>
@@ -219,7 +242,7 @@ export function Step5Background({ data, updateData, setValidity }: Step5Props) {
                           <div className="space-y-1">
                               <Label htmlFor="ideal" className="flex justify-between items-center">
                                   <span>Ideal</span>
-                                   <Button type="button" variant="ghost" size="xs" onClick={() => randomizeField('ideal', selectedBgData?.ideals)} disabled={!selectedBgData?.ideals}>
+                                   <Button type="button" variant="ghost" size="xs" onClick={() => randomizeField('ideal', currentBgData?.ideals)} disabled={!currentBgData?.ideals}>
                                        <Dices className="h-3 w-3 mr-1" /> Randomize
                                    </Button>
                               </Label>
@@ -229,7 +252,7 @@ export function Step5Background({ data, updateData, setValidity }: Step5Props) {
                            <div className="space-y-1">
                                <Label htmlFor="bond" className="flex justify-between items-center">
                                    <span>Bond</span>
-                                    <Button type="button" variant="ghost" size="xs" onClick={() => randomizeField('bond', selectedBgData?.bonds)} disabled={!selectedBgData?.bonds}>
+                                    <Button type="button" variant="ghost" size="xs" onClick={() => randomizeField('bond', currentBgData?.bonds)} disabled={!currentBgData?.bonds}>
                                         <Dices className="h-3 w-3 mr-1" /> Randomize
                                     </Button>
                                </Label>
@@ -239,7 +262,7 @@ export function Step5Background({ data, updateData, setValidity }: Step5Props) {
                             <div className="space-y-1">
                                 <Label htmlFor="flaw" className="flex justify-between items-center">
                                     <span>Flaw</span>
-                                     <Button type="button" variant="ghost" size="xs" onClick={() => randomizeField('flaw', selectedBgData?.flaws)} disabled={!selectedBgData?.flaws}>
+                                     <Button type="button" variant="ghost" size="xs" onClick={() => randomizeField('flaw', currentBgData?.flaws)} disabled={!currentBgData?.flaws}>
                                          <Dices className="h-3 w-3 mr-1" /> Randomize
                                      </Button>
                                 </Label>
@@ -251,3 +274,4 @@ export function Step5Background({ data, updateData, setValidity }: Step5Props) {
         </div>
     );
 }
+

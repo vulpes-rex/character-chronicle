@@ -1,35 +1,34 @@
+
 import { NextResponse } from 'next/server';
 import type { NextRequest } from 'next/server';
+import { logError, logMessage } from '@/services/logging-service'; // Import the logging service
 
-// Basic API route to receive and log errors from the client-side.
-// In a real application, this would likely integrate with a
-// dedicated logging service (e.g., Sentry, LogRocket, Google Cloud Logging).
-
+// API route to receive and log errors from the client-side.
 export async function POST(request: NextRequest) {
   try {
     const errorData = await request.json();
+    const userAgent = request.headers.get('user-agent') || 'Unknown';
+    const ip = request.ip || 'Unknown IP';
 
-    // TODO: Implement actual server-side logging here
-    // For now, just log to the server console
-    console.error("Client-Side Error Logged:", errorData);
-
-    // You could add more details like timestamp, user agent, etc.
-    // await logErrorToService({ ...errorData, timestamp: new Date(), userAgent: request.headers.get('user-agent') });
+    // Log the received client-side error using the logging service
+    await logMessage('error', 'Client-Side Error Reported', {
+        clientError: errorData,
+        userAgent: userAgent,
+        sourceIp: ip,
+        source: 'ClientErrorHandler',
+    });
 
     return NextResponse.json({ message: 'Error logged successfully' }, { status: 200 });
   } catch (e) {
+    // Log the error that occurred *within this API route*
     const error = e instanceof Error ? e : new Error(String(e));
-    console.error("Error logging client-side error:", {
-      errorMessage: error.message,
-      errorStack: error.stack,
+    // Use logError for server-side errors occurring in this handler
+    await logError(error, {
+        context: 'Error handling client-side log request',
+        source: 'api/log-error',
     });
+
     // Avoid sending sensitive error details back to the client
-    return NextResponse.json({ message: 'Failed to log error' }, { status: 500 });
+    return NextResponse.json({ message: 'Failed to log error on server' }, { status: 500 });
   }
 }
-
-// Example of a function that would send logs to a service (replace with actual implementation)
-// async function logErrorToService(errorDetails: any) {
-//   console.log("Sending error to external service:", errorDetails);
-//   // Example: fetch('https://your-logging-service.com/api/log', { method: 'POST', body: JSON.stringify(errorDetails) });
-// }

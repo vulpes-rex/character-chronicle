@@ -1,4 +1,3 @@
-
 import type { CharacterClass as CharacterClassType, CharacterRace, Feature, CharacterLevel, EquipmentItem, HitPoints, BackgroundInfo, SourcePack } from '@/lib/types';
 import { logError, logMessage } from './logging-service'; // Import logging service
 import { getMultipleFeatureDefinitions } from './feature-service'; // Import feature service
@@ -226,7 +225,7 @@ export async function getLevelUpOptions(
          logMessage('debug', `Found features for ${className} level ${targetLevel} in source pack: ${featureKeysAtLevel.join(', ')}`);
     } else {
         // Fallback to base SRD feature keys for this level (Example)
-        logMessage('debug', `No level ${targetLevel} features for ${className} in source pack, using base definitions.`);
+        logMessage('debug', `No level ${targetLevel} features for ${className} in source pack, checking base definitions.`);
         const baseClassData = BASE_CLASSES.find(c => c.name === className);
          if (baseClassData?.featuresByLevel?.[targetLevel]) {
              featureKeysAtLevel = baseClassData.featuresByLevel[targetLevel];
@@ -298,6 +297,11 @@ export async function getCumulativeClassFeatures(
     const classData = combinedContent?.classes?.[className] ?? BASE_CLASSES.find(c => c.name === className);
     let allFeatureKeys: string[] = [];
 
+    if (!classData) {
+         logMessage('error', `Class definition not found for "${className}" in combined content or base classes.`);
+         return [];
+    }
+
     if (classData?.featuresByLevel) {
         // Preferred: Use featuresByLevel from source pack or base data
         for (let level = 1; level <= maxLevel; level++) {
@@ -305,12 +309,17 @@ export async function getCumulativeClassFeatures(
                 allFeatureKeys.push(...classData.featuresByLevel[level]);
             }
         }
+        logMessage('debug', `Accumulated feature keys for ${className} up to level ${maxLevel}: ${allFeatureKeys.join(', ')}`);
     } else {
         logMessage('warn', `Class "${className}" lacks featuresByLevel definition.`);
     }
 
     // Fetch full definitions for all unique collected keys
     const uniqueFeatureKeys = [...new Set(allFeatureKeys)];
+    if (uniqueFeatureKeys.length === 0) {
+        logMessage('debug', `No unique feature keys found for ${className} up to level ${maxLevel}.`);
+        return [];
+    }
     try {
         return await getMultipleFeatureDefinitions(uniqueFeatureKeys, combinedContent);
     } catch (error) {

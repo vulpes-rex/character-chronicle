@@ -1,4 +1,3 @@
-
 'use client';
 
 import { useState, useCallback, useEffect } from 'react';
@@ -42,7 +41,7 @@ const mapCharacterToFormData = (char: Character): PartialCharacterFormData => ({
     playerName: char.playerName,
     characterName: char.characterName,
     race: char.race,
-    class: char.class,
+    class: char.class, // Keep for backward compatibility/reference if needed
     level: char.level,
     background: char.background,
     alignment: char.alignment,
@@ -51,7 +50,8 @@ const mapCharacterToFormData = (char: Character): PartialCharacterFormData => ({
     equipment: (char.equipment as Partial<EquipmentItem>[])?.map(item => ({ ...item, name: item.name, quantity: item.quantity ?? 1})) || [], // Ensure name and quantity are present
     backstory: char.backstory,
     appearance: char.appearance,
-    selectedClasses: { [char.class]: char.level }, // Simple single class representation for now
+    // Correctly initialize selectedClasses from character's class and level
+    selectedClasses: char.class ? { [char.class]: char.level } : {}, // Simple single class representation for now
     tempFeatures: char.features,
     tempProficiencies: char.proficiencies,
     activeSourcePackIds: ['srd'], // Default or needs fetching based on context
@@ -71,7 +71,7 @@ export function CharacterCreationWizard({ initialData, editMode = false }: Chara
             playerName: '',
             characterName: '',
             race: '',
-            class: '',
+            // class: '', // Remove direct initialization of class? Rely on selectedClasses
             level: 1,
             background: '',
             alignment: '',
@@ -80,7 +80,7 @@ export function CharacterCreationWizard({ initialData, editMode = false }: Chara
             equipment: [],
             backstory: '',
             appearance: '',
-            selectedClasses: {},
+            selectedClasses: {}, // Start empty
             tempFeatures: [],
             tempProficiencies: { armor: [], weapons: [], tools: [], savingThrows: [] },
             activeSourcePackIds: ['srd'], // Default to SRD
@@ -155,6 +155,7 @@ export function CharacterCreationWizard({ initialData, editMode = false }: Chara
     };
 
     const handleFinalSubmit = async () => {
+        console.log("Wizard: Final Submit Triggered. Current State:", characterData); // Debug log
         if (!isValid) {
             toast({ variant: 'destructive', title: 'Incomplete Step', description: 'Please complete the final step.' });
             return;
@@ -169,12 +170,35 @@ export function CharacterCreationWizard({ initialData, editMode = false }: Chara
         try {
              // --- Re-calculate final derived data based on choices ---
              const finalLevel = Object.values(characterData.selectedClasses ?? {}).reduce((sum, lvl) => sum + lvl, 0) || 1;
-             const primaryClassKey = Object.keys(characterData.selectedClasses ?? {})[0] ?? characterData.class ?? '';
+
+             // Determine the primary class key more robustly
+             let primaryClassKey = '';
+             if (characterData.selectedClasses && Object.keys(characterData.selectedClasses).length > 0) {
+                // If multiple classes, maybe pick the highest level one? Or just the first one?
+                // For simplicity, let's take the first key.
+                primaryClassKey = Object.keys(characterData.selectedClasses)[0];
+             } else if (characterData.class) {
+                // Fallback to the 'class' field if selectedClasses is somehow empty
+                primaryClassKey = characterData.class;
+             }
+
              const primaryClassData = combinedContent.classes?.[primaryClassKey];
 
-             if (!characterData.race || !primaryClassKey || !primaryClassData) {
-                throw new Error("Core character information (race, class) is missing or invalid in content packs.");
-             }
+              // --- Enhanced Validation ---
+              if (!characterData.race) {
+                 console.error("Final Submit Error: Race is missing.", characterData);
+                 throw new Error("Character race selection is missing. Please go back and select a race.");
+              }
+              if (!primaryClassKey) {
+                   console.error("Final Submit Error: No class selected.", characterData);
+                  throw new Error("Character class selection is missing. Please go back and select a class.");
+              }
+              if (!primaryClassData) {
+                   console.error(`Final Submit Error: Class definition for "${primaryClassKey}" not found in combined content.`, combinedContent?.classes);
+                  throw new Error(`Core class information ("${primaryClassKey}") is missing or invalid in the available content packs.`);
+              }
+              // --- End Enhanced Validation ---
+
 
             // Fetch final features based on race and class/level choices
             const raceFeatures = await getRaceFeatures(characterData.race, combinedContent);
@@ -189,7 +213,7 @@ export function CharacterCreationWizard({ initialData, editMode = false }: Chara
                  playerName: characterData.playerName || '',
                  characterName: characterData.characterName || '',
                  race: characterData.race || '',
-                 class: primaryClassKey,
+                 class: primaryClassKey, // Use the determined primary class key
                  level: finalLevel,
                  background: characterData.background || '',
                  alignment: characterData.alignment || '',
@@ -218,12 +242,12 @@ export function CharacterCreationWizard({ initialData, editMode = false }: Chara
              let finalMaxHp = 0;
              let finalHitDice: HitDiceState = { ...derivedCharacter.hitDice, total: finalLevel, remaining: finalLevel }; // Start with correct total/remaining
 
-            Object.entries(characterData.selectedClasses ?? {}).forEach(([className, level], index) => {
+            Object.entries(characterData.selectedClasses ?? { [primaryClassKey]: finalLevel }).forEach(([className, level], index) => { // Use primary class if selectedClasses is empty
                 const classData = combinedContent.classes?.[className];
                 if (!classData) return;
                 const classHitDieSides = parseInt(classData.hitDie.substring(1), 10);
 
-                if (index === 0) { // First class
+                if (index === 0) { // First class (or only class)
                     finalMaxHp = classHitDieSides + finalConModifier;
                      finalHitDice.dieType = classData.hitDie; // Ensure primary hit die is set
                     if (level > 1) {
@@ -283,8 +307,9 @@ export function CharacterCreationWizard({ initialData, editMode = false }: Chara
             }
         } catch (error) {
             console.error('Failed to save character:', error);
-            setApiError(error instanceof Error ? error.message : 'An unknown error occurred during saving.');
-            toast({ variant: 'destructive', title: 'Save Failed', description: 'Could not save character.' });
+            const message = error instanceof Error ? error.message : 'An unknown error occurred during saving.';
+            setApiError(message);
+            toast({ variant: 'destructive', title: 'Save Failed', description: message });
         } finally {
             setIsLoading(false);
         }

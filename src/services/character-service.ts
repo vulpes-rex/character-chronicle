@@ -1,4 +1,3 @@
-
 'use server'; // Indicate this module can contain server-only logic (like direct DB access)
 
 import { db } from '@/lib/firebase';
@@ -17,7 +16,6 @@ import {
 } from 'firebase/firestore';
 import type { Character, Feature, FeatureEffectMetadata, EquipmentItem } from '@/lib/types'; // Import new types
 import { logError, logMessage } from './logging-service'; // Import logging service
-// Removed import for applyFeatureRules as it's now handled client-side or in specific contexts
 import { applyFeatureRules } from './feature-service'; // Import renamed applyFeatureRules
 
 const charactersCollection = collection(db, 'characters');
@@ -37,6 +35,7 @@ export async function saveCharacter(characterData: Omit<Character, 'id' | 'creat
       throw new Error("Missing required character data (e.g., character name, player name).");
   }
   try {
+    logMessage('debug', 'Saving character data:', characterData); // Log the data being saved
     // Save the base data as provided by the creation wizard.
     const docRef = await addDoc(charactersCollection, {
       ...characterData,
@@ -84,10 +83,11 @@ export async function updateCharacter(characterId: string, characterData: Partia
   const dataToUpdate: Record<string, any> = { ...characterData };
   // Explicitly remove any derived fields if they accidentally got included
   // delete dataToUpdate.derivedStats; // Example if derivedStats existed
-  delete dataToUpdate.stats; // Ensure base stats are not overwritten by derived calculations accidentally sent here
-  if (characterData.stats) { // Only update base stats if explicitly provided in the partial update
-      dataToUpdate.stats = characterData.stats;
+  // Base stats should only be updated if they are explicitly passed in characterData
+  if (!characterData.stats) {
+      delete dataToUpdate.stats;
   }
+
 
   dataToUpdate.updatedAt = serverTimestamp();
 
@@ -228,4 +228,3 @@ export async function deleteCharacter(characterId: string): Promise<void> {
     throw new Error('Failed to delete character.');
   }
 }
-

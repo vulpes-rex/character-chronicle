@@ -334,7 +334,10 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
          if (!feature || feature.currentUses === undefined || feature.currentUses === null) {
              toast({
                  title: `Used ${featureName}`,
-                 description: feature?.description.split('.')[0] + '.' || "Feature action executed.",
+                 description: (typeof feature?.description === 'string' && feature.description.length > 0)
+                     ? feature.description.split('.')[0] + '.'
+                     : "Feature action executed."
+                     ,
              });
              return;
          }
@@ -739,7 +742,10 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
                                                         {feature.name}
                                                         <Badge variant="outline" className='text-xs'>{feature.source}</Badge>
                                                    </p>
-                                                   <p className='text-xs text-muted-foreground pl-6'>{feature.description.split('.')[0] + '.'}</p>
+                                                    <p className='text-xs text-muted-foreground pl-6'>
+                                                        {(typeof feature.description === 'string' && feature.description.length > 0) ? feature.description.split('.')[0] + '.' : ''}
+                                                    </p>
+
                                                     {(feature.maxUses !== null && feature.maxUses !== undefined) && (
                                                         <p className="text-xs text-primary pl-6 mt-1">
                                                              Uses: {feature.currentUses ?? 'N/A'} / {feature.maxUses}
@@ -844,14 +850,14 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
                             <div>
                                 <h3 className='font-semibold mb-2'>Appearance</h3>
                                  <p className="text-sm text-muted-foreground whitespace-pre-wrap min-h-[50px]">
-                                    {characterState.appearance || 'No description provided.'}
+                                    {typeof characterState.appearance === 'string' ? characterState.appearance : 'No description provided.'}
                                 </p>
                              </div>
                              <Separator />
                             <div>
                                 <h3 className='font-semibold mb-2'>Backstory</h3>
                                 <p className="text-sm text-muted-foreground whitespace-pre-wrap min-h-[150px]">
-                                    {characterState.backstory || 'No description provided.'}
+                                    {typeof characterState.backstory === 'string' ? characterState.backstory : 'No description provided.'}
                                 </p>
                            </div>
                         </CardContent>

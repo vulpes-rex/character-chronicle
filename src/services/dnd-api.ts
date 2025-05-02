@@ -1,7 +1,8 @@
-import type { CharacterClass as CharacterClassType, CharacterRace, Feature, CharacterLevel, EquipmentItem, HitPoints } from '@/lib/types';
+
+import type { CharacterClass as CharacterClassType, CharacterRace, Feature, CharacterLevel, EquipmentItem, HitPoints, BackgroundInfo } from '@/lib/types';
 
 // Re-export types from lib/types to ensure consistency
-export type { CharacterClass, CharacterRace, Feature, CharacterLevel, EquipmentItem, HitPoints };
+export type { CharacterClass, CharacterRace, Feature, CharacterLevel, EquipmentItem, HitPoints, BackgroundInfo };
 
 
 /**
@@ -9,6 +10,7 @@ export type { CharacterClass, CharacterRace, Feature, CharacterLevel, EquipmentI
  * @returns A promise that resolves to an array of character classes.
  */
 export async function getCharacterClasses(): Promise<CharacterClassType[]> {
+  console.log("getCharacterClasses: Using placeholder data.");
   // TODO: Implement this by calling an API. Using placeholder data.
   await new Promise(resolve => setTimeout(resolve, 100)); // Simulate network delay
   return [
@@ -67,6 +69,7 @@ export async function getCharacterClasses(): Promise<CharacterClassType[]> {
  * @returns A promise that resolves to an array of character races.
  */
 export async function getCharacterRaces(): Promise<CharacterRace[]> {
+  console.log("getCharacterRaces: Using placeholder data.");
   // TODO: Implement this by calling an API. Using placeholder data.
   await new Promise(resolve => setTimeout(resolve, 100)); // Simulate network delay
   return [
@@ -101,9 +104,9 @@ export async function getCharacterRaces(): Promise<CharacterRace[]> {
  * @returns A promise that resolves to the details for the target level.
  */
 export async function getLevelUpOptions(className: string, targetLevel: number): Promise<CharacterLevel> {
+  console.log(`getLevelUpOptions: Using placeholder data for ${className} level ${targetLevel}.`);
   // TODO: Implement this by calling a real API based on className and targetLevel.
   // This is placeholder data simulating features gained *at* targetLevel.
-  console.log(`Fetching level up options for ${className} to level ${targetLevel}`);
   await new Promise(resolve => setTimeout(resolve, 50)); // Simulate network delay (reduced for cumulative fetch)
 
   let features: Feature[] = [];
@@ -204,9 +207,9 @@ export async function getLevelUpOptions(className: string, targetLevel: number):
  * @returns A promise that resolves to an array of Feature objects representing the traits.
  */
 export async function getRaceTraitsDetails(traitNames: string[]): Promise<Feature[]> {
+    console.log(`getRaceTraitsDetails: Using placeholder data for traits: ${traitNames.join(', ')}`);
     // TODO: Implement this by calling a real API based on traitNames.
     // This is placeholder data.
-    console.log(`Fetching details for traits: ${traitNames.join(', ')}`);
     await new Promise(resolve => setTimeout(resolve, 50)); // Simulate network delay
 
     // Mark some traits as potentially actionable if they grant specific actions/abilities
@@ -237,8 +240,12 @@ export async function getRaceTraitsDetails(traitNames: string[]): Promise<Featur
  */
 export async function getCumulativeClassFeatures(className: string, maxLevel: number): Promise<Feature[]> {
     let allFeatures: Feature[] = [];
-    if (!className || maxLevel < 1) return []; // Guard clause
+    if (!className || maxLevel < 1) {
+        console.warn("getCumulativeClassFeatures: Invalid class name or level provided.");
+        return []; // Guard clause
+    }
 
+    console.log(`getCumulativeClassFeatures: Fetching features for ${className} up to level ${maxLevel}.`);
     // Use Promise.all for potentially faster fetching if the API supports concurrent requests
     const levelPromises: Promise<CharacterLevel>[] = [];
     for (let level = 1; level <= maxLevel; level++) {
@@ -251,7 +258,7 @@ export async function getCumulativeClassFeatures(className: string, maxLevel: nu
             allFeatures = allFeatures.concat(levelData.features);
         });
     } catch (error) {
-        console.error(`Error fetching cumulative features for ${className} up to level ${maxLevel}:`, error);
+        console.error(`Error in getCumulativeClassFeatures for ${className} up to level ${maxLevel}:`, error);
         // Handle the error appropriately - maybe return partial data or throw
         throw new Error(`Failed to fetch all features for ${className}.`);
     }
@@ -264,8 +271,8 @@ export async function getCumulativeClassFeatures(className: string, maxLevel: nu
  * @returns A promise that resolves to an array of EquipmentItem objects.
  */
 export async function getAvailableEquipmentItems(): Promise<EquipmentItem[]> {
+  console.log('getAvailableEquipmentItems: Using placeholder data.');
   // TODO: Implement this by calling a real API or database. Using placeholder data.
-  console.log('Fetching available equipment items...');
   await new Promise(resolve => setTimeout(resolve, 100)); // Simulate network delay
 
   return [
@@ -291,17 +298,36 @@ export async function getAvailableEquipmentItems(): Promise<EquipmentItem[]> {
 }
 
 
-// Placeholder function for fetching background details
-export async function getBackgroundDetails(backgroundName: string): Promise<{ name: string; skillProficiencies: string[] } | null> {
-    console.log(`Fetching details for background: ${backgroundName}`);
+/**
+ * Fetches background details based on name.
+ * @param backgroundName The name of the background.
+ * @returns A promise resolving to background info or null.
+ */
+export async function getBackgroundDetails(backgroundName: string): Promise<BackgroundInfo | null> {
+    console.log(`getBackgroundDetails: Using placeholder data for background: ${backgroundName}`);
     await new Promise(resolve => setTimeout(resolve, 50)); // Simulate delay
 
-    const backgrounds: Record<string, { name: string; skillProficiencies: string[] }> = {
-        "Acolyte": { name: "Acolyte", skillProficiencies: ["Insight", "Religion"] },
-        "Urchin": { name: "Urchin", skillProficiencies: ["Sleight of Hand", "Stealth"] },
-        "Soldier": { name: "Soldier", skillProficiencies: ["Athletics", "Intimidation"] },
-        // Add more backgrounds as needed
-    };
+    // MOCK_BACKGROUNDS constant defined in step-5-background.tsx or moved to a shared location
+    const MOCK_BACKGROUNDS: BackgroundInfo[] = [
+        {
+            name: "Acolyte",
+            skillProficiencies: ["Insight", "Religion"],
+            // Add other properties if needed based on BackgroundInfo type
+        },
+        {
+            name: "Urchin",
+            skillProficiencies: ["Sleight of Hand", "Stealth"],
+            toolProficiencies: ["Disguise kit", "Thieves' tools"],
+        },
+         {
+             name: "Soldier",
+             skillProficiencies: ["Athletics", "Intimidation"],
+             toolProficiencies: ["One type of gaming set", "Vehicles (land)"],
+         }
+        // Add more backgrounds
+    ];
 
-    return backgrounds[backgroundName] || null;
+
+    const background = MOCK_BACKGROUNDS.find(bg => bg.name === backgroundName);
+    return background || null;
 }

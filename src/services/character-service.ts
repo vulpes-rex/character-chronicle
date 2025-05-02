@@ -25,6 +25,10 @@ const charactersCollection = collection(db, 'characters');
  * @returns The ID of the newly created character.
  */
 export async function saveCharacter(characterData: Omit<Character, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> {
+  if (!characterData || !characterData.characterName || !characterData.playerName) {
+      console.error("saveCharacter: Attempted to save character with missing core data.");
+      throw new Error("Missing required character data (e.g., character name, player name).");
+  }
   try {
     const docRef = await addDoc(charactersCollection, {
       ...characterData,
@@ -34,7 +38,7 @@ export async function saveCharacter(characterData: Omit<Character, 'id' | 'creat
     console.log('Character saved with ID: ', docRef.id);
     return docRef.id;
   } catch (e) {
-    console.error('Error adding document: ', e);
+    console.error(`Error in saveCharacter for ${characterData.characterName}: `, e);
     throw new Error('Failed to save character.');
   }
 }
@@ -45,6 +49,14 @@ export async function saveCharacter(characterData: Omit<Character, 'id' | 'creat
  * @param characterData - The character data fields to update.
  */
 export async function updateCharacter(characterId: string, characterData: Partial<Omit<Character, 'id' | 'createdAt'>>): Promise<void> {
+  if (!characterId) {
+      console.error("updateCharacter: Attempted to update character with missing ID.");
+      throw new Error("Character ID is required for update.");
+  }
+   if (!characterData || Object.keys(characterData).length === 0) {
+      console.warn(`updateCharacter: Attempted to update character ${characterId} with empty data.`);
+      return; // No changes to apply
+  }
   const characterDoc = doc(db, 'characters', characterId);
   try {
     await updateDoc(characterDoc, {
@@ -53,7 +65,7 @@ export async function updateCharacter(characterId: string, characterData: Partia
     });
     console.log('Character updated with ID: ', characterId);
   } catch (e) {
-    console.error('Error updating document: ', e);
+    console.error(`Error in updateCharacter for ID ${characterId}: `, e);
     throw new Error('Failed to update character.');
   }
 }
@@ -64,6 +76,10 @@ export async function updateCharacter(characterId: string, characterData: Partia
  * @returns The character data, or null if not found.
  */
 export async function loadCharacter(characterId: string): Promise<Character | null> {
+   if (!characterId) {
+       console.warn("loadCharacter: Attempted to load character with empty ID.");
+       return null;
+   }
   const characterDoc = doc(db, 'characters', characterId);
   try {
     const docSnap = await getDoc(characterDoc);
@@ -78,11 +94,11 @@ export async function loadCharacter(characterId: string): Promise<Character | nu
         } as Character; // Cast might be needed depending on strictness
       return character;
     } else {
-      console.log('No such document!');
+      console.log(`No character document found for ID: ${characterId}`);
       return null;
     }
   } catch (e) {
-    console.error('Error getting document: ', e);
+    console.error(`Error in loadCharacter for ID ${characterId}: `, e);
     throw new Error('Failed to load character.');
   }
 }
@@ -109,7 +125,7 @@ export async function loadAllCharacters(): Promise<Character[]> {
     });
     return characters;
   } catch (e) {
-    console.error('Error getting documents: ', e);
+    console.error('Error in loadAllCharacters: ', e);
     throw new Error('Failed to load characters.');
   }
 }
@@ -119,12 +135,22 @@ export async function loadAllCharacters(): Promise<Character[]> {
  * @param characterId - The ID of the character to delete.
  */
 export async function deleteCharacter(characterId: string): Promise<void> {
+   if (!characterId) {
+       console.error("deleteCharacter: Attempted to delete character with missing ID.");
+       throw new Error("Character ID is required for deletion.");
+   }
   const characterDoc = doc(db, 'characters', characterId);
   try {
+    // Optional: Add check if document exists before deleting?
+    // const docSnap = await getDoc(characterDoc);
+    // if (!docSnap.exists()) {
+    //     console.warn(`deleteCharacter: Character with ID ${characterId} not found.`);
+    //     return; // Or throw an error
+    // }
     await deleteDoc(characterDoc);
     console.log('Character deleted with ID: ', characterId);
   } catch (e) {
-    console.error('Error deleting document: ', e);
+    console.error(`Error in deleteCharacter for ID ${characterId}: `, e);
     throw new Error('Failed to delete character.');
   }
 }

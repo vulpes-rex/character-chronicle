@@ -1,7 +1,7 @@
 
 'use client';
 
-import { useEffect } from 'react';
+import { useEffect, useCallback } from 'react'; // Import useCallback
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
@@ -24,7 +24,7 @@ interface Step1Props {
 }
 
 export function Step1BasicInfo({ data, updateData, setValidity }: Step1Props) {
-    const { register, handleSubmit, watch, formState: { errors, isValid }, trigger } = useForm<Step1FormData>({
+    const { register, handleSubmit, watch, formState: { errors, isValid: formIsValid }, trigger } = useForm<Step1FormData>({
         resolver: zodResolver(step1Schema),
         mode: 'onChange', // Validate on change
         defaultValues: {
@@ -35,18 +35,21 @@ export function Step1BasicInfo({ data, updateData, setValidity }: Step1Props) {
 
     const watchedFields = watch(); // Watch all fields
 
-    // Update parent component's data and validity state whenever form data or validity changes
+    // Update parent component's data state whenever form data changes
     useEffect(() => {
-        updateData(watchedFields);
-        setValidity(isValid);
-         // Trigger validation on mount to check initial state
-        // trigger(); // Removing trigger from here as it might cause issues with useCallback stability
-    }, [watchedFields.playerName, watchedFields.characterName, isValid, updateData, setValidity]);
+        // Only call updateData if the watched fields actually change
+        // This comparison might need refinement if dealing with complex objects
+        if (watchedFields.playerName !== data.playerName || watchedFields.characterName !== data.characterName) {
+             updateData(watchedFields);
+        }
+    }, [watchedFields.playerName, watchedFields.characterName, updateData, data.playerName, data.characterName]); // Depend on specific watched fields and updateData
 
-     // Trigger initial validation once on mount
-     useEffect(() => {
-         trigger();
-     }, [trigger]);
+    // Update parent component's validity state whenever form validity changes
+    useEffect(() => {
+         setValidity(formIsValid);
+         // Trigger initial validation once on mount
+         trigger(); // Trigger validation on mount to check initial state
+    }, [formIsValid, setValidity, trigger]);
 
 
     // No actual submit needed here, data is passed up via updateData on change

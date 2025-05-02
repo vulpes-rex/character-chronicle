@@ -36,6 +36,7 @@ interface Step4Props {
 }
 
 const ABILITIES: (keyof z.infer<typeof statsSchema>)[] = ["strength", "dexterity", "constitution", "intelligence", "wisdom", "charisma"];
+const UNASSIGN_VALUE = "__UNASSIGN__"; // Constant for unassign value
 
 export function Step4AbilityScores({ data, updateData, setValidity, availableRaces }: Step4Props) {
     const { toast } = useToast();
@@ -214,7 +215,13 @@ export function Step4AbilityScores({ data, updateData, setValidity, availableRac
                                  <Label htmlFor={`assign-${ability}`} className="uppercase text-xs font-semibold">{ability}</Label>
                                  <Select
                                       value={assignedScores[ability]?.toString() ?? ""}
-                                      onValueChange={(value) => handleAssignScore(ability, value ? parseInt(value) : null)}
+                                      onValueChange={(value) => {
+                                           if (value === UNASSIGN_VALUE) {
+                                               handleAssignScore(ability, null);
+                                           } else if (value) {
+                                                handleAssignScore(ability, parseInt(value));
+                                           }
+                                       }}
                                       disabled={rolledScores.length === 0 && assignedScores[ability] === null} // Disable if no scores rolled and not already assigned
                                  >
                                       <SelectTrigger id={`assign-${ability}`}>
@@ -223,7 +230,7 @@ export function Step4AbilityScores({ data, updateData, setValidity, availableRac
                                       <SelectContent>
                                            {/* Option to unassign */}
                                            {assignedScores[ability] !== null && (
-                                               <SelectItem value="">Unassign</SelectItem>
+                                               <SelectItem value={UNASSIGN_VALUE}>Unassign</SelectItem>
                                            )}
                                            {/* Show currently assigned score as an option */}
                                            {assignedScores[ability] !== null && (
@@ -270,7 +277,7 @@ export function Step4AbilityScores({ data, updateData, setValidity, availableRac
                                                      <SelectValue placeholder="Select Ability..." />
                                                  </SelectTrigger>
                                                  <SelectContent>
-                                                      <SelectItem value="">None</SelectItem>
+                                                      <SelectItem value={UNASSIGN_VALUE}>None</SelectItem> {/* Use UNASSIGN_VALUE for 'None' */}
                                                      {ABILITIES.map(ab => <SelectItem key={`p2-${ab}`} value={ab}>{ab.charAt(0).toUpperCase() + ab.slice(1)}</SelectItem>)}
                                                  </SelectContent>
                                              </Select>
@@ -282,7 +289,7 @@ export function Step4AbilityScores({ data, updateData, setValidity, availableRac
                                                       <SelectValue placeholder="Select Ability..." />
                                                   </SelectTrigger>
                                                   <SelectContent>
-                                                       <SelectItem value="">None</SelectItem>
+                                                       <SelectItem value={UNASSIGN_VALUE}>None</SelectItem> {/* Use UNASSIGN_VALUE for 'None' */}
                                                       {ABILITIES.map(ab => <SelectItem key={`p1-${ab}`} value={ab}>{ab.charAt(0).toUpperCase() + ab.slice(1)}</SelectItem>)}
                                                   </SelectContent>
                                               </Select>

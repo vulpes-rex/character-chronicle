@@ -7,10 +7,11 @@ export interface Character {
   playerName: string;
   characterName: string;
   race: string; // Name of the race (e.g., "Human", "Elf")
-  class: string; // Name of the class (e.g., "Fighter", "Wizard")
+  class: string; // Name of the class (e.g., "Fighter", "Wizard") // Consider array for multiclass
   level: number;
   background: string;
   alignment: string;
+  // Base stats before modifications
   stats: {
     strength: number;
     dexterity: number;
@@ -19,9 +20,10 @@ export interface Character {
     wisdom: number;
     charisma: number;
   };
+  // Skill proficiency selections (e.g., from background, class)
   skills: Record<string, boolean>; // Map skill name to proficiency status
   hitPoints: {
-    max: number;
+    max: number; // Max HP calculated based on class, level, CON
     current: number;
     temporary: number;
   };
@@ -31,14 +33,14 @@ export interface Character {
     dieType: `d${6 | 8 | 10 | 12}` | null; // e.g., d10
   };
   equipment: EquipmentItem[]; // Array of equipment items
+  // Explicit proficiencies (armor, weapons, tools, saves, initially from class/background)
   proficiencies: {
     armor: string[];
     weapons: string[];
     tools: string[];
     savingThrows: string[]; // Stat names the character is proficient in
-    // skills are derived from the skills object above
   };
-  features: Feature[]; // Features from class and race
+  features: Feature[]; // Features from class and race (potentially including metadata for effects)
   backstory: string;
   appearance: string;
   createdAt?: Date; // Optional: Timestamp for creation
@@ -46,24 +48,71 @@ export interface Character {
   campaignId?: string; // Optional: ID of the campaign the character belongs to
 }
 
+
+// --- Feature Metadata Types ---
+
+// Define specific effect types for features
+type StatBonusMetadata = {
+  effectType: 'statBonus';
+  stats: Partial<Record<keyof Character['stats'], number>>; // e.g., { strength: 1, dexterity: 1 }
+  condition?: string; // Optional condition text, e.g., "while wearing armor"
+};
+
+type ProficiencyGrantMetadata = {
+  effectType: 'proficiencyGrant';
+  type: 'armor' | 'weapon' | 'tool' | 'skill' | 'savingThrow';
+  proficiencies: string[]; // List of specific proficiencies granted (e.g., ["Longsword", "Stealth"])
+  condition?: string;
+};
+
+type ACBonusMetadata = {
+  effectType: 'acBonus';
+  value: number;
+  condition?: string; // e.g., "while not wearing heavy armor"
+};
+
+type AdvantageGrantMetadata = {
+    effectType: 'advantage';
+    target: 'savingThrow' | 'skillCheck' | 'attackRoll'; // What kind of roll gets advantage
+    condition: string; // e.g., "against being charmed", "on Dexterity (Stealth) checks"
+};
+
+type ResistanceGrantMetadata = {
+    effectType: 'resistance';
+    damageType: string; // e.g., "Poison", "Fire"
+    condition?: string;
+};
+
+// Add more effect types as needed (e.g., SpeedBonus, SpecialAction, etc.)
+
+// Union type for feature metadata
+export type FeatureEffectMetadata =
+  | StatBonusMetadata
+  | ProficiencyGrantMetadata
+  | ACBonusMetadata
+  | AdvantageGrantMetadata
+  | ResistanceGrantMetadata;
+// | SpeedBonusMetadata
+// | SpecialActionMetadata;
+
+
 /**
 * Represents a feature or trait gained by a character.
-* (Copied from dnd-api.ts for now, could be shared)
 */
 export interface Feature {
   name: string;
   description: string;
-  source: string;
-  isActionable?: boolean;
+  source: string; // e.g., "Human Race", "Fighter Class", "Feat: Tough"
+  metadata?: FeatureEffectMetadata; // Optional metadata describing the game effect
+  isActionable?: boolean; // Does this feature grant an action the player can take?
   maxUses?: number | null;
   usesResetOn?: 'short-rest' | 'long-rest' | 'daily' | null;
-  currentUses?: number; // This will be managed in the Character object state if tracked
+  currentUses?: number; // Managed in Character state if tracked
 }
 
 
 /**
  * Represents an item of equipment.
- * (Copied from dnd-api.ts for now, could be shared)
  */
 export interface EquipmentItem {
     name: string;
@@ -74,10 +123,10 @@ export interface EquipmentItem {
     type?: 'Weapon' | 'Armor' | 'Adventuring Gear' | 'Tool' | 'Potion' | string;
     isEquipped?: boolean; // State managed within the Character object
     // Weapon specific
-    weaponCategory?: string;
-    damageDice?: string;
-    damageType?: string;
-    properties?: string[];
+    weaponCategory?: string; // e.g., "Simple Melee", "Martial Ranged"
+    damageDice?: string; // e.g., "1d8", "2d6"
+    damageType?: string; // e.g., "Slashing", "Piercing"
+    properties?: string[]; // e.g., ["Finesse", "Light", "Thrown (range 20/60)"]
     // Armor specific
     armorCategory?: 'Light' | 'Medium' | 'Heavy' | 'Shield';
     baseAC?: number;
@@ -89,7 +138,6 @@ export interface EquipmentItem {
 
 /**
  * Represents character Hit Points and Hit Dice state within the Character object.
- * (Simplified from dnd-api.ts for database storage)
  */
 export interface HitPointsState {
     current: number;
@@ -104,7 +152,6 @@ export interface HitDiceState {
 
 /**
  * Represents a character class in D&D 5e.
- * (Copied from dnd-api.ts for now, could be shared)
  */
 export interface CharacterClass {
   name: string;
@@ -114,32 +161,40 @@ export interface CharacterClass {
     armor: string[];
     weapons: string[];
     tools?: string[];
-    savingThrows: string[];
+    savingThrows: string[]; // Stat names ('Strength', 'Dexterity', etc.)
     skills?: { choose: number; options: string[] }; // Skill choices provided by the class
   };
+  // features?: Feature[]; // Features gained at level 1 (optional here, often fetched dynamically)
 }
 
 /**
  * Represents a character race in D&D 5e.
- * (Copied from dnd-api.ts for now, could be shared)
  */
 export interface CharacterRace {
   name: string;
   description: string;
-  traits: string[]; // Names of traits
-  // Potentially add skill proficiencies granted by race here if needed
-  // skillProficiencies?: string[];
+  // Traits are now Features stored in the Character.features array
+  // traitNames?: string[]; // Names of traits (could still be useful for reference)
+  baseSpeed?: number; // e.g., 30, 25
+  size?: string; // e.g., "Medium", "Small"
+  // Initial stat bonuses could be modeled as features with metadata
 }
 
 /**
  * Represents a character background in D&D 5e.
- * (Simplified for now)
+ * (Simplified for now, effects modeled as Features)
  */
 export interface BackgroundInfo {
     name: string;
-    skillProficiencies: string[];
-    toolProficiencies?: string[];
-    // Add languages, equipment, features if needed
+    description: string;
+    // Skill/tool proficiencies granted are modeled as Features with metadata
+    // feature: { name: string; description: string }; // Background feature modeled as a Feature
+    // suggestedTraits?: string[];
+    // suggestedIdeals?: string[];
+    // suggestedBonds?: string[];
+    // suggestedFlaws?: string[];
+    // startingEquipment?: EquipmentItem[]; // Could be added here or derived
+    // startingGold?: number;
 }
 
 
@@ -152,9 +207,8 @@ export interface BackgroundInfo {
    email?: string | null;
    displayName?: string | null;
    role: UserRole; // 'player' or 'dm'
-   // Add any other user-specific data needed
-   createdAt?: Date; // Added timestamp
-   updatedAt?: Date; // Added timestamp
+   createdAt?: Date;
+   updatedAt?: Date;
  }
 
 
@@ -180,14 +234,14 @@ export interface BackgroundInfo {
     id: string;
     campaignId: string;
     timestamp: Date;
-    actorId: string; // User ID or Character ID
+    actorId: string; // User ID or Character ID or 'system'
     actorName: string; // Display name of the actor
-    actionType: 'roll' | 'featureUse' | 'message' | 'statusChange' | string; // Type of action
-    details: string; // Description of the action (e.g., "Rolled Athletics (1d20+3): 15", "Used Second Wind", "DM: A goblin appears!")
-    rollDetails?: { // Optional specific details for dice rolls
-        dice: string; // e.g., "1d20", "2d6+2"
+    actionType: 'roll' | 'featureUse' | 'message' | 'statusChange' | 'combatStart' | 'combatEnd' | 'turnChange' | 'initiativeRoll' | 'hpChange' | 'hpSet' | string; // Type of action
+    details: string; // Description of the action
+    rollDetails?: {
+        dice: string;
         result: number;
-        components?: { roll: number; modifier?: number }; // Breakdown if needed
+        components?: { roll: number; modifier?: number };
     };
  }
 
@@ -204,9 +258,9 @@ export interface Monster {
   armorClass?: number;
   hitPoints?: {
     average: number;
-    dice: string;
+    dice: string; // e.g., "10d8+20"
   };
-  speed?: string;
+  speed?: string; // e.g., "30 ft., fly 60 ft."
   stats?: {
     strength: number;
     dexterity: number;
@@ -216,8 +270,8 @@ export interface Monster {
     charisma: number;
   };
   skills?: Record<string, number>; // Skill modifier (e.g., { Perception: 5 })
-  senses?: string;
-  languages?: string;
+  senses?: string; // e.g., "darkvision 60 ft., passive Perception 15"
+  languages?: string; // e.g., "Common, Goblin"
   challengeRating?: string; // e.g., "1/4", "5"
   specialAbilities?: Array<{ name: string; description: string }>;
   actions?: Array<{ name: string; description: string; attackBonus?: number; damageDice?: string; damageBonus?: number }>;
@@ -227,12 +281,11 @@ export interface Monster {
  * Represents a Non-Player Character (NPC).
  */
  export interface NPC {
-    id?: string; // Added ID for internal tracking/dropdowns
+    id?: string;
     name: string;
     description?: string; // Physical description, role in the world
     personality?: string; // Traits, ideals, bonds, flaws
     notes?: string; // DM notes, plot hooks, relationships
-    // Optional: Include stat block similar to Monster if they can enter combat
     size?: string;
     type?: string; // e.g., Humanoid (Human), Beast
     alignment?: string;
@@ -253,8 +306,8 @@ export interface Monster {
     skills?: Record<string, number>; // e.g., { Persuasion: 3, Insight: 2 }
     senses?: string;
     languages?: string;
-    challengeRating?: string; // If applicable
-    actions?: Array<{ name: string; description: string; attackBonus?: number; damageDice?: string; damageBonus?: number }>; // Simple actions/attacks
+    challengeRating?: string;
+    actions?: Array<{ name: string; description: string; attackBonus?: number; damageDice?: string; damageBonus?: number }>;
  }
 
 
@@ -271,9 +324,9 @@ export interface Monster {
         classes?: Record<string, Omit<CharacterClass, 'description'>>;
         items?: Record<string, Omit<EquipmentItem, 'description' | 'isEquipped'>>;
         monsters?: Record<string, Omit<Monster, 'id'>>; // Omit internal ID for storage
-        npcs?: Record<string, Omit<NPC, 'id'>>; // Added NPCs, omit internal ID
-        backgrounds?: Record<string, BackgroundInfo>;
-        // spells?: Record<string, any>; // Add spell structure if needed
+        npcs?: Record<string, Omit<NPC, 'id'>>;
+        backgrounds?: Record<string, Omit<BackgroundInfo, 'description'>>;
+        features?: Record<string, Omit<Feature, 'description' | 'source'>>; // Allow storing generic features/traits
     };
     createdAt: Date;
     updatedAt: Date;
@@ -286,7 +339,7 @@ export interface Monster {
 export interface EncounterParticipant {
   id: string; // Unique ID for this instance in the encounter
   sourceId: string; // ID of the Character, Monster definition, or NPC definition
-  type: 'character' | 'monster' | 'npc'; // Added NPC type
+  type: 'character' | 'monster' | 'npc';
   name: string; // Character name, Monster name (e.g., "Goblin 1"), or NPC name
   initiative?: number | null;
   currentHp: number;
@@ -305,16 +358,22 @@ export interface Encounter {
   description?: string;
   participants: EncounterParticipant[];
   status: 'setup' | 'running' | 'completed';
-  currentTurnIndex?: number | null; // Index in the participants array after sorting by initiative
+  currentTurnIndex?: number | null;
   round?: number;
   createdAt: Date;
   updatedAt: Date;
 }
 
+// --- Helper Functions ---
 
-// Helper function for dice rolling (moved here for potential server-side use)
+/**
+ * Rolls dice based on a dice string (e.g., "1d20", "2d6+3").
+ */
 export const rollDice = (diceString: string): number => {
-    if (!diceString || !diceString.includes('d')) return 0;
+    if (!diceString || typeof diceString !== 'string' || !diceString.includes('d')) {
+        console.error("Invalid dice string format:", diceString);
+        return 0;
+    }
     try {
         // Handle simple dice like 'd6', 'd20'
         if (diceString.startsWith('d')) {
@@ -326,20 +385,19 @@ export const rollDice = (diceString: string): number => {
         if (diceString.includes('+')) {
             const parts = diceString.split('+');
             dicePart = parts[0].trim();
-            modifier = parseInt(parts.slice(1).join('+').trim(), 10) || 0; // Handle multiple '+' if necessary
+            modifier = parseInt(parts.slice(1).join('+').trim(), 10) || 0;
         } else if (diceString.includes('-')) {
             const parts = diceString.split('-');
             dicePart = parts[0].trim();
-            modifier = -(parseInt(parts.slice(1).join('-').trim(), 10) || 0); // Handle multiple '-' if necessary
+            modifier = -(parseInt(parts.slice(1).join('-').trim(), 10) || 0);
         }
-
 
         const [numDiceStr, numSidesStr] = dicePart.toLowerCase().split('d');
         const numDice = parseInt(numDiceStr, 10);
         const numSides = parseInt(numSidesStr, 10);
 
         if (isNaN(numDice) || isNaN(numSides) || numDice <= 0 || numSides <= 0) {
-            console.error("Invalid dice string:", diceString);
+            console.error("Invalid dice numbers in:", diceString);
             return 0;
         }
 
@@ -347,7 +405,7 @@ export const rollDice = (diceString: string): number => {
         for (let i = 0; i < numDice; i++) {
             total += Math.floor(Math.random() * numSides) + 1;
         }
-        return total + modifier; // Add modifier at the end
+        return total + modifier;
     } catch (e) {
         console.error("Error rolling dice:", diceString, e);
         return 0;
@@ -379,28 +437,42 @@ export const SKILL_ABILITY_MAP: Record<string, keyof Character['stats']> = {
 // All standard 5e skills
 export const ALL_SKILLS = Object.keys(SKILL_ABILITY_MAP);
 
-// Function to calculate skill modifier
+/**
+ * Calculates the modifier for a given skill.
+ * Considers base ability score, proficiency bonus if applicable, and potential expertises (not yet implemented).
+ */
 export const calculateSkillModifier = (
     skillName: string,
-    stats: Character['stats'] | NPC['stats'] | Monster['stats'] | undefined, // Allow undefined stats
+    stats: Character['stats'] | NPC['stats'] | Monster['stats'] | undefined,
     proficient: boolean,
     proficiencyBonus: number
 ): number => {
     const skillLower = skillName.toLowerCase();
     const ability = SKILL_ABILITY_MAP[skillLower];
 
-    // Handle case where stats or specific ability score might be undefined
     if (!stats || !ability || typeof stats[ability] !== 'number') {
-        console.warn(`Could not find ability score for skill: ${skillName} or stats are missing.`);
-        // Handle Monster skill overrides (e.g., { Perception: 5 })
-        // Check if stats exist and if the skillLower exists as a direct property and is a number
-         if (stats && typeof (stats as any)[skillLower] === 'number') {
-             return (stats as any)[skillLower] as number;
-         }
-        return 0; // Return 0 if ability score cannot be determined
+        // Handle direct skill modifiers from monsters/NPCs
+        if (stats && typeof (stats as any)[skillLower] === 'number') {
+            return (stats as any)[skillLower] as number;
+        }
+        // console.warn(`Could not find ability score for skill: ${skillName} or stats are missing.`);
+        return 0;
     }
 
     const abilityModifier = Math.floor((stats[ability]! - 10) / 2);
     const proficiencyValue = proficient ? proficiencyBonus : 0;
+    // TODO: Add check for expertise (would double proficiencyValue)
     return abilityModifier + proficiencyValue;
 };
+
+/**
+ * Interface defining the structure for a character level progression.
+ * (Copied from dnd-api.ts for now, could be shared)
+ */
+export interface CharacterLevel {
+    level: number;
+    features: Feature[];
+    proficiencyBonus?: number; // Optional: May not change every level
+    // spellcasting?: { ... }; // Optional spellcasting details
+    // Add other level-specific changes like ASI options
+}

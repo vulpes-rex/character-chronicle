@@ -1,12 +1,9 @@
-'use client';
-
 import React, {useState, useRef, useEffect} from 'react';
 import Dice from 'react-dice-complete';
-import 'react-dice-complete/dist/react-dice-complete.css';
+import 'react-dice-complete/dist/dice.css';
 import {Button} from "@/components/ui/button";
 import {Input} from "@/components/ui/input";
 import {Card, CardContent} from "@/components/ui/card";
-import {Dices} from "lucide-react";
 
 const FloatingDiceRoller = () => {
     const [numDice, setNumDice] = useState(1);

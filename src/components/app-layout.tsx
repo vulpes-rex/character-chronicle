@@ -1,3 +1,4 @@
+
 'use client';
 
 import type { ReactNode } from 'react';
@@ -28,7 +29,7 @@ import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar'; // For user d
 import { Skeleton } from './ui/skeleton'; // Import Skeleton component
 import { useQuery } from '@tanstack/react-query';
 import { loadCharacter } from '@/services/character-service';
-import { FloatingDiceRoller } from './floating-dice-roller';
+import { FloatingDiceRoller } from './floating-dice-roller'; // Re-import FloatingDiceRoller
 
 export function AppLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
@@ -66,6 +67,18 @@ export function AppLayout({ children }: { children: ReactNode }) {
      return (names[0].charAt(0) + names[names.length - 1].charAt(0)).toUpperCase();
   };
 
+  // TODO: Implement a better way to pass dice roll results to GameLog
+  const handleDiceRollLog = (rollString: string, result: number) => {
+    console.log("Dice Rolled (AppLayout):", rollString, result);
+    // This is where you'd ideally call a service or context function to log the roll
+    // e.g., logDiceRollToGame(rollString, result);
+    toast({
+        title: "Dice Roll",
+        description: `${rollString} = ${result}`,
+    });
+  };
+
+
   return (
     <SidebarProvider defaultOpen>
       <Sidebar side="left" collapsible="icon">
@@ -78,8 +91,8 @@ export function AppLayout({ children }: { children: ReactNode }) {
         </SidebarHeader>
         <SidebarContent className="p-2">
           <SidebarMenu>
-             {/* Character Management - Visible only if logged in */}
-             {user && (
+             {/* Character Management - Visible only if logged in and not DM */}
+             {user && !isAdmin && (
                 <>
                      <SidebarMenuItem>
                       <SidebarMenuButton
@@ -233,7 +246,10 @@ export function AppLayout({ children }: { children: ReactNode }) {
       </Sidebar>
       <SidebarInset>
          {children}
+         {/* Render FloatingDiceRoller unconditionally if user is logged in */}
+         {user && <FloatingDiceRoller onRoll={handleDiceRollLog} />}
       </SidebarInset>
     </SidebarProvider>
   );
 }
+

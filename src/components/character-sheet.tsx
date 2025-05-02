@@ -34,7 +34,7 @@ import { AddEquipmentDialog } from './add-equipment-dialog';
 import { ShortRestDialog } from './short-rest-dialog';
 import { rollDice, SKILL_ABILITY_MAP, calculateSkillModifier, ALL_SKILLS } from '@/lib/types'; // Use central utils/types
 import Link from 'next/link'; // For Edit button
-// Import DDDiceRoller component (assuming path is correct)
+// Import DDDiceRoller component
 import { DDDiceRoller } from './dddice-roller';
 
 
@@ -290,7 +290,7 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
     const handleAttackRoll = (weaponName: string, hitBonus: number) => {
         const roll = rollDice('1d20');
         const total = roll + hitBonus;
-        const resultText = `${weaponName} Attack: ${roll} + ${hitBonus} = ${total}`;
+        const resultText = `${weaponName} Attack: Rolled ${roll} + ${hitBonus} = ${total} (1d20)`; // Include dice notation
         setDiceRollResult(resultText);
         setRollerKey(prev => prev + 1); // Trigger dddice roller
         toast({
@@ -306,7 +306,7 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
          }
         const roll = rollDice(damageDice);
         const total = roll + damageBonus;
-        const resultText = `${weaponName} Damage: ${roll} (${damageDice}) + ${damageBonus} = ${Math.max(0, total)}`;
+        const resultText = `${weaponName} Damage: Rolled ${roll} (${damageDice}) + ${damageBonus} = ${Math.max(0, total)}`;
         setDiceRollResult(resultText);
         setRollerKey(prev => prev + 1); // Trigger dddice roller
         toast({
@@ -319,7 +319,7 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
          const modifier = skillModifiers[skillName.toLowerCase()];
          const roll = rollDice('1d20');
          const total = roll + modifier;
-         const resultText = `${skillName.charAt(0).toUpperCase() + skillName.slice(1)} Check: ${roll} + ${modifier} = ${total}`;
+         const resultText = `${skillName.charAt(0).toUpperCase() + skillName.slice(1)} Check: Rolled ${roll} + ${modifier} = ${total} (1d20)`; // Include dice notation
          setDiceRollResult(resultText);
          setRollerKey(prev => prev + 1); // Trigger dddice roller
          toast({

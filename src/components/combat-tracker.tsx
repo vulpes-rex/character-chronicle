@@ -11,7 +11,7 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { useToast } from '@/hooks/use-toast';
 import { saveEncounter } from '@/services/encounter-service'; // Assuming update logic is in saveEncounter
 import { addGameLogEntry } from '@/services/campaign-service';
-import type { Encounter, EncounterParticipant, Campaign, Character, Monster, NPC } from '@/lib/types'; // Added NPC type
+import type { Encounter, EncounterParticipant, Campaign, Character, Monster, NPC, GameLogEntry } from '@/lib/types'; // Added NPC type and GameLogEntry
 import { rollDice } from '@/lib/types';
 import { Dices, ShieldAlert, HeartPulse, ChevronRight, ChevronLeft, RotateCw, Users, X, PlusCircle, MinusCircle } from 'lucide-react'; // Added MinusCircle
 import { useAuth } from '@/components/auth-provider';

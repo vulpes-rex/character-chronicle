@@ -40,8 +40,13 @@ export function Step1BasicInfo({ data, updateData, setValidity }: Step1Props) {
         updateData(watchedFields);
         setValidity(isValid);
          // Trigger validation on mount to check initial state
-        trigger();
-    }, [watchedFields.playerName, watchedFields.characterName, isValid, updateData, setValidity, trigger]);
+        // trigger(); // Removing trigger from here as it might cause issues with useCallback stability
+    }, [watchedFields.playerName, watchedFields.characterName, isValid, updateData, setValidity]);
+
+     // Trigger initial validation once on mount
+     useEffect(() => {
+         trigger();
+     }, [trigger]);
 
 
     // No actual submit needed here, data is passed up via updateData on change

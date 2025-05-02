@@ -1,7 +1,7 @@
 
 'use client';
 
-import { useState } from 'react';
+import { useState, useCallback } from 'react'; // Import useCallback
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
@@ -54,7 +54,7 @@ export function CharacterCreationWizard() {
         tempFeatures: [],
         tempProficiencies: { armor: [], weapons: [], tools: [], savingThrows: [] },
     });
-    const [isValid, setIsValid] = useState(false); // Track if current step data is valid
+    const [isValid, _setIsValid] = useState(false); // Track if current step data is valid
     const [isLoading, setIsLoading] = useState(false);
     const [apiError, setApiError] = useState<string | null>(null);
     const router = useRouter();
@@ -75,9 +75,15 @@ export function CharacterCreationWizard() {
 
     const isFetchingInitialData = isLoadingClasses || isLoadingRaces;
 
-    const updateCharacterData = (newData: PartialCharacterFormData) => {
+    // Memoize updateCharacterData to prevent re-renders in child components
+    const updateCharacterData = useCallback((newData: PartialCharacterFormData) => {
         setCharacterData(prev => ({ ...prev, ...newData }));
-    };
+    }, []); // No dependencies, function identity is stable
+
+    // Memoize setValidity
+    const setIsValid = useCallback((valid: boolean) => {
+        _setIsValid(valid);
+    }, []);
 
     const handleNext = () => {
         if (isValid) {
@@ -207,17 +213,17 @@ export function CharacterCreationWizard() {
     const renderStep = () => {
         switch (currentStep) {
             case 1:
-                return <Step1BasicInfo data={characterData} updateData={updateCharacterData} setValidity={setIsValid} />;
+                return <Step1BasicInfo data={characterData} updateData={updateCharacterData} setValidity={setValidity} />;
             case 2:
-                return <Step2RaceSelection data={characterData} updateData={updateCharacterData} setValidity={setIsValid} availableRaces={availableRaces} />;
+                return <Step2RaceSelection data={characterData} updateData={updateCharacterData} setValidity={setValidity} availableRaces={availableRaces} />;
             case 3:
-                return <Step3ClassSelection data={characterData} updateData={updateCharacterData} setValidity={setIsValid} availableClasses={availableClasses} />;
+                return <Step3ClassSelection data={characterData} updateData={updateCharacterData} setValidity={setValidity} availableClasses={availableClasses} />;
             case 4:
-                return <Step4AbilityScores data={characterData} updateData={updateCharacterData} setValidity={setIsValid} availableRaces={availableRaces}/>;
+                return <Step4AbilityScores data={characterData} updateData={updateCharacterData} setValidity={setValidity} availableRaces={availableRaces}/>;
             case 5:
-                return <Step5Background data={characterData} updateData={updateCharacterData} setValidity={setIsValid} />;
+                return <Step5Background data={characterData} updateData={updateCharacterData} setValidity={setValidity} />;
             case 6:
-                return <Step6Equipment data={characterData} updateData={updateCharacterData} setValidity={setIsValid} />;
+                return <Step6Equipment data={characterData} updateData={updateCharacterData} setValidity={setValidity} />;
             default:
                 return <div>Invalid Step</div>;
         }

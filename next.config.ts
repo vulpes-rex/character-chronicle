@@ -1,4 +1,8 @@
 
+// Load environment variables from .env file
+import dotenv from 'dotenv';
+dotenv.config();
+
 import type {NextConfig} from 'next';
 
 const nextConfig: NextConfig = {
@@ -32,7 +36,7 @@ const nextConfig: NextConfig = {
        config.resolve.extensionAlias = { '.js': ['.js', '.jsx'], '.ts': ['.ts', '.tsx'] };
        return config;
      },
-   
+
    output: 'standalone', // Optimize for deployment environments
 };
 

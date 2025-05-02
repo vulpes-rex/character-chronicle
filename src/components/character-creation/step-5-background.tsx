@@ -1,3 +1,4 @@
+
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
@@ -14,8 +15,8 @@ import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/
 import { useQuery } from '@tanstack/react-query';
 import { Dices } from 'lucide-react';
 import type { PartialCharacterFormData } from './character-creation-wizard';
-import { ALL_SKILLS, type SourcePack, type BackgroundInfo } from '@/lib/types'; // Import SourcePack type
-import { getBackgroundDetails } from '@/services/dnd-api';
+import { ALL_SKILLS, type SourcePack, type BackgroundInfo } from '@/lib/types';
+import { getBackgroundDetails, getAvailableBackgrounds } from '@/services/dnd-api'; // Updated import
 
 // Simplified Zod schema for validation within this step
 const step5Schema = z.object({
@@ -32,7 +33,7 @@ interface Step5Props {
     data: PartialCharacterFormData;
     updateData: (data: Partial<PartialCharacterFormData>) => void;
     setValidity: (isValid: boolean) => void;
-    combinedContent?: SourcePack['content']; // Add combinedContent prop
+    combinedContent?: SourcePack['content']; // Keep for potential future use or merging logic
 }
 
 export function Step5Background({ data, updateData, setValidity, combinedContent }: Step5Props) {
@@ -51,24 +52,26 @@ export function Step5Background({ data, updateData, setValidity, combinedContent
     const selectedBgName = watch('background');
     const watchedPersonality = watch(['personalityTrait', 'ideal', 'bond', 'flaw']);
 
-    // Use query for background details, using combinedContent if available
-    const { data: currentBgData, isLoading: isLoadingBgDetails } = useQuery<BackgroundInfo | null, Error>({
-        queryKey: ['backgroundDetails', selectedBgName, combinedContent], // Key includes content
-        queryFn: () => selectedBgName ? getBackgroundDetails(selectedBgName, combinedContent) : Promise.resolve(null),
-        enabled: !!selectedBgName && !!combinedContent, // Fetch when a background is selected and content is loaded
-        staleTime: Infinity, // Backgrounds are generally static within a content set
+     // Fetch available background names from the API
+     const { data: availableBackgroundNames = [], isLoading: isLoadingNames } = useQuery<string[], Error>({
+        queryKey: ['availableBackgrounds'],
+        queryFn: getAvailableBackgrounds, // Fetch directly from API
+        staleTime: Infinity, // Background names are fairly static
     });
 
-    // Get the list of available background names from combinedContent
-    const availableBackgroundNames = useMemo(() => {
-        if (!combinedContent?.backgrounds) return [];
-        return Object.keys(combinedContent.backgrounds).sort();
-    }, [combinedContent]);
+    // Fetch background details for the selected background
+    const { data: currentBgData, isLoading: isLoadingBgDetails } = useQuery<BackgroundInfo | null, Error>({
+        queryKey: ['backgroundDetails', selectedBgName, combinedContent], // Still include combinedContent in case API uses it
+        queryFn: () => selectedBgName ? getBackgroundDetails(selectedBgName, combinedContent) : Promise.resolve(null),
+        enabled: !!selectedBgName, // Fetch when a background is selected
+        staleTime: 5 * 60 * 1000, // Cache details for 5 mins
+    });
 
 
     useEffect(() => {
+        const isLoading = isLoadingNames || isLoadingBgDetails;
         // Update Validity
-        setValidity(!!selectedBgName && formIsValid && !isLoadingBgDetails); // Also check loading state
+        setValidity(!!selectedBgName && formIsValid && !isLoading); // Also check loading states
 
         // Calculate Derived Update Data
         const backstoryString = [
@@ -79,22 +82,24 @@ export function Step5Background({ data, updateData, setValidity, combinedContent
         ].join('\n---\n');
 
         // Start with existing skills/proficiencies and remove old background ones
+        // Note: This logic might need refinement if multiple sources grant the same proficiency.
+        // For now, we simply remove old background ones and add new ones.
         const baseSkills = { ...(data.skills || {}) };
         const baseProficiencies = {
             armor: [...(data.tempProficiencies?.armor ?? [])],
             weapons: [...(data.tempProficiencies?.weapons ?? [])],
-            tools: [...(data.tempProficiencies?.tools?.filter(p => !p.endsWith('(Background)')) ?? [])],
+            tools: [...(data.tempProficiencies?.tools?.filter(p => !p.endsWith('(Background)')) ?? [])], // Remove old background tools
             savingThrows: [...(data.tempProficiencies?.savingThrows ?? [])],
         };
 
-        // Remove skills granted by the *previously selected* background (if any)
-        // This requires knowing the previous background, which isn't easily tracked here.
-        // A simpler approach is to only ADD proficiencies and let the final calculation handle duplicates.
-        // However, to truly reflect choices, we'd need more complex state management.
-        // For now, we'll just add the new ones. The final character save should use `applyFeatureRules`.
+         // Remove skills potentially granted by the *previous* background
+         // This is tricky without knowing the *exact* previous background's skills.
+         // We assume background skills were marked or clear the slate if selection changed.
+         // A safer approach: filter out *all* potential background skills before adding new ones.
+         // For simplicity here, we assume the final save calculation will handle duplicates.
+         const newSkills = { ...baseSkills };
+         const newProficiencies = { ...baseProficiencies };
 
-        const newSkills = { ...baseSkills };
-        const newProficiencies = { ...baseProficiencies };
 
         if (currentBgData) {
              // Add skill proficiencies from the current background
@@ -121,7 +126,7 @@ export function Step5Background({ data, updateData, setValidity, combinedContent
             // Persist chosen languages/skill choices from background here if implemented
         };
 
-        // Compare specific parts before updating
+        // Compare relevant parts before updating
         const backgroundChanged = updatePayload.background !== data.background;
         const backstoryChanged = updatePayload.backstory !== data.backstory;
         const skillsChanged = JSON.stringify(updatePayload.skills) !== JSON.stringify(data.skills);
@@ -135,7 +140,8 @@ export function Step5Background({ data, updateData, setValidity, combinedContent
     }, [
         selectedBgName,
         formIsValid,
-        isLoadingBgDetails, // Added dependency
+        isLoadingNames,
+        isLoadingBgDetails,
         watchedPersonality,
         currentBgData,
         setValidity,
@@ -154,6 +160,8 @@ export function Step5Background({ data, updateData, setValidity, combinedContent
         }
     };
 
+    const isLoading = isLoadingNames || isLoadingBgDetails;
+
     return (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {/* Background Selection & Details */}
@@ -171,14 +179,17 @@ export function Step5Background({ data, updateData, setValidity, combinedContent
                                     // Use || "" to handle potential undefined/null from field.value but avoid passing it directly
                                     value={field.value || ""}
                                     onValueChange={(value) => field.onChange(value)}
-                                    // Disable while loading content OR if no backgrounds are available
-                                    disabled={isLoadingBgDetails || availableBackgroundNames.length === 0}
+                                    // Disable while loading names
+                                    disabled={isLoadingNames}
                                 >
-                                    <SelectTrigger className={isLoadingBgDetails ? 'animate-pulse' : ''}>
-                                        <SelectValue placeholder={isLoadingBgDetails ? "Loading..." : "Choose a background..."} />
+                                    <SelectTrigger id="background-select" className={isLoadingNames ? 'animate-pulse' : ''}>
+                                        <SelectValue placeholder={isLoadingNames ? "Loading..." : "Choose a background..."} />
                                     </SelectTrigger>
                                     <SelectContent>
-                                        {availableBackgroundNames.map(bgName => (
+                                         {availableBackgroundNames.length === 0 && !isLoadingNames && (
+                                             <SelectItem value="" disabled>No backgrounds found</SelectItem>
+                                         )}
+                                         {availableBackgroundNames.map(bgName => (
                                             <SelectItem key={bgName} value={bgName}>{bgName}</SelectItem>
                                         ))}
                                     </SelectContent>
@@ -213,7 +224,7 @@ export function Step5Background({ data, updateData, setValidity, combinedContent
                          <div className="space-y-1">
                              <Label htmlFor="personalityTrait" className="flex justify-between items-center">
                                  <span>Personality Trait</span>
-                                  <Button type="button" variant="ghost" size="xs" onClick={() => randomizeField('personalityTrait', currentBgData?.suggestedTraits)} disabled={!currentBgData?.suggestedTraits || isLoadingBgDetails}>
+                                  <Button type="button" variant="ghost" size="xs" onClick={() => randomizeField('personalityTrait', currentBgData?.suggestedTraits)} disabled={!selectedBgName || isLoadingBgDetails || !currentBgData?.suggestedTraits}>
                                       <Dices className="h-3 w-3 mr-1" /> Randomize
                                   </Button>
                              </Label>
@@ -222,7 +233,7 @@ export function Step5Background({ data, updateData, setValidity, combinedContent
                           <div className="space-y-1">
                               <Label htmlFor="ideal" className="flex justify-between items-center">
                                   <span>Ideal</span>
-                                   <Button type="button" variant="ghost" size="xs" onClick={() => randomizeField('ideal', currentBgData?.suggestedIdeals)} disabled={!currentBgData?.suggestedIdeals || isLoadingBgDetails}>
+                                   <Button type="button" variant="ghost" size="xs" onClick={() => randomizeField('ideal', currentBgData?.suggestedIdeals)} disabled={!selectedBgName || isLoadingBgDetails || !currentBgData?.suggestedIdeals}>
                                        <Dices className="h-3 w-3 mr-1" /> Randomize
                                    </Button>
                               </Label>
@@ -231,7 +242,7 @@ export function Step5Background({ data, updateData, setValidity, combinedContent
                            <div className="space-y-1">
                                <Label htmlFor="bond" className="flex justify-between items-center">
                                    <span>Bond</span>
-                                    <Button type="button" variant="ghost" size="xs" onClick={() => randomizeField('bond', currentBgData?.suggestedBonds)} disabled={!currentBgData?.suggestedBonds || isLoadingBgDetails}>
+                                    <Button type="button" variant="ghost" size="xs" onClick={() => randomizeField('bond', currentBgData?.suggestedBonds)} disabled={!selectedBgName || isLoadingBgDetails || !currentBgData?.suggestedBonds}>
                                         <Dices className="h-3 w-3 mr-1" /> Randomize
                                     </Button>
                                </Label>
@@ -240,7 +251,7 @@ export function Step5Background({ data, updateData, setValidity, combinedContent
                             <div className="space-y-1">
                                 <Label htmlFor="flaw" className="flex justify-between items-center">
                                     <span>Flaw</span>
-                                     <Button type="button" variant="ghost" size="xs" onClick={() => randomizeField('flaw', currentBgData?.suggestedFlaws)} disabled={!currentBgData?.suggestedFlaws || isLoadingBgDetails}>
+                                     <Button type="button" variant="ghost" size="xs" onClick={() => randomizeField('flaw', currentBgData?.suggestedFlaws)} disabled={!selectedBgName || isLoadingBgDetails || !currentBgData?.suggestedFlaws}>
                                          <Dices className="h-3 w-3 mr-1" /> Randomize
                                      </Button>
                                 </Label>

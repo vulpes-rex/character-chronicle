@@ -7,28 +7,36 @@ import { getMultipleFeatureDefinitions } from './feature-service'; // Import fea
 export type { CharacterClass, CharacterRace, Feature, CharacterLevel, EquipmentItem, HitPoints, BackgroundInfo };
 
 
-/**
- * Fetches available character classes, prioritizing source pack content.
- * @param combinedContent - Optional combined content from active source packs.
- * @returns A promise that resolves to an array of character classes.
- */
-export async function getCharacterClasses(combinedContent?: SourcePack['content']): Promise<CharacterClassType[]> {
-    logMessage('debug', 'getCharacterClasses: Fetching character classes.');
-    let classes: CharacterClassType[] = [];
+// Placeholder for base SRD data if not provided by source packs
+const BASE_BACKGROUNDS: Record<string, BackgroundInfo> = {
+    "Acolyte": {
+        name: "Acolyte",
+        description: "You have spent your life in the service of a temple...",
+        skillProficiencies: ["Insight", "Religion"],
+        languages: { choose: 2 },
+        feature: { name: "Shelter of the Faithful", description: "..." },
+        equipment: ["Holy symbol", "Prayer book", "5 sticks incense", "Vestments", "Common clothes", "15 gp"],
+    },
+    "Urchin": {
+        name: "Urchin",
+        description: "You grew up on the streets alone...",
+        skillProficiencies: ["Sleight of Hand", "Stealth"],
+        toolProficiencies: ["Disguise kit", "Thieves' tools"],
+        feature: { name: "City Secrets", description: "..." },
+        equipment: ["Small knife", "Map of city", "Pet mouse", "Token", "Common clothes", "10 gp"],
+    },
+     "Soldier": {
+         name: "Soldier",
+         description: "War has been your life...",
+         skillProficiencies: ["Athletics", "Intimidation"],
+         toolProficiencies: ["One type of gaming set", "Vehicles (land)"],
+         feature: { name: "Military Rank", description: "..." },
+         equipment: ["Insignia of rank", "Trophy", "Gaming set", "Common clothes", "10 gp"],
+     }
+    // Add more base backgrounds
+};
 
-    // 1. Get classes from combined source pack content
-    if (combinedContent?.classes) {
-        classes = Object.values(combinedContent.classes);
-        logMessage('debug', `getCharacterClasses: Found ${classes.length} classes in source packs.`);
-    }
-
-    // 2. TODO: Optionally merge/override with base SRD classes if needed.
-    // For now, we assume source packs contain complete definitions if they exist.
-    // If no classes were found in packs, load base SRD data.
-    if (classes.length === 0) {
-        logMessage('debug', 'getCharacterClasses: No classes in source packs, using base SRD placeholders.');
-        await new Promise(resolve => setTimeout(resolve, 50)); // Simulate network delay
-        classes = [
+const BASE_CLASSES: CharacterClassType[] = [
             // Add base SRD class definitions here if needed as fallback
              {
                 name: 'Fighter',
@@ -80,7 +88,76 @@ export async function getCharacterClasses(combinedContent?: SourcePack['content'
                      // ...
                  }
             },
-        ];
+];
+
+const BASE_RACES: CharacterRace[] = [
+    {
+        name: 'Human',
+        description: 'Humans are the most common people in the worlds of D\&D, but they live nearly everywhere.',
+        traits: ['HumanASI', 'ExtraLanguage'], // Feature keys
+    },
+    {
+        name: 'Elf',
+        description: 'Elves are a magical people of otherworldly grace, living in the world but not entirely part of it.',
+        traits: ['Darkvision', 'FeyAncestry', 'Trance'],
+    },
+    {
+        name: 'Dwarf',
+        description: 'Resilient and sturdy.',
+        traits: ['Darkvision', 'DwarvenResilience', 'Stonecunning'],
+    },
+     {
+        name: 'Halfling',
+        description: 'Small and lucky.',
+        traits: ['Lucky', 'Brave', 'HalflingNimbleness'],
+     },
+];
+
+const BASE_ITEMS: EquipmentItem[] = [
+    // Add base SRD item definitions here
+    { name: 'Backpack', description: 'Holds adventuring gear', weight: 5, cost: '2 gp', type: 'Adventuring Gear' },
+    { name: 'Bedroll', description: 'For sleeping', weight: 7, cost: '1 gp', type: 'Adventuring Gear' },
+    { name: 'Rope (50 feet)', description: 'Hempen rope', weight: 10, cost: '1 gp', type: 'Adventuring Gear' },
+    { name: 'Torch', description: 'Provides light', weight: 1, cost: '1 cp', type: 'Adventuring Gear' },
+    { name: 'Rations (1 day)', description: 'Food for one day', weight: 2, cost: '5 sp', type: 'Adventuring Gear' },
+    { name: 'Waterskin', description: 'Holds water (4 pints)', weight: 5, cost: '2 sp', type: 'Adventuring Gear' },
+    { name: 'Longsword', description: 'Versatile martial weapon', weight: 3, cost: '15 gp', type: 'Weapon', weaponCategory: 'Martial Melee', damageDice: '1d8', damageType: 'Slashing', properties: ['Versatile (1d10)'] },
+    { name: 'Dagger', description: 'Simple melee weapon', weight: 1, cost: '2 gp', type: 'Weapon', weaponCategory: 'Simple Melee', damageDice: '1d4', damageType: 'Piercing', properties: ['Finesse', 'Light', 'Thrown (range 20/60)'] },
+    { name: 'Shortsword', description: 'Simple melee weapon', weight: 2, cost: '10 gp', type: 'Weapon', weaponCategory: 'Martial Melee', damageDice: '1d6', damageType: 'Piercing', properties: ['Finesse', 'Light'] },
+    { name: 'Rapier', description: 'Martial melee weapon', weight: 2, cost: '25 gp', type: 'Weapon', weaponCategory: 'Martial Melee', damageDice: '1d8', damageType: 'Piercing', properties: ['Finesse'] },
+    { name: 'Shortbow', description: 'Simple ranged weapon', weight: 2, cost: '25 gp', type: 'Weapon', weaponCategory: 'Simple Ranged', damageDice: '1d6', damageType: 'Piercing', properties: ['Ammunition (range 80/320)', 'Two-Handed'] },
+    { name: 'Light Crossbow', description: 'Simple ranged weapon', weight: 5, cost: '25 gp', type: 'Weapon', weaponCategory: 'Simple Ranged', damageDice: '1d8', damageType: 'Piercing', properties: ['Ammunition (range 80/320)', 'Loading', 'Two-Handed'] },
+    { name: 'Leather Armor', description: 'Light armor', weight: 10, cost: '10 gp', type: 'Armor', armorCategory: 'Light', baseAC: 11, addDexModifier: true, maxDexBonus: null, strengthRequirement: null, stealthDisadvantage: false },
+    { name: 'Scale Mail', description: 'Medium armor', weight: 45, cost: '50 gp', type: 'Armor', armorCategory: 'Medium', baseAC: 14, addDexModifier: true, maxDexBonus: 2, strengthRequirement: null, stealthDisadvantage: true },
+    { name: 'Chain Mail', description: 'Heavy armor', weight: 55, cost: '75 gp', type: 'Armor', armorCategory: 'Heavy', baseAC: 16, addDexModifier: false, maxDexBonus: null, strengthRequirement: 13, stealthDisadvantage: true },
+    { name: 'Shield', description: 'Increases AC by 2', weight: 6, cost: '10 gp', type: 'Armor', armorCategory: 'Shield', baseAC: 2, addDexModifier: false, maxDexBonus: null, strengthRequirement: null, stealthDisadvantage: false },
+    { name: 'Healing Potion', description: 'Regain 2d4+2 hit points', weight: 0.5, cost: '50 gp', type: 'Potion' },
+    { name: 'Thieves\' Tools', description: 'Tools for disarming traps and opening locks', weight: 1, cost: '25 gp', type: 'Tool' },
+];
+
+
+/**
+ * Fetches available character classes, prioritizing source pack content.
+ * @param combinedContent - Optional combined content from active source packs.
+ * @returns A promise that resolves to an array of character classes.
+ */
+export async function getCharacterClasses(combinedContent?: SourcePack['content']): Promise<CharacterClassType[]> {
+    logMessage('debug', 'getCharacterClasses: Fetching character classes.');
+    let classes: CharacterClassType[] = [];
+
+    // 1. Get classes from combined source pack content
+    if (combinedContent?.classes) {
+        classes = Object.values(combinedContent.classes);
+        logMessage('debug', `getCharacterClasses: Found ${classes.length} classes in source packs.`);
+    }
+
+    // 2. TODO: Optionally merge/override with base SRD classes if needed.
+    // For now, we assume source packs contain complete definitions if they exist.
+    // If no classes were found in packs, load base SRD data.
+    if (classes.length === 0) {
+        logMessage('debug', 'getCharacterClasses: No classes in source packs, using base SRD placeholders.');
+        await new Promise(resolve => setTimeout(resolve, 50)); // Simulate network delay
+        classes = BASE_CLASSES;
     }
 
     return classes.sort((a, b) => a.name.localeCompare(b.name));
@@ -105,28 +182,7 @@ export async function getCharacterRaces(combinedContent?: SourcePack['content'])
     if (races.length === 0) {
         logMessage('debug', 'getCharacterRaces: No races in source packs, using base SRD placeholders.');
         await new Promise(resolve => setTimeout(resolve, 50)); // Simulate delay
-        races = [
-            {
-                name: 'Human',
-                description: 'Humans are the most common people in the worlds of D\&D, but they live nearly everywhere.',
-                traits: ['HumanASI', 'ExtraLanguage'], // Feature keys
-            },
-            {
-                name: 'Elf',
-                description: 'Elves are a magical people of otherworldly grace, living in the world but not entirely part of it.',
-                traits: ['Darkvision', 'FeyAncestry', 'Trance'],
-            },
-            {
-                name: 'Dwarf',
-                description: 'Resilient and sturdy.',
-                traits: ['Darkvision', 'DwarvenResilience', 'Stonecunning'],
-            },
-             {
-                name: 'Halfling',
-                description: 'Small and lucky.',
-                traits: ['Lucky', 'Brave', 'HalflingNimbleness'],
-             },
-        ];
+        races = BASE_RACES;
     }
 
     return races.sort((a, b) => a.name.localeCompare(b.name));
@@ -171,18 +227,10 @@ export async function getLevelUpOptions(
     } else {
         // Fallback to base SRD feature keys for this level (Example)
         logMessage('debug', `No level ${targetLevel} features for ${className} in source pack, using base definitions.`);
-         switch (className) {
-            case 'Fighter':
-                if (targetLevel === 1) featureKeysAtLevel = ['FightingStyleArchery', 'SecondWind'];
-                else if (targetLevel === 2) featureKeysAtLevel = ['ActionSurge'];
-                // else if (targetLevel === 3) featureKeysAtLevel = ['MartialArchetype']; // Placeholder key
-                break;
-             case 'Rogue':
-                 if (targetLevel === 1) featureKeysAtLevel = ['Expertise', 'SneakAttack', 'ThievesCant'];
-                 else if (targetLevel === 2) featureKeysAtLevel = ['CunningAction'];
-                 break;
-            // Add other base classes and levels
-        }
+        const baseClassData = BASE_CLASSES.find(c => c.name === className);
+         if (baseClassData?.featuresByLevel?.[targetLevel]) {
+             featureKeysAtLevel = baseClassData.featuresByLevel[targetLevel];
+         }
     }
 
     // 3. Fetch full definitions for the features gained at this level
@@ -241,43 +289,24 @@ export async function getCumulativeClassFeatures(
     maxLevel: number,
     combinedContent?: SourcePack['content']
 ): Promise<Feature[]> {
-    if (!className || maxLevel < 1 || !combinedContent) {
-        logMessage('warn', "getCumulativeClassFeatures: Invalid class name, level, or missing combinedContent.");
+    if (!className || maxLevel < 1) {
+        logMessage('warn', "getCumulativeClassFeatures: Invalid class name or level.");
         return [];
     }
 
     logMessage('debug', `getCumulativeClassFeatures: Fetching cumulative features for ${className} up to level ${maxLevel}.`);
-    const classData = combinedContent.classes?.[className];
+    const classData = combinedContent?.classes?.[className] ?? BASE_CLASSES.find(c => c.name === className);
     let allFeatureKeys: string[] = [];
 
     if (classData?.featuresByLevel) {
-        // Preferred: Use featuresByLevel from source pack
+        // Preferred: Use featuresByLevel from source pack or base data
         for (let level = 1; level <= maxLevel; level++) {
             if (classData.featuresByLevel[level]) {
                 allFeatureKeys.push(...classData.featuresByLevel[level]);
             }
         }
     } else {
-        // Fallback: Manually map base SRD features level by level
-        logMessage('debug', `Class "${className}" lacks featuresByLevel in source pack, using base definitions.`);
-        for (let level = 1; level <= maxLevel; level++) {
-             // This requires duplicating the logic from getLevelUpOptions fallback
-             let keysThisLevel: string[] = [];
-             switch (className) {
-                 case 'Fighter':
-                     if (level === 1) keysThisLevel = ['FightingStyleArchery', 'SecondWind'];
-                     else if (level === 2) keysThisLevel = ['ActionSurge'];
-                     // Add more levels...
-                     break;
-                  case 'Rogue':
-                      if (level === 1) keysThisLevel = ['Expertise', 'SneakAttack', 'ThievesCant'];
-                      else if (level === 2) keysThisLevel = ['CunningAction'];
-                      // Add more levels...
-                     break;
-                // Add other base classes
-             }
-             allFeatureKeys.push(...keysThisLevel);
-        }
+        logMessage('warn', `Class "${className}" lacks featuresByLevel definition.`);
     }
 
     // Fetch full definitions for all unique collected keys
@@ -316,30 +345,36 @@ export async function getAvailableEquipmentItems(combinedContent?: SourcePack['c
     if (items.length === 0) {
         logMessage('debug', 'getAvailableEquipmentItems: No items in source packs, using base SRD placeholders.');
         await new Promise(resolve => setTimeout(resolve, 50)); // Simulate delay
-        items = [
-            // Add base SRD item definitions here
-            { name: 'Backpack', description: 'Holds adventuring gear', weight: 5, cost: '2 gp', type: 'Adventuring Gear' },
-            { name: 'Bedroll', description: 'For sleeping', weight: 7, cost: '1 gp', type: 'Adventuring Gear' },
-            { name: 'Rope (50 feet)', description: 'Hempen rope', weight: 10, cost: '1 gp', type: 'Adventuring Gear' },
-            { name: 'Torch', description: 'Provides light', weight: 1, cost: '1 cp', type: 'Adventuring Gear' },
-            { name: 'Rations (1 day)', description: 'Food for one day', weight: 2, cost: '5 sp', type: 'Adventuring Gear' },
-            { name: 'Waterskin', description: 'Holds water (4 pints)', weight: 5, cost: '2 sp', type: 'Adventuring Gear' },
-            { name: 'Longsword', description: 'Versatile martial weapon', weight: 3, cost: '15 gp', type: 'Weapon', weaponCategory: 'Martial Melee', damageDice: '1d8', damageType: 'Slashing', properties: ['Versatile (1d10)'] },
-            { name: 'Dagger', description: 'Simple melee weapon', weight: 1, cost: '2 gp', type: 'Weapon', weaponCategory: 'Simple Melee', damageDice: '1d4', damageType: 'Piercing', properties: ['Finesse', 'Light', 'Thrown (range 20/60)'] },
-            { name: 'Shortsword', description: 'Simple melee weapon', weight: 2, cost: '10 gp', type: 'Weapon', weaponCategory: 'Martial Melee', damageDice: '1d6', damageType: 'Piercing', properties: ['Finesse', 'Light'] },
-            { name: 'Rapier', description: 'Martial melee weapon', weight: 2, cost: '25 gp', type: 'Weapon', weaponCategory: 'Martial Melee', damageDice: '1d8', damageType: 'Piercing', properties: ['Finesse'] },
-            { name: 'Shortbow', description: 'Simple ranged weapon', weight: 2, cost: '25 gp', type: 'Weapon', weaponCategory: 'Simple Ranged', damageDice: '1d6', damageType: 'Piercing', properties: ['Ammunition (range 80/320)', 'Two-Handed'] },
-            { name: 'Light Crossbow', description: 'Simple ranged weapon', weight: 5, cost: '25 gp', type: 'Weapon', weaponCategory: 'Simple Ranged', damageDice: '1d8', damageType: 'Piercing', properties: ['Ammunition (range 80/320)', 'Loading', 'Two-Handed'] },
-            { name: 'Leather Armor', description: 'Light armor', weight: 10, cost: '10 gp', type: 'Armor', armorCategory: 'Light', baseAC: 11, addDexModifier: true, maxDexBonus: null, strengthRequirement: null, stealthDisadvantage: false },
-            { name: 'Scale Mail', description: 'Medium armor', weight: 45, cost: '50 gp', type: 'Armor', armorCategory: 'Medium', baseAC: 14, addDexModifier: true, maxDexBonus: 2, strengthRequirement: null, stealthDisadvantage: true },
-            { name: 'Chain Mail', description: 'Heavy armor', weight: 55, cost: '75 gp', type: 'Armor', armorCategory: 'Heavy', baseAC: 16, addDexModifier: false, maxDexBonus: null, strengthRequirement: 13, stealthDisadvantage: true },
-            { name: 'Shield', description: 'Increases AC by 2', weight: 6, cost: '10 gp', type: 'Armor', armorCategory: 'Shield', baseAC: 2, addDexModifier: false, maxDexBonus: null, strengthRequirement: null, stealthDisadvantage: false },
-            { name: 'Healing Potion', description: 'Regain 2d4+2 hit points', weight: 0.5, cost: '50 gp', type: 'Potion' },
-            { name: 'Thieves\' Tools', description: 'Tools for disarming traps and opening locks', weight: 1, cost: '25 gp', type: 'Tool' },
-        ];
+        items = BASE_ITEMS;
     }
 
   return items.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * Fetches a list of available background names, prioritizing source packs.
+ * @param combinedContent - Optional combined content from active source packs.
+ * @returns A promise that resolves to an array of background names.
+ */
+export async function getAvailableBackgrounds(combinedContent?: SourcePack['content']): Promise<string[]> {
+    logMessage('debug', 'getAvailableBackgrounds: Fetching available background names.');
+    let backgroundNames: string[] = [];
+
+    // 1. Get from source packs
+    if (combinedContent?.backgrounds) {
+        backgroundNames = Object.keys(combinedContent.backgrounds);
+        logMessage('debug', `getAvailableBackgrounds: Found ${backgroundNames.length} backgrounds in source packs.`);
+    }
+
+    // 2. Add base SRD names if not already present
+    const baseNames = Object.keys(BASE_BACKGROUNDS);
+    backgroundNames = [...new Set([...backgroundNames, ...baseNames])]; // Combine and ensure uniqueness
+
+    if (backgroundNames.length === 0) {
+        logMessage('warn', 'getAvailableBackgrounds: No backgrounds found in source packs or base data.');
+    }
+
+    return backgroundNames.sort();
 }
 
 
@@ -362,35 +397,8 @@ export async function getBackgroundDetails(
     }
 
     // 2. Fallback to base SRD data
-    logMessage('debug', `Background "${backgroundName}" not found in source packs, using base SRD placeholders.`);
+    logMessage('debug', `Background "${backgroundName}" not found in source packs, checking base SRD.`);
     await new Promise(resolve => setTimeout(resolve, 50)); // Simulate delay
-    const BASE_BACKGROUNDS: Record<string, BackgroundInfo> = {
-        "Acolyte": {
-            name: "Acolyte",
-            description: "You have spent your life in the service of a temple...",
-            skillProficiencies: ["Insight", "Religion"],
-            languages: { choose: 2 },
-            feature: { name: "Shelter of the Faithful", description: "..." },
-            equipment: ["Holy symbol", "Prayer book", "5 sticks incense", "Vestments", "Common clothes", "15 gp"],
-        },
-        "Urchin": {
-            name: "Urchin",
-            description: "You grew up on the streets alone...",
-            skillProficiencies: ["Sleight of Hand", "Stealth"],
-            toolProficiencies: ["Disguise kit", "Thieves' tools"],
-            feature: { name: "City Secrets", description: "..." },
-            equipment: ["Small knife", "Map of city", "Pet mouse", "Token", "Common clothes", "10 gp"],
-        },
-         "Soldier": {
-             name: "Soldier",
-             description: "War has been your life...",
-             skillProficiencies: ["Athletics", "Intimidation"],
-             toolProficiencies: ["One type of gaming set", "Vehicles (land)"],
-             feature: { name: "Military Rank", description: "..." },
-             equipment: ["Insignia of rank", "Trophy", "Gaming set", "Common clothes", "10 gp"],
-         }
-        // Add more base backgrounds
-    };
 
     return BASE_BACKGROUNDS[backgroundName] || null;
 }

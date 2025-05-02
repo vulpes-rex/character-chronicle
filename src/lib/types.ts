@@ -1,5 +1,4 @@
 
-
 /**
  * Represents the core data structure for a D&D character.
  */
@@ -74,6 +73,13 @@ type ACBonusMetadata = {
   condition?: string; // e.g., "while not wearing heavy armor"
 };
 
+// Specific type for complex AC calculations like Unarmored Defense
+type ACCalculationMetadata = {
+    effectType: 'acCalculation';
+    formula: string; // e.g., "10 + dexMod + conMod" (parsed during AC calculation)
+    condition: string; // e.g., "not wearing armor", "not wearing armor and not wielding a shield"
+};
+
 type AdvantageGrantMetadata = {
     effectType: 'advantage';
     target: 'savingThrow' | 'skillCheck' | 'attackRoll'; // What kind of roll gets advantage
@@ -93,6 +99,7 @@ export type FeatureEffectMetadata =
   | StatBonusMetadata
   | ProficiencyGrantMetadata
   | ACBonusMetadata
+  | ACCalculationMetadata // Added new type
   | AdvantageGrantMetadata
   | ResistanceGrantMetadata;
 // | SpeedBonusMetadata
@@ -494,3 +501,4 @@ export interface CharacterLevel {
     // spellcasting?: { ... }; // Optional spellcasting details
     // Add other level-specific changes like ASI options
 }
+```

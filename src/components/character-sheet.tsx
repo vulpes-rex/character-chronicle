@@ -17,8 +17,8 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation'; // Added useRouter
-import { useQuery } from '@tanstack/react-query';
-import { PlusCircle, Trash2, Dices, ShieldCheck, Swords, ChevronUp, ChevronDown, BedDouble, BedSingle, HeartPulse, Edit, CheckSquare, Square } from 'lucide-react'; // Added CheckSquare, Square
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { PlusCircle, Trash2, Dices, ShieldCheck, Swords, ChevronUp, ChevronDown, BedDouble, BedSingle, HeartPulse, Edit, CheckSquare, Square, AlertCircle, Loader2 } from 'lucide-react'; // Added CheckSquare, Square
 import { useToast } from '@/hooks/use-toast';
 import {
     getCharacterClasses,
@@ -29,48 +29,66 @@ import {
     getLevelUpOptions,
 } from '@/services/dnd-api';
 import type { Character, EquipmentItem, Feature, HitPointsState, HitDiceState, FeatureEffectMetadata } from '@/lib/types'; // Import FeatureEffectMetadata
-import { updateCharacter } from '@/services/character-service';
+import { updateCharacter, loadCharacter } from '@/services/character-service';
 import { AddEquipmentDialog } from './add-equipment-dialog';
 import { ShortRestDialog } from './short-rest-dialog';
 import { rollDice, SKILL_ABILITY_MAP, calculateSkillModifier, ALL_SKILLS } from '@/lib/types'; // Use central utils/types
 import Link from 'next/link'; // For Edit button
 import { DDDiceRoller } from './dddice-roller';
-
+import { applyFeatureRules } from '@/services/feature-service'; // Import feature rule application
 
 interface CharacterSheetProps {
-    initialCharacter: Character; // Character data is now passed in (includes base stats)
+    initialCharacter: Character; // Base character data is now passed in
 }
-
 
 export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
     const { toast } = useToast();
-    const router = useRouter(); // If updates might redirect
+    const router = useRouter();
+    const queryClient = useQueryClient();
 
-    // --- Local UI State ---
-    const [characterState, setCharacterState] = useState<Character>(initialCharacter);
+    // --- State Management ---
+    // Use react-query to manage character data, refetching when needed
+    const { data: characterData, isLoading: isLoadingCharacter, error: characterError, refetch } = useQuery<Character | null, Error>({
+         queryKey: ['character', initialCharacter.id],
+         // Fetch function applies feature rules AFTER loading base data
+         queryFn: async () => {
+             const baseData = await loadCharacter(initialCharacter.id);
+             if (!baseData) return null;
+             return applyFeatureRules(baseData); // Apply rules to get derived state
+         },
+         initialData: initialCharacter, // Use passed initial data until first fetch
+         staleTime: 5 * 60 * 1000, // Consider data stale after 5 minutes
+         refetchOnWindowFocus: false, // Optional: disable refetch on focus
+    });
+
     const [isSaving, setIsSaving] = useState(false);
     const [isAddEquipmentOpen, setIsAddEquipmentOpen] = useState(false);
     const [isShortRestDialogOpen, setIsShortRestDialogOpen] = useState(false);
     const [diceRollResult, setDiceRollResult] = useState<string | null>(null);
     const [rollerKey, setRollerKey] = useState(0); // To force re-render of roller
 
+    // Derived state for feature uses - synchronized with query data
+    const [featureUses, setFeatureUses] = useState<Record<string, number>>({});
 
-    // --- Calculate Derived Stats from Base Stats and Features ---
-    const derivedStats = useMemo(() => {
-        const stats = { ...characterState.stats }; // Start with base stats
-        (characterState.features || []).forEach(feature => {
-            if (feature.metadata?.effectType === 'statBonus') {
-                const metadata = feature.metadata as FeatureEffectMetadata & { effectType: 'statBonus' };
-                 // TODO: Add condition checking if metadata.condition exists
-                Object.entries(metadata.stats).forEach(([stat, bonus]) => {
-                     if (stats[stat as keyof typeof stats] !== undefined) {
-                        stats[stat as keyof typeof stats] += bonus;
-                    }
-                });
-            }
-        });
-        return stats;
-    }, [characterState.stats, characterState.features]);
+    useEffect(() => {
+        // Update local feature uses state when characterData (from query) changes
+        if (characterData?.features) {
+             const initialUses: Record<string, number> = {};
+             characterData.features.forEach(feature => {
+                if (feature.maxUses !== null && feature.maxUses !== undefined) {
+                    // Prioritize currentUses if available, otherwise default to maxUses
+                    initialUses[feature.name] = feature.currentUses ?? feature.maxUses;
+                }
+            });
+            setFeatureUses(initialUses);
+        }
+    }, [characterData?.features]); // Dependency on fetched features
+
+
+    // --- Derived Values (Calculated from characterData) ---
+
+    // Get derived stats directly from the query data (already processed by applyFeatureRules)
+    const derivedStats = useMemo(() => characterData?.stats || initialCharacter.stats, [characterData, initialCharacter.stats]);
 
     const modifiers = useMemo(() => ({
         strength: Math.floor((derivedStats.strength - 10) / 2),
@@ -82,27 +100,16 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
     }), [derivedStats]);
 
     // --- Fetch Level Data (Proficiency Bonus) ---
-    const { data: levelData } = useQuery<Awaited<ReturnType<typeof getLevelUpOptions>>, Error>({
-        queryKey: ['levelData', characterState.class, characterState.level],
-        queryFn: () => getLevelUpOptions(characterState.class, characterState.level),
-        enabled: !!characterState.class && characterState.level > 0,
+     const { data: levelData } = useQuery<Awaited<ReturnType<typeof getLevelUpOptions>>, Error>({
+        queryKey: ['levelData', characterData?.class, characterData?.level],
+        queryFn: () => getLevelUpOptions(characterData!.class, characterData!.level), // Assert non-null as it depends on characterData
+        enabled: !!characterData?.class && (characterData?.level ?? 0) > 0,
         staleTime: Infinity,
     });
     const proficiencyBonus = useMemo(() => levelData?.proficiencyBonus ?? 0, [levelData]);
 
 
-    const allFeaturesAndTraits = useMemo(() => characterState.features ?? [], [characterState.features]);
-
-    const [featureUses, setFeatureUses] = useState<Record<string, number>>(() => {
-        const initialUses: Record<string, number> = {};
-        (characterState.features ?? []).forEach(feature => {
-            if (feature.maxUses !== null && feature.maxUses !== undefined) {
-                initialUses[feature.name] = feature.currentUses ?? feature.maxUses;
-            }
-        });
-        return initialUses;
-    });
-
+    const allFeaturesAndTraits = useMemo(() => characterData?.features ?? [], [characterData?.features]);
 
     // --- Data Fetching for Definitions (Dropdowns, Item Details) ---
     const { data: availableEquipment = [], isLoading: isLoadingEquipment } = useQuery<EquipmentItem[], Error>({
@@ -115,24 +122,17 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
     // --- Memoized Calculations (Using derived stats/modifiers) ---
 
      const armorClass = useMemo(() => {
+         if (!characterData) return 10; // Default AC if no data
+
          let baseAC = 10;
-         let dexModForAC = modifiers.dexterity; // Use derived modifier
+         let dexModForAC = modifiers.dexterity;
          let maxDex: number | null = null;
          let hasShield = false;
          let armorEquipped = false;
          let unarmoredDefenseValue: number | null = null;
 
-         // Check for Unarmored Defense features first
-         characterState.features.forEach(f => {
-             if (f.name === 'Unarmored Defense (Barbarian)') {
-                 unarmoredDefenseValue = 10 + modifiers.dexterity + modifiers.constitution;
-             } else if (f.name === 'Unarmored Defense (Monk)') {
-                 unarmoredDefenseValue = 10 + modifiers.dexterity + modifiers.wisdom;
-             }
-         });
-
-         // Check equipped armor
-         characterState.equipment
+         // Check equipped armor first
+         characterData.equipment
              .filter(item => item.isEquipped && item.type === 'Armor')
              .forEach(item => {
                  if (item.armorCategory === 'Shield') {
@@ -147,37 +147,67 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
                  }
              });
 
-         // Apply Unarmored Defense if applicable
-         const canUseUnarmoredDefense = unarmoredDefenseValue !== null && !armorEquipped && (f.name.includes('Barbarian') || !hasShield);
-         if (canUseUnarmoredDefense) {
-             baseAC = unarmoredDefenseValue!;
-             dexModForAC = 0; // Modifier is already included in the formula
+         // Check for Unarmored Defense features and apply IF conditions met
+         characterData.features.forEach(f => {
+             const metadata = f.metadata as FeatureEffectMetadata | undefined; // Type cast
+             if (metadata?.effectType === 'acCalculation') {
+                 const isBarb = f.name.includes('Barbarian');
+                 const isMonk = f.name.includes('Monk');
+                  // Apply Barbarian UD if no armor worn (shield allowed)
+                 if (isBarb && !armorEquipped && unarmoredDefenseValue === null) {
+                     unarmoredDefenseValue = 10 + modifiers.dexterity + modifiers.constitution;
+                     console.log("Barbarian Unarmored Defense applicable:", unarmoredDefenseValue);
+                 }
+                 // Apply Monk UD if no armor and no shield worn
+                  else if (isMonk && !armorEquipped && !hasShield && unarmoredDefenseValue === null) {
+                     unarmoredDefenseValue = 10 + modifiers.dexterity + modifiers.wisdom;
+                     console.log("Monk Unarmored Defense applicable:", unarmoredDefenseValue);
+                 }
+             }
+         });
+
+         // Determine final AC calculation method
+         if (unarmoredDefenseValue !== null) {
+             baseAC = unarmoredDefenseValue;
+             dexModForAC = 0; // Modifier already included in the formula
+             console.log("Using Unarmored Defense AC:", baseAC);
          } else if (!armorEquipped) {
              baseAC = 10; // Default unarmored
-             dexModForAC = modifiers.dexterity; // Use full derived dex
+             dexModForAC = modifiers.dexterity;
+             console.log("Using Default Unarmored AC:", baseAC, "+ DEX");
+         } else {
+            console.log("Using Armor Base AC:", baseAC);
          }
+
 
          // Apply Max Dex Bonus from armor
          if (maxDex !== null) {
              dexModForAC = Math.min(dexModForAC, maxDex);
          }
 
-         // Calculate final AC
+         // Calculate AC before direct bonuses
          let finalAC = baseAC + dexModForAC + (hasShield ? 2 : 0); // Standard shield bonus = 2
+         console.log("AC before feature bonuses:", finalAC, `(Base: ${baseAC}, DexMod: ${dexModForAC}, Shield: ${hasShield ? 2 : 0})`);
 
          // Apply direct AC bonuses from features (e.g., Fighting Style: Defense)
-         characterState.features.forEach(f => {
-             if (f.metadata?.effectType === 'acBonus') {
-                 // TODO: Add condition checking based on f.metadata.condition
-                 finalAC += (f.metadata as FeatureEffectMetadata & { effectType: 'acBonus' }).value;
+         characterData.features.forEach(f => {
+             const metadata = f.metadata as FeatureEffectMetadata | undefined;
+             if (metadata?.effectType === 'acBonus') {
+                  // TODO: Add proper condition checking
+                  const conditionMet = metadata.condition === 'wearing armor' ? armorEquipped : true; // Simple check
+                  if (conditionMet) {
+                     finalAC += metadata.value;
+                     console.log(`Applying AC bonus from ${f.name}: +${metadata.value}`);
+                  }
              }
          });
 
+          console.log("Final Calculated AC:", finalAC);
          return finalAC;
-     }, [characterState.equipment, characterState.features, modifiers]);
+     }, [characterData, modifiers]);
 
 
-    const equippedWeapons = useMemo(() => characterState.equipment.filter(item => item.isEquipped && item.type === 'Weapon'), [characterState.equipment]);
+    const equippedWeapons = useMemo(() => characterData?.equipment.filter(item => item.isEquipped && item.type === 'Weapon') ?? [], [characterData?.equipment]);
     const actionableFeatures = useMemo(() =>
         allFeaturesAndTraits
             .filter(f => f.isActionable)
@@ -189,33 +219,34 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
 
 
     const isProficientWith = useCallback((item: EquipmentItem): boolean => {
-        if (!characterState.proficiencies) return false;
+        if (!characterData?.proficiencies) return false;
 
         if (item.type === 'Weapon') {
-            if (characterState.proficiencies.weapons.includes(item.name)) return true;
+            // Check specific weapon name first (e.g., proficiency with "Rapier")
+            if (characterData.proficiencies.weapons.includes(item.name)) return true;
             // Check weapon category proficiency (e.g., "Simple", "Martial", or specific types like "Longswords")
             if (item.weaponCategory) {
-                const categories = item.weaponCategory.split(' '); // e.g., ["Simple", "Melee"]
-                if (characterState.proficiencies.weapons.some(p => categories.includes(p) || p === item.weaponCategory)) {
+                // Simple check: Is any part of the category string present in the proficiencies?
+                // E.g., if proficient with "Martial", and weapon is "Martial Melee", it matches.
+                const categories = item.weaponCategory.split(' ');
+                 if (characterData.proficiencies.weapons.some(p => categories.includes(p) || p === item.weaponCategory)) {
                     return true;
                 }
             }
-             // Check specific weapon name again (e.g., proficiency with "Rapier")
-             if (characterState.proficiencies.weapons.some(p => p === item.name)) return true;
 
         } else if (item.type === 'Armor') {
             if (!item.armorCategory) return true; // Items like clothes don't require proficiency
+             // Check specific armor name proficiency
+             if (characterData.proficiencies.armor.includes(item.name)) return true;
             // Check armor category proficiency (e.g., "Light", "Medium", "Heavy", "Shields")
-            if (characterState.proficiencies.armor.includes(item.armorCategory)) return true;
-            // Check specific armor name proficiency
-             if (characterState.proficiencies.armor.includes(item.name)) return true;
+            if (characterData.proficiencies.armor.includes(item.armorCategory)) return true;
         }
         return false;
-    }, [characterState.proficiencies]);
+    }, [characterData?.proficiencies]);
 
 
     const getHitBonus = useCallback((weapon: EquipmentItem): number => {
-        let abilityMod = modifiers.strength; // Use derived modifier
+        let abilityMod = modifiers.strength;
         const isFinesse = weapon.properties?.includes('Finesse');
 
         if (isFinesse && modifiers.dexterity > modifiers.strength) {
@@ -224,17 +255,17 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
              abilityMod = modifiers.dexterity;
         }
         const proficiencyMod = isProficientWith(weapon) ? proficiencyBonus : 0;
-        // TODO: Add other potential bonuses (e.g., Archery fighting style +2 for ranged)
+        // Check for Fighting Style: Archery
         let fightingStyleBonus = 0;
-        if (weapon.weaponCategory?.includes('Ranged') && characterState.features.some(f => f.name === 'Fighting Style: Archery')) {
+        if (weapon.weaponCategory?.includes('Ranged') && characterData?.features.some(f => f.name === 'Fighting Style: Archery')) {
             fightingStyleBonus = 2;
         }
         return abilityMod + proficiencyMod + fightingStyleBonus;
-    }, [modifiers.strength, modifiers.dexterity, proficiencyBonus, isProficientWith, characterState.features]);
+    }, [modifiers.strength, modifiers.dexterity, proficiencyBonus, isProficientWith, characterData?.features]);
 
 
     const getDamageBonus = useCallback((weapon: EquipmentItem): number => {
-         let abilityMod = modifiers.strength; // Use derived modifier
+         let abilityMod = modifiers.strength;
          const isFinesse = weapon.properties?.includes('Finesse');
 
          if (isFinesse && modifiers.dexterity > modifiers.strength) {
@@ -242,49 +273,47 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
          } else if (weapon.weaponCategory?.includes('Ranged') && !weapon.properties?.some(p => p.toLowerCase().includes('thrown'))) {
               abilityMod = modifiers.dexterity;
          }
+         // TODO: Add bonuses from fighting styles (Dueling, etc.) or features
          let fightingStyleBonus = 0;
-         // Example check (simplified):
-         // if (characterState.features.some(f => f.name === 'Dueling') && ...) fightingStyleBonus = 2;
 
          return abilityMod + fightingStyleBonus;
-    }, [modifiers.strength, modifiers.dexterity, characterState.features, characterState.equipment]);
+    }, [modifiers.strength, modifiers.dexterity, characterData?.features, characterData?.equipment]);
 
 
     // Calculated skill modifiers using derived stats
     const skillModifiers = useMemo(() => {
         const mods: Record<string, number> = {};
         ALL_SKILLS.forEach(skill => {
-            const proficient = !!characterState.skills[skill];
-             // Pass derived stats to the calculation function
+            const proficient = !!characterData?.skills[skill];
+            // Pass derived stats to the calculation function
             mods[skill] = calculateSkillModifier(skill, derivedStats, proficient, proficiencyBonus);
         });
         return mods;
-    }, [derivedStats, characterState.skills, proficiencyBonus]);
+    }, [derivedStats, characterData?.skills, proficiencyBonus]);
 
 
    // --- Update Functions ---
 
     const updateCharacterData = async (updates: Partial<Character>) => {
+        if (!characterData) return; // Exit if character data isn't loaded
+
         setIsSaving(true);
         // IMPORTANT: Only save the fields that are meant to be persisted (base stats, equipment, HP/HD state, features with current uses).
         // Derived values (modifiers, final AC, final proficiencies) should NOT be saved back directly.
-        const dataToSave: Partial<Omit<Character, 'id' | 'createdAt'>> = {};
-        const newState = { ...characterState }; // Start with current local state
+        const dataToSave: Partial<Omit<Character, 'id' | 'createdAt' | 'updatedAt'>> = {};
 
-        if ('hitPoints' in updates && updates.hitPoints) {
+        // Only include fields that were actually changed and are persistable
+        if ('hitPoints' in updates && updates.hitPoints && JSON.stringify(updates.hitPoints) !== JSON.stringify(characterData.hitPoints)) {
             dataToSave.hitPoints = updates.hitPoints;
-            newState.hitPoints = updates.hitPoints;
         }
-        if ('hitDice' in updates && updates.hitDice) {
+        if ('hitDice' in updates && updates.hitDice && JSON.stringify(updates.hitDice) !== JSON.stringify(characterData.hitDice)) {
             dataToSave.hitDice = updates.hitDice;
-            newState.hitDice = updates.hitDice;
         }
-        if ('equipment' in updates && updates.equipment) {
+        if ('equipment' in updates && updates.equipment && JSON.stringify(updates.equipment) !== JSON.stringify(characterData.equipment)) {
             dataToSave.equipment = updates.equipment;
-            newState.equipment = updates.equipment;
         }
         if ('features' in updates && updates.features) {
-            // Only save features with potentially updated currentUses
+            // Only save features, ensuring currentUses are persisted
              dataToSave.features = updates.features.map(f => ({
                  name: f.name,
                  description: f.description,
@@ -295,23 +324,24 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
                  usesResetOn: f.usesResetOn,
                  currentUses: f.currentUses, // Persist current uses
              }));
-            newState.features = updates.features; // Update local state fully
         }
-        // Never save derivedStats directly, only baseCharacter.stats should be persisted
-        // if ('stats' in updates) { /* DO NOT SAVE DERIVED STATS */ }
+        // Do not save derived 'stats' or 'proficiencies' or 'skills' unless they represent base changes (unlikely here)
+
 
         try {
             if (Object.keys(dataToSave).length > 0) {
-                 await updateCharacter(characterState.id, dataToSave);
-                 setCharacterState(newState); // Update local state after successful save
+                 console.log("Updating character with:", dataToSave);
+                 await updateCharacter(characterData.id, dataToSave);
+                 // Invalidate query to refetch the data with derived stats recalculated
+                 queryClient.invalidateQueries({ queryKey: ['character', characterData.id] });
                  toast({ title: "Character Updated", description: "Changes saved successfully." });
             } else {
-                toast({ title: "No Changes", description: "No data needed saving." });
+                toast({ title: "No Changes Detected", description: "No data needed saving." });
             }
         } catch (error) {
             console.error("Failed to update character:", error);
             toast({ variant: "destructive", title: "Update Failed", description: "Could not save changes." });
-            // Potentially revert local state if save fails?
+            // Consider reverting local UI state if needed, although query invalidation might handle this
         } finally {
             setIsSaving(false);
         }
@@ -321,74 +351,72 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
     // --- Event Handlers ---
 
      const handleHitPointChange = (type: 'current' | 'temporary', value: string) => {
+         if (!characterData) return;
          const numValue = parseInt(value, 10);
-         const currentHp = characterState.hitPoints.current;
-         const maxHp = characterState.hitPoints.max;
-         const tempHp = characterState.hitPoints.temporary;
+         const currentHp = characterData.hitPoints.current;
+         const maxHp = characterData.hitPoints.max;
+         const tempHp = characterData.hitPoints.temporary;
+         let newHpState: HitPointsState | null = null;
 
          if (!isNaN(numValue)) {
-             const newHpState = { ...characterState.hitPoints };
+             newHpState = { ...characterData.hitPoints };
              if (type === 'current') {
                  newHpState.current = Math.max(0, Math.min(numValue, maxHp));
              } else {
                  newHpState.temporary = Math.max(0, numValue);
              }
-             // Update local state immediately for responsiveness
-             setCharacterState(prev => ({ ...prev, hitPoints: newHpState }));
-             // Debounce or trigger save after a short delay? For now, direct save.
-             updateCharacterData({ hitPoints: newHpState });
-         } else if (value === '') {
-             const newHpState = { ...characterState.hitPoints };
+         } else if (value === '') { // Allow clearing the input
+             newHpState = { ...characterData.hitPoints };
              newHpState[type] = 0;
-             setCharacterState(prev => ({ ...prev, hitPoints: newHpState }));
+         }
+
+         if (newHpState) {
+             // Optimistically update local state if desired, but saving refetches
+             // setCharacterState(prev => ({ ...prev!, hitPoints: newHpState! }));
              updateCharacterData({ hitPoints: newHpState });
          }
      };
 
 
     const handleToggleEquip = (itemName: string) => {
-        const newEquipment = characterState.equipment.map(item =>
+        if (!characterData) return;
+        const newEquipment = characterData.equipment.map(item =>
             item.name === itemName
                 ? { ...item, isEquipped: !item.isEquipped }
                 : item
         );
-        // Update local state immediately
-        setCharacterState(prev => ({ ...prev, equipment: newEquipment }));
         updateCharacterData({ equipment: newEquipment }); // Save the change
     };
 
     const handleAddEquipment = (itemToAdd: EquipmentItem) => {
-         const existingItemIndex = characterState.equipment.findIndex(item => item.name === itemToAdd.name);
+        if (!characterData) return;
+         const existingItemIndex = characterData.equipment.findIndex(item => item.name === itemToAdd.name);
          let newEquipment;
          if (existingItemIndex > -1) {
-             newEquipment = characterState.equipment.map((item, index) =>
+             newEquipment = characterData.equipment.map((item, index) =>
                 index === existingItemIndex
                     ? { ...item, quantity: (item.quantity || 1) + (itemToAdd.quantity || 1) }
                     : item
             );
          } else {
-            newEquipment = [...characterState.equipment, { ...itemToAdd, quantity: itemToAdd.quantity || 1, isEquipped: false }];
+            newEquipment = [...characterData.equipment, { ...itemToAdd, quantity: itemToAdd.quantity || 1, isEquipped: false }];
          }
-         // Update local state immediately
-         setCharacterState(prev => ({ ...prev, equipment: newEquipment }));
          updateCharacterData({ equipment: newEquipment }); // Save the change
     };
 
     const handleRemoveEquipment = (itemName: string) => {
-        const newEquipment = characterState.equipment.filter(item => item.name !== itemName);
-         // Update local state immediately
-        setCharacterState(prev => ({ ...prev, equipment: newEquipment }));
+         if (!characterData) return;
+        const newEquipment = characterData.equipment.filter(item => item.name !== itemName);
         updateCharacterData({ equipment: newEquipment }); // Save the change
     };
 
      const handleUpdateEquipmentQuantity = (itemName: string, quantity: number) => {
+          if (!characterData) return;
          const newQuantity = Math.max(0, quantity);
-         const newEquipment = characterState.equipment
+         const newEquipment = characterData.equipment
             .map(item =>
                 item.name === itemName ? { ...item, quantity: newQuantity } : item
             ).filter(item => item.quantity > 0);
-        // Update local state immediately
-        setCharacterState(prev => ({ ...prev, equipment: newEquipment }));
         updateCharacterData({ equipment: newEquipment }); // Save the change
     }
 
@@ -448,8 +476,9 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
      };
 
 
-    const handleUseFeature = (featureName: string) => {
-         const feature = characterState.features.find(f => f.name === featureName);
+     const handleUseFeature = (featureName: string) => {
+          if (!characterData) return;
+         const feature = characterData.features.find(f => f.name === featureName);
          if (!feature) return;
 
          const currentUses = featureUses[featureName]; // Get current uses from local state
@@ -462,41 +491,40 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
                      ? feature.description.split('.')[0] + '.'
                      : "Feature action executed.",
              });
-              // Special handling for features like Second Wind
-             if (featureName === 'Second Wind') { /* Handle effect */ }
+              // Special handling for features like Second Wind (needs rework as it modifies HP)
+             // if (featureName === 'Second Wind') { /* Handle effect */ }
              return;
          }
 
          if (currentUses > 0) {
              const newUses = currentUses - 1;
-             const newFeatureUses = { ...featureUses, [featureName]: newUses };
-             setFeatureUses(newFeatureUses); // Update local UI state first
+             // Update local UI state immediately for feedback
+             setFeatureUses(prev => ({ ...prev, [featureName]: newUses }));
 
              toast({
                  title: `Used ${featureName}`,
                  description: `${newUses} uses remaining.`,
              });
 
-             // Special handling for features like Second Wind
-             if (featureName === 'Second Wind') {
-                  const healing = rollDice('1d10') + characterState.level;
-                  const newHpState = {
-                     ...characterState.hitPoints,
-                     current: Math.min(characterState.hitPoints.max, characterState.hitPoints.current + healing)
-                  }
-                   // We need to update both features (for uses) and hitpoints
-                   const updatedFeaturesForSave = characterState.features.map(f =>
-                       f.name === featureName ? { ...f, currentUses: newUses } : f
-                   );
-                   updateCharacterData({ hitPoints: newHpState, features: updatedFeaturesForSave });
-                   toast({ title: 'Second Wind Healing', description: `Regained ${healing} hit points.` });
-                   return; // Exit early as updateCharacterData was called
-             }
-
-             // Save the feature use change
-             const updatedFeaturesForSave = characterState.features.map(f =>
+             // Prepare data for saving
+             const updatedFeaturesForSave = characterData.features.map(f =>
                  f.name === featureName ? { ...f, currentUses: newUses } : f
              );
+
+              // Special handling for features like Second Wind that affect HP
+              if (featureName === 'Second Wind') {
+                  const healing = rollDice('1d10') + characterData.level;
+                  const newHpState = {
+                     ...characterData.hitPoints,
+                     current: Math.min(characterData.hitPoints.max, characterData.hitPoints.current + healing)
+                  }
+                  // Save both HP and feature use updates
+                  updateCharacterData({ hitPoints: newHpState, features: updatedFeaturesForSave });
+                  toast({ title: 'Second Wind Healing', description: `Regained ${healing} hit points.` });
+                  return; // Exit early as updateCharacterData handles save and refetch
+              }
+
+              // Save just the feature use change for other features
              updateCharacterData({ features: updatedFeaturesForSave });
 
          } else {
@@ -511,116 +539,137 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
 
     // --- Rest Handlers ---
     const handleShortRest = async (hitDiceSpent: number, hpRecovered: number) => {
+         if (!characterData) return;
+
          const newHp: HitPointsState = {
-             ...characterState.hitPoints,
-             current: Math.min(characterState.hitPoints.max, characterState.hitPoints.current + hpRecovered),
+             ...characterData.hitPoints,
+             current: Math.min(characterData.hitPoints.max, characterData.hitPoints.current + hpRecovered),
          };
          const newHitDice: HitDiceState = {
-             ...characterState.hitDice,
-             remaining: Math.max(0, characterState.hitDice.remaining - hitDiceSpent),
+             ...characterData.hitDice,
+             remaining: Math.max(0, characterData.hitDice.remaining - hitDiceSpent),
          };
 
-         const usesReset: Record<string, number> = {};
-          characterState.features.forEach(feature => {
+         // Determine which features reset and update their currentUses
+          const usesReset: Record<string, number> = {};
+          characterData.features.forEach(feature => {
               if (feature.usesResetOn === 'short-rest' && feature.maxUses !== null && feature.maxUses !== undefined) {
-                  usesReset[feature.name] = feature.maxUses;
+                  usesReset[feature.name] = feature.maxUses; // Reset to max
               }
           });
-          const newFeatureUses = { ...featureUses, ...usesReset }; // Combine existing and reset uses
-          setFeatureUses(newFeatureUses); // Update local UI state immediately
 
-         try {
-            setIsSaving(true);
-             const updatedFeaturesWithUses = characterState.features.map(f => {
-                 const currentLocalUse = newFeatureUses[f.name];
-                if (currentLocalUse !== undefined && currentLocalUse !== null) {
-                     return { ...f, currentUses: currentLocalUse };
-                }
-                return f;
-             });
+          // Combine existing uses with reset uses
+          const newFeatureUsesMap = { ...featureUses, ...usesReset };
 
-            await updateCharacter(characterState.id, {
-               hitPoints: newHp,
-               hitDice: newHitDice,
-               features: updatedFeaturesWithUses,
-             });
-            // Update local state after successful save
-            setCharacterState(prev => ({
-               ...prev,
-               hitPoints: newHp,
-               hitDice: newHitDice,
-               features: updatedFeaturesWithUses,
-            }));
-             toast({
-                 title: "Short Rest Complete",
-                 description: `Recovered ${hpRecovered} HP. Spent ${hitDiceSpent} Hit Dice. Short rest features refreshed.`,
-             });
-         } catch (error) {
-            console.error("Failed to save short rest changes:", error);
-             toast({ variant: "destructive", title: "Rest Failed", description: "Could not save rest changes." });
-             // Consider reverting featureUses state here if save fails
-         } finally {
-             setIsSaving(false);
-         }
+          // Prepare the features array with updated currentUses for saving
+           const updatedFeaturesWithUses = characterData.features.map(f => ({
+               ...f,
+               currentUses: newFeatureUsesMap[f.name] ?? f.currentUses, // Update if reset, else keep current
+           }));
+
+          // Update local UI immediately
+          setFeatureUses(newFeatureUsesMap);
+
+         // Save changes to DB
+         await updateCharacterData({
+             hitPoints: newHp,
+             hitDice: newHitDice,
+             features: updatedFeaturesWithUses,
+         });
+          // Toast already handled by updateCharacterData's onSuccess via query invalidation/refetch
+
+         // toast({
+         //     title: "Short Rest Complete",
+         //     description: `Recovered ${hpRecovered} HP. Spent ${hitDiceSpent} Hit Dice. Short rest features refreshed.`,
+         // });
      };
 
     const handleLongRest = async () => {
-        const hitDiceToRegain = Math.max(1, Math.floor(characterState.hitDice.total / 2));
-        const newCurrentHitDice = Math.min(characterState.hitDice.total, characterState.hitDice.remaining + hitDiceToRegain);
+         if (!characterData) return;
+
+        const hitDiceToRegain = Math.max(1, Math.floor(characterData.hitDice.total / 2));
+        const newCurrentHitDice = Math.min(characterData.hitDice.total, characterData.hitDice.remaining + hitDiceToRegain);
 
         const newHp: HitPointsState = {
-            ...characterState.hitPoints,
-            current: characterState.hitPoints.max,
+            ...characterData.hitPoints,
+            current: characterData.hitPoints.max,
             temporary: 0,
         };
          const newHitDice: HitDiceState = {
-            ...characterState.hitDice,
+            ...characterData.hitDice,
             remaining: newCurrentHitDice,
         };
 
-        const usesReset: Record<string, number> = {};
-         characterState.features.forEach(feature => {
+        // Reset all features that have uses
+         const usesReset: Record<string, number> = {};
+         characterData.features.forEach(feature => {
              if (feature.maxUses !== null && feature.maxUses !== undefined) {
-                 usesReset[feature.name] = feature.maxUses;
+                 usesReset[feature.name] = feature.maxUses; // Reset to max
              }
          });
-         setFeatureUses(usesReset); // Reset all tracked uses to max
 
-        try {
-           setIsSaving(true);
-            const updatedFeaturesWithUses = characterState.features.map(f => {
-                if (usesReset[f.name] !== undefined) {
-                    return { ...f, currentUses: usesReset[f.name] };
-                }
-                return f;
-            });
-           await updateCharacter(characterState.id, {
-               hitPoints: newHp,
-               hitDice: newHitDice,
-               features: updatedFeaturesWithUses,
-            });
-           // Update local state after successful save
-           setCharacterState(prev => ({
-               ...prev,
-               hitPoints: newHp,
-               hitDice: newHitDice,
-               features: updatedFeaturesWithUses,
-            }));
-            toast({
-                title: "Long Rest Complete",
-                description: `HP fully restored. Regained ${hitDiceToRegain} Hit Dice. All features refreshed.`,
-            });
-         } catch (error) {
-             console.error("Failed to save long rest changes:", error);
-             toast({ variant: "destructive", title: "Rest Failed", description: "Could not save rest changes." });
-              // Consider reverting featureUses state here if save fails
-         } finally {
-            setIsSaving(false);
-         }
+         // Prepare features with reset uses for saving
+         const updatedFeaturesWithUses = characterData.features.map(f => ({
+             ...f,
+             currentUses: usesReset[f.name] ?? f.currentUses, // Update if reset, else keep current
+         }));
+
+          // Update local UI immediately
+          setFeatureUses(usesReset);
+
+         // Save changes to DB
+         await updateCharacterData({
+             hitPoints: newHp,
+             hitDice: newHitDice,
+             features: updatedFeaturesWithUses,
+          });
+
+         // toast({
+         //     title: "Long Rest Complete",
+         //     description: `HP fully restored. Regained ${hitDiceToRegain} Hit Dice. All features refreshed.`,
+         // });
     };
 
 
   // --- Render ---
+
+   if (isLoadingCharacter) {
+      return (
+         <div className="p-4 md:p-6 space-y-6">
+            <Skeleton className="h-24 w-full" />
+            <Skeleton className="h-12 w-full" />
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+               <Skeleton className="h-64 w-full" />
+               <Skeleton className="h-96 w-full" />
+               <Skeleton className="h-80 w-full" />
+            </div>
+         </div>
+      )
+   }
+
+   if (characterError) {
+      return (
+         <div className="p-4 md:p-6">
+             <Alert variant="destructive">
+                 <AlertCircle className="h-4 w-4" />
+                 <AlertTitle>Error Loading Character</AlertTitle>
+                 <AlertDescription>{characterError.message}</AlertDescription>
+             </Alert>
+         </div>
+      )
+   }
+
+    if (!characterData) {
+      return (
+         <div className="p-4 md:p-6">
+             <Alert>
+                 <AlertCircle className="h-4 w-4" />
+                 <AlertTitle>Character Not Found</AlertTitle>
+                 <AlertDescription>The character could not be loaded.</AlertDescription>
+             </Alert>
+         </div>
+      )
+   }
 
   return (
     <>
@@ -633,19 +682,19 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
             <Card className="bg-card/80 backdrop-blur-sm">
                 <CardHeader>
                      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                         <h1 className="text-2xl font-bold">{characterState.characterName}</h1>
+                         <h1 className="text-2xl font-bold">{characterData.characterName}</h1>
                         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-sm text-muted-foreground">
-                            <span>Class: {characterState.class}</span>
-                             <span>Race: {characterState.race}</span>
-                             <span>Level: {characterState.level}</span>
-                             <span>Background: {characterState.background}</span>
-                             <span>Player: {characterState.playerName}</span>
-                             <span>Alignment: {characterState.alignment}</span>
+                            <span>Class: {characterData.class}</span>
+                             <span>Race: {characterData.race}</span>
+                             <span>Level: {characterData.level}</span>
+                             <span>Background: {characterData.background}</span>
+                             <span>Player: {characterData.playerName}</span>
+                             <span>Alignment: {characterData.alignment}</span>
                          </div>
                      </div>
                     <div className="flex justify-end gap-2 mt-4">
                         <Button variant="outline" size="sm" asChild>
-                           <Link href={`/character/edit/${characterState.id}`}>
+                           <Link href={`/character/edit/${characterData.id}`}>
                               <Edit className="mr-2 h-4 w-4" /> Edit Character
                            </Link>
                         </Button>
@@ -653,6 +702,7 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
                              <BedSingle className="mr-2 h-4 w-4" /> Short Rest
                          </Button>
                          <Button variant="default" size="sm" onClick={handleLongRest} disabled={isSaving}>
+                              {isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                               <BedDouble className="mr-2 h-4 w-4" /> Long Rest
                          </Button>
                     </div>
@@ -676,11 +726,11 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
                          <Card className="bg-card/80 backdrop-blur-sm">
                            <CardHeader>
                              <CardTitle>Ability Scores</CardTitle>
-                              <CardDescription>Base Score (Modifier)</CardDescription>
+                              <CardDescription>Score (Modifier)</CardDescription>
                            </CardHeader>
                            <CardContent className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                              {Object.entries(characterState.stats).map(([name, baseValue]) => {
-                                  const derivedValue = derivedStats[name as keyof typeof derivedStats];
+                              {Object.entries(derivedStats).map(([name, derivedValue]) => {
+                                  const baseValue = initialCharacter.stats[name as keyof typeof initialCharacter.stats]; // Get base value
                                   const modifierValue = modifiers[name as keyof typeof modifiers];
                                   const modifierString = modifierValue >= 0 ? `+${modifierValue}` : `${modifierValue}`;
                                   return (
@@ -713,7 +763,7 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
                                 </CardHeader>
                                 <CardContent className="space-y-1">
                                     {ALL_SKILLS.map((skill) => {
-                                        const proficient = !!characterState.skills[skill];
+                                        const proficient = !!characterData.skills[skill]; // Check proficiency from derived data
                                         const ability = SKILL_ABILITY_MAP[skill];
                                         const modifier = skillModifiers[skill]; // Use pre-calculated skill modifiers
                                         const modifierString = modifier >= 0 ? `+${modifier}` : `${modifier}`;
@@ -780,7 +830,7 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
                    </div>
                 </TabsContent>
 
-                {/* Combat Tab */}
+                 {/* Combat Tab */}
                 <TabsContent value="combat">
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                          {/* Column 1: Combat Stats */}
@@ -801,31 +851,31 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
                                      <div className="border rounded-md p-3 bg-secondary/30">
                                          <Label className="text-xs uppercase text-muted-foreground">Speed</Label>
                                          {/* TODO: Better speed calculation based on race/features */}
-                                         <div className="text-3xl font-bold mt-1">{characterState.race === 'Dwarf' ? '25 ft' : '30 ft'}</div>
+                                         <div className="text-3xl font-bold mt-1">{characterData.race === 'Dwarf' ? '25 ft' : '30 ft'}</div>
                                      </div>
                                     <div className="col-span-3 border rounded-md p-3 bg-secondary/30">
                                           <Label className="text-xs uppercase text-muted-foreground flex items-center justify-center gap-1"><HeartPulse className='inline h-3 w-3' /> Hit Points</Label>
                                           <div className="flex justify-center items-center gap-2 mt-1">
                                                <Input
                                                    type="number"
-                                                   value={characterState.hitPoints.current}
+                                                   value={characterData.hitPoints.current}
                                                    onChange={(e) => handleHitPointChange('current', e.target.value)}
                                                    className="w-20 text-center text-lg font-semibold"
                                                    aria-label="Current Hit Points"
-                                                   max={characterState.hitPoints.max}
+                                                   max={characterData.hitPoints.max}
                                                    min={0}
                                                    disabled={isSaving}
                                                />
                                                <span className="text-muted-foreground">/</span>
-                                                <span className="w-20 text-center text-lg font-semibold">{characterState.hitPoints.max}</span>
+                                                <span className="w-20 text-center text-lg font-semibold">{characterData.hitPoints.max}</span>
                                           </div>
-                                           {characterState.hitPoints.temporary > 0 && (
+                                           {characterData.hitPoints.temporary > 0 && (
                                                 <div className='flex items-center justify-center gap-2 mt-1'>
                                                      <Label htmlFor='temp-hp' className='text-xs text-blue-400'>Temp HP:</Label>
                                                       <Input
                                                          id='temp-hp'
                                                          type="number"
-                                                         value={characterState.hitPoints.temporary}
+                                                         value={characterData.hitPoints.temporary}
                                                          onChange={(e) => handleHitPointChange('temporary', e.target.value)}
                                                          className="w-16 h-6 text-center text-xs font-semibold"
                                                          aria-label="Temporary Hit Points"
@@ -836,7 +886,7 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
                                           )}
                                            <div className="mt-2 pt-2 border-t border-border/50">
                                                 <Label className="text-xs uppercase text-muted-foreground">Hit Dice</Label>
-                                                <p className='text-sm font-medium'>{characterState.hitDice.remaining} / {characterState.hitDice.total} ({characterState.hitDice.dieType || 'N/A'})</p>
+                                                <p className='text-sm font-medium'>{characterData.hitDice.remaining} / {characterData.hitDice.total} ({characterData.hitDice.dieType || 'N/A'})</p>
                                            </div>
                                      </div>
                                  </CardContent>
@@ -920,22 +970,23 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
                     </div>
                 </TabsContent>
 
+
                 {/* Inventory Tab */}
                 <TabsContent value="inventory">
                     <Card className="bg-card/80 backdrop-blur-sm">
                        <CardHeader className="flex flex-row items-center justify-between pb-2">
                            <CardTitle>Equipment</CardTitle>
-                           <Button variant="ghost" size="icon" onClick={() => setIsAddEquipmentOpen(true)} aria-label="Add Equipment" disabled={isSaving}>
+                           <Button variant="ghost" size="icon" onClick={() => setIsAddEquipmentOpen(true)} aria-label="Add Equipment" disabled={isSaving || isLoadingEquipment}>
                                <PlusCircle className="h-5 w-5" />
                            </Button>
                        </CardHeader>
                        <CardContent>
-                           {characterState.equipment.length === 0 ? (
+                           {characterData.equipment.length === 0 ? (
                                <p className="text-sm text-muted-foreground text-center py-4">No equipment added yet.</p>
                            ) : (
                                <ScrollArea className="h-[400px] w-full">
                                    <ul className="space-y-2 pr-4">
-                                       {characterState.equipment.map((item, index) => (
+                                       {characterData.equipment.map((item, index) => (
                                            <li key={`${item.name}-${index}`} className="flex items-center justify-between group border-b pb-2 last:border-b-0">
                                                <div className='flex items-center gap-2 flex-grow min-w-0'>
                                                     <Input
@@ -990,7 +1041,7 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
                 </TabsContent>
 
                 {/* Backstory Tab */}
-                <TabsContent value="backstory">
+                 <TabsContent value="backstory">
                     <Card className="bg-card/80 backdrop-blur-sm">
                         <CardHeader>
                             <CardTitle>Backstory & Appearance</CardTitle>
@@ -999,14 +1050,14 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
                             <div>
                                 <h3 className='font-semibold mb-2'>Appearance</h3>
                                  <p className="text-sm text-muted-foreground whitespace-pre-wrap min-h-[50px]">
-                                    {typeof characterState.appearance === 'string' ? characterState.appearance : 'No description provided.'}
+                                    {characterData.appearance || 'No description provided.'}
                                 </p>
                              </div>
                              <Separator />
                             <div>
                                 <h3 className='font-semibold mb-2'>Backstory</h3>
                                 <p className="text-sm text-muted-foreground whitespace-pre-wrap min-h-[150px]">
-                                    {typeof characterState.backstory === 'string' ? characterState.backstory : 'No description provided.'}
+                                     {characterData.backstory || 'No description provided.'}
                                 </p>
                            </div>
                         </CardContent>
@@ -1028,15 +1079,17 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
          <ShortRestDialog
              isOpen={isShortRestDialogOpen}
              onOpenChange={setIsShortRestDialogOpen}
-             maxHitDice={characterState.hitDice.total}
-             currentHitDice={characterState.hitDice.remaining}
-             hitDieType={characterState.hitDice.dieType}
+             maxHitDice={characterData.hitDice.total}
+             currentHitDice={characterData.hitDice.remaining}
+             hitDieType={characterData.hitDice.dieType}
              constitutionModifier={modifiers.constitution} // Pass derived modifier
-             maxHp={characterState.hitPoints.max}
-             currentHp={characterState.hitPoints.current}
+             maxHp={characterData.hitPoints.max}
+             currentHp={characterData.hitPoints.current}
              onConfirm={handleShortRest}
              rollDiceFn={rollDice} // Pass the central rollDice function
          />
     </>
   );
 }
+
+```

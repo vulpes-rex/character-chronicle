@@ -1,3 +1,4 @@
+
 'use server';
 
 import type { Feature, FeatureEffectMetadata, SourcePack, CharacterClass, CharacterRace, BackgroundInfo, Character } from '@/lib/types';
@@ -102,6 +103,16 @@ const BASE_FEATURE_DEFINITIONS: Record<string, Feature> = {
         source: "Fighter Class (Base)",
         // Note: This bonus needs to be applied during attack roll calculation, not directly to stats. Informational metadata.
     },
+     "FightingStyleDefense": { // Added definition for Defense style
+        name: "Fighting Style: Defense",
+        description: "While you are wearing armor, you gain a +1 bonus to AC.",
+        source: "Fighter Class (Base)",
+        metadata: {
+            effectType: "acBonus",
+            value: 1,
+            condition: "wearing armor",
+        },
+    },
     "SecondWind": {
         name: "Second Wind",
         description: "On your turn, you can use a bonus action to regain hit points equal to 1d10 + your fighter level. Once you use this feature, you must finish a short or long rest before you can use it again.",
@@ -165,8 +176,8 @@ const BASE_FEATURE_DEFINITIONS: Record<string, Feature> = {
         description: 'While you are not wearing any armor, your Armor Class equals 10 + your Dexterity modifier + your Constitution modifier. You can use a shield and still gain this benefit.',
         source: 'Barbarian Class (Base)',
         metadata: {
-            effectType: 'acBonus', // Informational: AC calculation logic needs to check for this feature name
-            value: 0, // Value isn't a simple bonus
+            effectType: 'acCalculation', // Changed from acBonus, needs specific handling
+            formula: '10 + dexMod + conMod',
             condition: 'not wearing armor',
         },
     },
@@ -175,8 +186,8 @@ const BASE_FEATURE_DEFINITIONS: Record<string, Feature> = {
         description: 'Beginning at 1st level, while you are wearing no armor and not wielding a shield, your AC equals 10 + your Dexterity modifier + your Wisdom modifier.',
         source: 'Monk Class (Base)',
         metadata: {
-            effectType: 'acBonus', // Informational
-            value: 0,
+            effectType: 'acCalculation', // Changed from acBonus
+            formula: '10 + dexMod + wisMod',
             condition: 'not wearing armor and not wielding a shield',
         },
     },
@@ -434,7 +445,7 @@ export async function getBackgroundFeatures(
  * @param baseCharacter - The base character object (should have base stats and FULL feature definitions).
  * @returns A promise resolving to a new character object containing the derived state after applying features.
  */
-export async function applyFeatureRules(baseCharacter: Character): Promise<Character> {
+ export async function applyFeatureRules(baseCharacter: Character): Promise<Character> {
     logMessage('debug', `Applying feature rules for character ${baseCharacter.id}`);
     if (!baseCharacter.features || baseCharacter.features.length === 0) {
         logMessage('debug', `No features found for character ${baseCharacter.id}. Returning base character.`);
@@ -489,6 +500,9 @@ export async function applyFeatureRules(baseCharacter: Character): Promise<Chara
                     case 'acBonus':
                          logMessage('debug', `Informational AC Bonus detected: ${feature.name}`);
                          break;
+                     case 'acCalculation': // Informational tag for special AC calculation
+                          logMessage('debug', `Informational AC Calculation detected: ${feature.name}`);
+                          break;
                     case 'advantage':
                          logMessage('debug', `Informational Advantage detected: ${feature.name}`);
                          break;
@@ -528,3 +542,4 @@ export async function applyFeatureRules(baseCharacter: Character): Promise<Chara
     logMessage('debug', `Finished applying feature rules for character ${baseCharacter.id}.`);
     return derivedCharacter;
 }
+```

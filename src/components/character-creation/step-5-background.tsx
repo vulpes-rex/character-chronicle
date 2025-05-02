@@ -1,4 +1,3 @@
-
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
@@ -56,7 +55,7 @@ export function Step5Background({ data, updateData, setValidity, combinedContent
     const { data: currentBgData, isLoading: isLoadingBgDetails } = useQuery<BackgroundInfo | null, Error>({
         queryKey: ['backgroundDetails', selectedBgName, combinedContent], // Key includes content
         queryFn: () => selectedBgName ? getBackgroundDetails(selectedBgName, combinedContent) : Promise.resolve(null),
-        enabled: !!selectedBgName, // Fetch when a background is selected
+        enabled: !!selectedBgName && !!combinedContent, // Fetch when a background is selected and content is loaded
         staleTime: Infinity, // Backgrounds are generally static within a content set
     });
 
@@ -69,7 +68,7 @@ export function Step5Background({ data, updateData, setValidity, combinedContent
 
     useEffect(() => {
         // Update Validity
-        setValidity(!!selectedBgName && formIsValid);
+        setValidity(!!selectedBgName && formIsValid && !isLoadingBgDetails); // Also check loading state
 
         // Calculate Derived Update Data
         const backstoryString = [
@@ -136,6 +135,7 @@ export function Step5Background({ data, updateData, setValidity, combinedContent
     }, [
         selectedBgName,
         formIsValid,
+        isLoadingBgDetails, // Added dependency
         watchedPersonality,
         currentBgData,
         setValidity,
@@ -171,16 +171,13 @@ export function Step5Background({ data, updateData, setValidity, combinedContent
                                     // Use || "" to handle potential undefined/null from field.value but avoid passing it directly
                                     value={field.value || ""}
                                     onValueChange={(value) => field.onChange(value)}
-                                    disabled={availableBackgroundNames.length === 0}
+                                    // Disable while loading content OR if no backgrounds are available
+                                    disabled={!combinedContent || availableBackgroundNames.length === 0}
                                 >
-                                    <SelectTrigger>
-                                        <SelectValue placeholder="Choose a background..." />
+                                    <SelectTrigger className={!combinedContent ? 'animate-pulse' : ''}>
+                                        <SelectValue placeholder={!combinedContent ? "Loading..." : "Choose a background..."} />
                                     </SelectTrigger>
                                     <SelectContent>
-                                        {/* Remove the SelectItem with empty value */}
-                                        {/* {availableBackgroundNames.length === 0 && (
-                                             <SelectItem value="" disabled>No backgrounds available</SelectItem>
-                                        )} */}
                                         {availableBackgroundNames.map(bgName => (
                                             <SelectItem key={bgName} value={bgName}>{bgName}</SelectItem>
                                         ))}
@@ -190,7 +187,7 @@ export function Step5Background({ data, updateData, setValidity, combinedContent
                        />
                         {errors.background && <p className="text-xs text-destructive mt-1">{errors.background.message}</p>}
 
-                        {isLoadingBgDetails && <Skeleton className="h-20 w-full mt-4" />}
+                        {isLoadingBgDetails && selectedBgName && <Skeleton className="h-20 w-full mt-4" />}
                         {!isLoadingBgDetails && currentBgData && (
                              <div className="mt-4 space-y-2 text-sm text-muted-foreground">
                                 <p className="font-medium text-foreground">{currentBgData.name}</p>
@@ -216,7 +213,7 @@ export function Step5Background({ data, updateData, setValidity, combinedContent
                          <div className="space-y-1">
                              <Label htmlFor="personalityTrait" className="flex justify-between items-center">
                                  <span>Personality Trait</span>
-                                  <Button type="button" variant="ghost" size="xs" onClick={() => randomizeField('personalityTrait', currentBgData?.suggestedTraits)} disabled={!currentBgData?.suggestedTraits}>
+                                  <Button type="button" variant="ghost" size="xs" onClick={() => randomizeField('personalityTrait', currentBgData?.suggestedTraits)} disabled={!currentBgData?.suggestedTraits || isLoadingBgDetails}>
                                       <Dices className="h-3 w-3 mr-1" /> Randomize
                                   </Button>
                              </Label>
@@ -225,7 +222,7 @@ export function Step5Background({ data, updateData, setValidity, combinedContent
                           <div className="space-y-1">
                               <Label htmlFor="ideal" className="flex justify-between items-center">
                                   <span>Ideal</span>
-                                   <Button type="button" variant="ghost" size="xs" onClick={() => randomizeField('ideal', currentBgData?.suggestedIdeals)} disabled={!currentBgData?.suggestedIdeals}>
+                                   <Button type="button" variant="ghost" size="xs" onClick={() => randomizeField('ideal', currentBgData?.suggestedIdeals)} disabled={!currentBgData?.suggestedIdeals || isLoadingBgDetails}>
                                        <Dices className="h-3 w-3 mr-1" /> Randomize
                                    </Button>
                               </Label>
@@ -234,7 +231,7 @@ export function Step5Background({ data, updateData, setValidity, combinedContent
                            <div className="space-y-1">
                                <Label htmlFor="bond" className="flex justify-between items-center">
                                    <span>Bond</span>
-                                    <Button type="button" variant="ghost" size="xs" onClick={() => randomizeField('bond', currentBgData?.suggestedBonds)} disabled={!currentBgData?.suggestedBonds}>
+                                    <Button type="button" variant="ghost" size="xs" onClick={()={() => randomizeField('bond', currentBgData?.suggestedBonds)} disabled={!currentBgData?.suggestedBonds || isLoadingBgDetails}>
                                         <Dices className="h-3 w-3 mr-1" /> Randomize
                                     </Button>
                                </Label>
@@ -243,7 +240,7 @@ export function Step5Background({ data, updateData, setValidity, combinedContent
                             <div className="space-y-1">
                                 <Label htmlFor="flaw" className="flex justify-between items-center">
                                     <span>Flaw</span>
-                                     <Button type="button" variant="ghost" size="xs" onClick={() => randomizeField('flaw', currentBgData?.suggestedFlaws)} disabled={!currentBgData?.suggestedFlaws}>
+                                     <Button type="button" variant="ghost" size="xs" onClick={() => randomizeField('flaw', currentBgData?.suggestedFlaws)} disabled={!currentBgData?.suggestedFlaws || isLoadingBgDetails}>
                                          <Dices className="h-3 w-3 mr-1" /> Randomize
                                      </Button>
                                 </Label>
@@ -255,4 +252,3 @@ export function Step5Background({ data, updateData, setValidity, combinedContent
         </div>
     );
 }
-

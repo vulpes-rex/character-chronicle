@@ -92,7 +92,7 @@ export function Step5Background({ data, updateData, setValidity, combinedContent
         // This requires knowing the previous background, which isn't easily tracked here.
         // A simpler approach is to only ADD proficiencies and let the final calculation handle duplicates.
         // However, to truly reflect choices, we'd need more complex state management.
-        // For now, we'll just add the new ones. The final character save should use `applyFeatureEffects`.
+        // For now, we'll just add the new ones. The final character save should use `applyFeatureRules`.
 
         const newSkills = { ...baseSkills };
         const newProficiencies = { ...baseProficiencies };
@@ -168,7 +168,8 @@ export function Step5Background({ data, updateData, setValidity, combinedContent
                            control={control}
                            render={({ field }) => (
                                 <Select
-                                    value={field.value ?? ""}
+                                    // Use || "" to handle potential undefined/null from field.value but avoid passing it directly
+                                    value={field.value || ""}
                                     onValueChange={(value) => field.onChange(value)}
                                     disabled={availableBackgroundNames.length === 0}
                                 >
@@ -176,9 +177,10 @@ export function Step5Background({ data, updateData, setValidity, combinedContent
                                         <SelectValue placeholder="Choose a background..." />
                                     </SelectTrigger>
                                     <SelectContent>
-                                        {availableBackgroundNames.length === 0 && (
+                                        {/* Remove the SelectItem with empty value */}
+                                        {/* {availableBackgroundNames.length === 0 && (
                                              <SelectItem value="" disabled>No backgrounds available</SelectItem>
-                                        )}
+                                        )} */}
                                         {availableBackgroundNames.map(bgName => (
                                             <SelectItem key={bgName} value={bgName}>{bgName}</SelectItem>
                                         ))}
@@ -253,3 +255,4 @@ export function Step5Background({ data, updateData, setValidity, combinedContent
         </div>
     );
 }
+

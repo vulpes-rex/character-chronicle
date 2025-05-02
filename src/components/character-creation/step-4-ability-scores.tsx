@@ -76,6 +76,13 @@ export function Step4AbilityScores({ data, updateData, setValidity, availableRac
 
     const selectedRace = availableRaces.find(r => r.name === data.race);
 
+    // Use react-hook-form for Zod validation, but don't drive state from it directly
+    const { formState: { isValid: formIsValid }, trigger, watch, reset } = useForm<Step4FormData>({
+        resolver: zodResolver(z.object({ stats: statsSchema })), // Validate final scores schema
+        mode: 'onChange',
+         // Default values will be set by the main useEffect below
+    });
+
      // --- Initialization Effect for Edit Mode ---
      useEffect(() => {
          if (editMode && data.stats) {
@@ -101,6 +108,7 @@ export function Step4AbilityScores({ data, updateData, setValidity, availableRac
             // Trigger validation with derived base scores
             trigger();
          }
+     // eslint-disable-next-line react-hooks/exhaustive-deps
      }, [editMode, data.stats, data.race, trigger]); // Run only when edit mode or initial data changes
 
 
@@ -121,13 +129,6 @@ export function Step4AbilityScores({ data, updateData, setValidity, availableRac
         return bonuses;
     }, [selectedRace, useTashasRules, tashasBonuses, editMode]);
 
-
-    // Use react-hook-form for Zod validation, but don't drive state from it directly
-    const { formState: { isValid: formIsValid }, trigger, watch, reset } = useForm<Step4FormData>({
-        resolver: zodResolver(z.object({ stats: statsSchema })), // Validate final scores schema
-        mode: 'onChange',
-         // Default values will be set by the main useEffect below
-    });
 
      // Validation logic: All base scores must be assigned
      const allScoresAssigned = useMemo(() => Object.values(assignedScores).every(score => typeof score === 'number' && score >= 1), [assignedScores]);
@@ -293,7 +294,7 @@ export function Step4AbilityScores({ data, updateData, setValidity, availableRac
                           {/* Assignment Section */}
                           <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                              {ABILITIES.map(ability => (
-                                  <div key={ability} className="space-y-1">
+                                  <div key={ability} className="space-y-1"> {/* Use stable key */}
                                       <Label htmlFor={`assign-${ability}`} className="uppercase text-xs font-semibold">{ability}</Label>
                                       {editMode ? (
                                           // Display assigned base score in edit mode (non-editable)
@@ -309,7 +310,7 @@ export function Step4AbilityScores({ data, updateData, setValidity, availableRac
                                          <Select
                                               value={assignedScores[ability]?.toString() ?? ""}
                                               onValueChange={(value) => handleAssignScore(ability, value)}
-                                              disabled={rolledScores.length === 0 && assignedScores[ability] === null}
+                                              disabled={rolledScores.length === 0 && assignedScores[ability] === null} // Disable if no scores rolled and not already assigned
                                          >
                                               <SelectTrigger id={`assign-${ability}`}>
                                                   <SelectValue placeholder="Assign..." />

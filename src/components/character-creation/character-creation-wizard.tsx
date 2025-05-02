@@ -1,11 +1,11 @@
 
 'use client';
 
-import { useState, useCallback } from 'react'; // Import useCallback
+import { useState, useCallback, useEffect } from 'react'; // Import useEffect
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
-import { saveCharacter } from '@/services/character-service';
+import { saveCharacter, updateCharacter } from '@/services/character-service'; // Import updateCharacter
 import type { Character, EquipmentItem, Feature, HitPointsState, HitDiceState, CharacterClass as CharacterClassType } from '@/lib/types';
 import { getCharacterClasses, getCharacterRaces, getCumulativeClassFeatures, getRaceTraitsDetails, getAvailableEquipmentItems, getBackgroundDetails } from '@/services/dnd-api';
 import { calculateSkillModifier, SKILL_ABILITY_MAP, ALL_SKILLS, rollDice } from '@/lib/types';
@@ -33,28 +33,56 @@ export type PartialCharacterFormData = Partial<Omit<Character, 'id' | 'createdAt
     tempProficiencies?: Partial<Character['proficiencies']>; // Temporary holding for proficiencies
 }>;
 
-const TOTAL_STEPS = 6;
+// Helper to map full Character to PartialCharacterFormData for initialization
+const mapCharacterToFormData = (char: Character): PartialCharacterFormData => ({
+    playerName: char.playerName,
+    characterName: char.characterName,
+    race: char.race,
+    class: char.class,
+    level: char.level,
+    background: char.background,
+    alignment: char.alignment,
+    stats: char.stats,
+    skills: char.skills,
+    equipment: char.equipment as Partial<EquipmentItem>[], // Cast needed
+    backstory: char.backstory,
+    appearance: char.appearance,
+    // Reconstruct selectedClasses from primary class and level for simplicity in editing single class
+    // TODO: Handle multiclass editing properly if needed
+    selectedClasses: { [char.class]: char.level },
+    tempFeatures: char.features,
+    tempProficiencies: char.proficiencies,
+});
 
-export function CharacterCreationWizard() {
+interface CharacterCreationWizardProps {
+    initialData?: Character; // Optional initial data for editing
+    editMode?: boolean; // Flag for edit mode
+}
+
+export function CharacterCreationWizard({ initialData, editMode = false }: CharacterCreationWizardProps) {
+    const TOTAL_STEPS = editMode ? 5 : 6; // Skip equipment step in edit mode
     const [currentStep, setCurrentStep] = useState(1);
-    const [characterData, setCharacterData] = useState<PartialCharacterFormData>({
-        playerName: '',
-        characterName: '',
-        race: '',
-        class: '', // Primary class for now
-        level: 1,
-        background: '',
-        alignment: '',
-        stats: { strength: 10, dexterity: 10, constitution: 10, intelligence: 10, wisdom: 10, charisma: 10 },
-        skills: ALL_SKILLS.reduce((acc, skill) => { acc[skill] = false; return acc; }, {} as Record<string, boolean>),
-        equipment: [],
-        backstory: '',
-        appearance: '',
-        selectedClasses: {}, // Initialize for multi-classing
-        tempFeatures: [],
-        tempProficiencies: { armor: [], weapons: [], tools: [], savingThrows: [] },
-    });
-    const [isValid, _setIsValid] = useState(false); // Track if current step data is valid
+    // Initialize state with initialData if provided, otherwise default empty state
+    const [characterData, setCharacterData] = useState<PartialCharacterFormData>(
+        initialData ? mapCharacterToFormData(initialData) : {
+            playerName: '',
+            characterName: '',
+            race: '',
+            class: '',
+            level: 1,
+            background: '',
+            alignment: '',
+            stats: { strength: 10, dexterity: 10, constitution: 10, intelligence: 10, wisdom: 10, charisma: 10 },
+            skills: ALL_SKILLS.reduce((acc, skill) => { acc[skill] = false; return acc; }, {} as Record<string, boolean>),
+            equipment: [],
+            backstory: '',
+            appearance: '',
+            selectedClasses: {},
+            tempFeatures: [],
+            tempProficiencies: { armor: [], weapons: [], tools: [], savingThrows: [] },
+        }
+    );
+    const [isValid, setIsValid] = useState(false); // Track if current step data is valid
     const [isLoading, setIsLoading] = useState(false);
     const [apiError, setApiError] = useState<string | null>(null);
     const router = useRouter();
@@ -76,20 +104,21 @@ export function CharacterCreationWizard() {
     const isFetchingInitialData = isLoadingClasses || isLoadingRaces;
 
     // Memoize updateCharacterData to prevent re-renders in child components
-    const updateCharacterData = useCallback((newData: PartialCharacterFormData) => {
+     const updateCharacterData = useCallback((newData: Partial<PartialCharacterFormData>) => {
         setCharacterData(prev => ({ ...prev, ...newData }));
     }, []); // No dependencies, function identity is stable
 
+
     // Memoize setValidity using useCallback
-    const setValidity = useCallback((valid: boolean) => {
-        _setIsValid(valid);
-    }, [_setIsValid]); // Dependency on the state setter function
+     const setValidityCallback = useCallback((valid: boolean) => {
+         setIsValid(valid);
+     }, []); // Dependency on the state setter function
 
 
     const handleNext = () => {
         if (isValid) {
             setCurrentStep(prev => Math.min(prev + 1, TOTAL_STEPS));
-            _setIsValid(false); // Reset validity for the next step using the state setter
+            setIsValid(false); // Reset validity for the next step using the state setter
         } else {
             toast({ variant: 'destructive', title: 'Incomplete Step', description: 'Please complete the required fields.' });
         }
@@ -97,7 +126,7 @@ export function CharacterCreationWizard() {
 
     const handlePrevious = () => {
         setCurrentStep(prev => Math.max(prev - 1, 1));
-        _setIsValid(true); // Assume previous step was valid, use state setter
+        setIsValid(true); // Assume previous step was valid, use state setter
     };
 
     const calculateProficiencyBonus = (level: number): number => {
@@ -117,9 +146,9 @@ export function CharacterCreationWizard() {
         setApiError(null);
 
         try {
-             // --- Final Data Calculation ---
+             // --- Final Data Calculation (Same as creation for now) ---
              const finalLevel = Object.values(characterData.selectedClasses ?? {}).reduce((sum, lvl) => sum + lvl, 0) || 1;
-             const primaryClass = Object.keys(characterData.selectedClasses ?? {})[0] ?? characterData.class ?? ''; // Determine primary class
+             const primaryClass = Object.keys(characterData.selectedClasses ?? {})[0] ?? characterData.class ?? '';
              const selectedClassData = availableClasses.find(c => c.name === primaryClass);
 
              if (!characterData.race || !primaryClass || !selectedClassData) {
@@ -140,38 +169,48 @@ export function CharacterCreationWizard() {
 
                  const classHitDieSides = parseInt(classData.hitDie.substring(1), 10);
 
-                 if (index === 0) { // First class determines initial HP and hit die type
+                 if (index === 0) {
                       maxHp = classHitDieSides + conModifier;
                       hitDice.dieType = classData.hitDie;
                       if (level > 1) {
                           maxHp += (level - 1) * (Math.ceil((classHitDieSides + 1) / 2) + conModifier);
                       }
-                 } else { // Subsequent classes add their HP
+                 } else {
                      for (let i = 0; i < level; i++) {
                           maxHp += Math.ceil((classHitDieSides + 1) / 2) + conModifier;
                      }
                  }
              });
-             maxHp = Math.max(1, maxHp); // Ensure minimum 1 HP
+             maxHp = Math.max(1, maxHp);
 
-             const finalHitPoints: HitPointsState = { max: maxHp, current: maxHp, temporary: 0 };
+             // Keep existing current/temp HP if editing, otherwise start full
+             const finalHitPoints: HitPointsState = {
+                 max: maxHp,
+                 current: initialData?.hitPoints?.current ?? maxHp,
+                 temporary: initialData?.hitPoints?.temporary ?? 0,
+             };
 
-             // Final Skill Proficiencies (ensure boolean values)
+             // Keep existing remaining hit dice if editing
+             hitDice.remaining = initialData?.hitDice?.remaining ?? finalLevel;
+
+             // Final Skill Proficiencies
             const finalSkills: Record<string, boolean> = {};
             ALL_SKILLS.forEach(skill => {
                 finalSkills[skill] = !!characterData.skills?.[skill];
             });
 
-             // Construct final Character object
-            const characterToSave: Omit<Character, 'id' | 'createdAt' | 'updatedAt'> = {
+            // Construct final Character object (or partial for update)
+            // Note: When updating, only send changed fields if possible, but for simplicity sending most fields.
+            const characterToSave: Partial<Omit<Character, 'id' | 'createdAt'>> & {id?: string} = {
+                id: initialData?.id, // Include ID for update
                 playerName: characterData.playerName || '',
                 characterName: characterData.characterName || '',
                 race: characterData.race || '',
-                class: primaryClass, // Store primary class or handle representation differently
+                class: primaryClass,
                 level: finalLevel,
                 background: characterData.background || '',
                 alignment: characterData.alignment || '',
-                stats: { // Ensure all stats are present
+                stats: {
                     strength: characterData.stats?.strength ?? 10,
                     dexterity: characterData.stats?.dexterity ?? 10,
                     constitution: characterData.stats?.constitution ?? 10,
@@ -182,26 +221,38 @@ export function CharacterCreationWizard() {
                 skills: finalSkills,
                 hitPoints: finalHitPoints,
                 hitDice: hitDice,
-                equipment: (characterData.equipment as EquipmentItem[])?.map(item => ({ // Ensure full equipment structure
+                // Only include equipment if NOT editing or if it's the last step in creation mode
+                ...(!editMode && currentStep === TOTAL_STEPS && { equipment: (characterData.equipment as EquipmentItem[])?.map(item => ({
                      ...item,
                      quantity: item.quantity ?? 1,
                      isEquipped: item.isEquipped ?? false,
-                 })) || [],
-                proficiencies: { // Use combined proficiencies
+                 })) || [] }),
+                 // If editing, equipment might be managed elsewhere (character sheet) or loaded initially
+                 ...(editMode && initialData?.equipment && { equipment: initialData.equipment }),
+                proficiencies: {
                      armor: characterData.tempProficiencies?.armor ?? [],
                      weapons: characterData.tempProficiencies?.weapons ?? [],
                      tools: characterData.tempProficiencies?.tools ?? [],
                      savingThrows: characterData.tempProficiencies?.savingThrows ?? [],
                  },
-                features: characterData.tempFeatures || [], // Use combined features
+                features: characterData.tempFeatures || [],
                 backstory: characterData.backstory || '',
                 appearance: characterData.appearance || '',
-                campaignId: undefined, // Or logic to assign later
+                campaignId: initialData?.campaignId, // Preserve campaign ID if editing
             };
 
-            const newId = await saveCharacter(characterToSave);
-            toast({ title: 'Character Created', description: `${characterToSave.characterName} has been successfully created.` });
-            router.push(`/character/view/${newId}`);
+            if (editMode && initialData?.id) {
+                await updateCharacter(initialData.id, characterToSave);
+                toast({ title: 'Character Updated', description: `${characterToSave.characterName} has been successfully updated.` });
+                router.push(`/character/view/${initialData.id}`); // Redirect to view page
+                router.refresh(); // Force refresh to show updated data
+            } else {
+                // Remove ID for creation
+                delete characterToSave.id;
+                const newId = await saveCharacter(characterToSave as Omit<Character, 'id' | 'createdAt' | 'updatedAt'>);
+                toast({ title: 'Character Created', description: `${characterToSave.characterName} has been successfully created.` });
+                router.push(`/character/view/${newId}`);
+            }
         } catch (error) {
             console.error('Failed to save character:', error);
             setApiError(error instanceof Error ? error.message : 'An unknown error occurred during saving.');
@@ -214,17 +265,21 @@ export function CharacterCreationWizard() {
     const renderStep = () => {
         switch (currentStep) {
             case 1:
-                return <Step1BasicInfo data={characterData} updateData={updateCharacterData} setValidity={setValidity} />;
+                return <Step1BasicInfo data={characterData} updateData={updateCharacterData} setValidity={setValidityCallback} />;
             case 2:
-                return <Step2RaceSelection data={characterData} updateData={updateCharacterData} setValidity={setValidity} availableRaces={availableRaces} />;
+                return <Step2RaceSelection data={characterData} updateData={updateCharacterData} setValidity={setValidityCallback} availableRaces={availableRaces} />;
             case 3:
-                return <Step3ClassSelection data={characterData} updateData={updateCharacterData} setValidity={setValidity} availableClasses={availableClasses} />;
+                return <Step3ClassSelection data={characterData} updateData={updateCharacterData} setValidity={setValidityCallback} availableClasses={availableClasses} />;
             case 4:
-                return <Step4AbilityScores data={characterData} updateData={updateCharacterData} setValidity={setValidity} availableRaces={availableRaces}/>;
+                return <Step4AbilityScores data={characterData} updateData={updateCharacterData} setValidity={setValidityCallback} availableRaces={availableRaces}/>;
             case 5:
-                return <Step5Background data={characterData} updateData={updateCharacterData} setValidity={setValidity} />;
-            case 6:
-                return <Step6Equipment data={characterData} updateData={updateCharacterData} setValidity={setValidity} />;
+                return <Step5Background data={characterData} updateData={updateCharacterData} setValidity={setValidityCallback} />;
+            case 6: // Only shown in creation mode
+                 if (!editMode) {
+                    return <Step6Equipment data={characterData} updateData={updateCharacterData} setValidity={setValidityCallback} />;
+                 }
+                 // Fall through or return null if step 6 is reached in edit mode (shouldn't happen with TOTAL_STEPS adjustment)
+                 return <div>Invalid Step for Edit Mode</div>;
             default:
                 return <div>Invalid Step</div>;
         }
@@ -246,7 +301,7 @@ export function CharacterCreationWizard() {
 
     return (
         <div className="space-y-6">
-            <h1 className="text-3xl font-bold mb-6">Create New Character (Step {currentStep} of {TOTAL_STEPS})</h1>
+            <h1 className="text-3xl font-bold mb-6">{editMode ? 'Edit Character' : 'Create New Character'} (Step {currentStep} of {TOTAL_STEPS})</h1>
             <Progress value={(currentStep / TOTAL_STEPS) * 100} className="w-full mb-6" />
 
             {apiError && (
@@ -272,12 +327,10 @@ export function CharacterCreationWizard() {
                 ) : (
                     <Button onClick={handleFinalSubmit} disabled={!isValid || isLoading}>
                         {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                        Finish & Create Character
+                        {editMode ? 'Save Changes' : 'Finish & Create Character'}
                     </Button>
                 )}
             </div>
         </div>
     );
 }
-
-    

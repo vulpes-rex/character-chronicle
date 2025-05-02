@@ -16,6 +16,7 @@ export async function loadUserProfile(userId: string): Promise<UserProfile | nul
        return null;
    }
   const userDocRef = doc(db, 'users', userId);
+  
   try {
     const docSnap = await getDoc(userDocRef);
     if (docSnap.exists()) {

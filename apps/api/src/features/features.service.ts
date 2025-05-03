@@ -137,11 +137,15 @@ export class FeaturesService {
       this.logger.debug(`Applying feature rules for character ${baseCharacter.id}`, 'FeaturesService');
       if (!baseCharacter.features || baseCharacter.features.length === 0) {
           this.logger.debug(`No features found for character ${baseCharacter.id}. Returning base character.`, 'FeaturesService');
-          return { ...baseCharacter };
+          // Ensure base stats exist even if no features
+          return {
+              ...baseCharacter,
+              stats: baseCharacter.baseStats || { strength: 10, dexterity: 10, constitution: 10, intelligence: 10, wisdom: 10, charisma: 10 }
+          };
       }
 
       const derivedCharacter = JSON.parse(JSON.stringify(baseCharacter)) as Character;
-      const finalStats = { ...(baseCharacter.stats || {}) };
+      const finalStats = { ...(baseCharacter.baseStats || { strength: 10, dexterity: 10, constitution: 10, intelligence: 10, wisdom: 10, charisma: 10 }) }; // Start with base stats
       const finalProficiencies = {
           armor: [...(baseCharacter.proficiencies?.armor ?? [])],
           weapons: [...(baseCharacter.proficiencies?.weapons ?? [])],
@@ -203,7 +207,7 @@ export class FeaturesService {
       // Ensure unique proficiencies
       derivedCharacter.proficiencies = { armor: [...new Set(finalProficiencies.armor)], weapons: [...new Set(finalProficiencies.weapons)], tools: [...new Set(finalProficiencies.tools)], savingThrows: [...new Set(finalProficiencies.savingThrows)], languages: [...new Set(finalProficiencies.languages)] };
       derivedCharacter.skills = finalSkills;
-      derivedCharacter.stats = finalStats; // Apply final base stats
+      derivedCharacter.stats = finalStats; // Apply final stats (derived from base + features)
 
       // Max HP
       const classDataHP = SRD_SOURCE_PACK.content.classes?.[baseCharacter.class];

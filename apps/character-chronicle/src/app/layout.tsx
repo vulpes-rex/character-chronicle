@@ -7,7 +7,7 @@ import { Providers } from '@/components/providers'; // Use alias
 import { AuthProvider } from '@/components/auth-provider'; // Use alias
 import React, { Suspense } from 'react'; // Import Suspense
 import { Skeleton } from '@/components/ui/skeleton'; // Use alias
-import { DDDiceRoller } from '@/components/dddice-roller'; // Use alias
+import { DDDiceLoader } from '@/components/dddice-loader'; // Corrected import path
 import { DiceRollProvider } from '@/components/dice-roll-context'; // Use alias
 
 const geistSans = Geist({
@@ -38,7 +38,7 @@ export default function RootLayout({
              <DiceRollProvider> {/* Wrap relevant parts with DiceRollProvider */}
                 {/* Wrap children in Suspense for potential loading states */}
                  <Suspense fallback={<RootLoadingSkeleton />}>
-                     <DDDiceRoller /> {/* Render the visualizer component */}
+                     <DDDiceLoader /> {/* Load DDDice assets */}
                     {children}
                  </Suspense>
               </DiceRollProvider>

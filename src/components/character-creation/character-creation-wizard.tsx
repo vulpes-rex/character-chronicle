@@ -8,9 +8,9 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { saveCharacter, updateCharacter } from '@/services/character-service'; // Import updateCharacter
 import type { Character, EquipmentItem, Feature, HitPointsState, HitDiceState, CharacterClass as CharacterClassType, SourcePack } from '@/lib/types';
-import { getCharacterClasses, getCharacterRaces, getCumulativeClassFeatures, getRaceFeatures, getAvailableEquipmentItems, getBackgroundDetails } from '@/services/dnd-api'; // Updated imports
-import { getBackgroundFeatures } from '@/services/feature-service'; // Import feature service for background features
-import { calculateSkillModifier, SKILL_ABILITY_MAP, ALL_SKILLS, rollDice } from '@/lib/types';
+import { getCharacterClasses, getCharacterRaces, getCumulativeClassFeatures, getAvailableEquipmentItems, getBackgroundDetails } from '@/services/dnd-api'; // Updated imports
+import { getBackgroundFeatures, getRaceFeatures } from '@/services/feature-service'; // Import feature service for background/race features
+import { calculateSkillModifier, SKILL_ABILITY_MAP, ALL_SKILLS, rollDice, BASE_FEATURE_DEFINITIONS } from '@/lib/types'; // Import BASE_FEATURE_DEFINITIONS
 import { useQuery } from '@tanstack/react-query';
 import { Progress } from '@/components/ui/progress';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
@@ -213,7 +213,7 @@ export function CharacterCreationWizard({ initialData, editMode = false }: Chara
                          }
                      }
                  } else if (feature.metadata?.effectType === 'proficiencyGrant' && feature.metadata.choose && feature.metadata.options) {
-                      const choiceKey = feature.name; // Use feature name as the choice key for proficiencies
+                      const choiceKey = feature.metadata.choiceKey || feature.name; // Use choiceKey or feature name
                       const choices = characterData.featureChoices?.[choiceKey];
                       if (choices && Array.isArray(choices)) {
                           // Modify the feature to reflect the chosen proficiencies

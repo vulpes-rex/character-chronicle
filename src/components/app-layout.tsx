@@ -26,11 +26,12 @@ import type { Character } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar'; // For user display
 import { Skeleton } from './ui/skeleton'; // Import Skeleton component
-import { useQuery } from '@tanstack/react-query';
-import { loadCharacter } from '@/services/character-service';
+// Removed useQuery and loadCharacter import as AppLayout is a client component
+// import { useQuery } from '@tanstack/react-query';
+// import { loadCharacter } from '@/services/character-service'; // This service is likely server-only now
 import { DiceRollProvider } from './dice-roll-context'; // Import DiceRollProvider
-// Removed import for FloatingDiceRoller as requested
-// import { FloatingDiceRoller } from './floating-dice-roller';
+import { DDDiceRoller } from './dddice-roller'; // Import DDDice Roller
+
 
 export function AppLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
@@ -41,14 +42,8 @@ export function AppLayout({ children }: { children: ReactNode }) {
   const characterIdMatch = pathname.match(/^\/character\/(view|edit)\/([a-zA-Z0-9_-]+)/);
   const currentCharacterId = characterIdMatch ? characterIdMatch[2] : undefined;
 
-  // Pre-fetch character data if ID is present, useful for BackstoryGenerator
-   const { data: currentCharacter } = useQuery<Character | null, Error>({
-       queryKey: ['character', currentCharacterId],
-       queryFn: () => currentCharacterId ? loadCharacter(currentCharacterId) : Promise.resolve(null), // Use client-safe fetcher or wrap server action
-       enabled: !!currentCharacterId && !!user, // Only fetch if we have an ID and user is logged in
-       staleTime: 5 * 60 * 1000, // Cache for 5 minutes
-   });
-
+  // Removed useQuery for character data - AppLayout is client-side
+  // const { data: currentCharacter } = useQuery<Character | null, Error>({ ... });
 
   const handleLogout = async () => {
     try {
@@ -111,12 +106,8 @@ export function AppLayout({ children }: { children: ReactNode }) {
                         </SidebarMenuButton>
                       </SidebarMenuItem>
                        <SidebarMenuItem>
-                            <BackstoryGenerator
-                               characterId={currentCharacterId}
-                               characterRace={currentCharacter?.race}
-                               characterClass={currentCharacter?.class}
-                               characterAlignment={currentCharacter?.alignment}
-                           />
+                            {/* Pass only characterId, BackstoryGenerator handles fetching if needed */}
+                            <BackstoryGenerator characterId={currentCharacterId} />
                        </SidebarMenuItem>
                        <SidebarSeparator />
                    </>
@@ -238,8 +229,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
         </Sidebar>
         <SidebarInset>
            {children}
-            {/* Conditional rendering removed as requested */}
-           {/* {user && <FloatingDiceRoller onRoll={handleDiceRollLog} />} */}
+            <DDDiceRoller /> {/* Keep DDDice Roller */}
         </SidebarInset>
       </SidebarProvider>
     </DiceRollProvider>

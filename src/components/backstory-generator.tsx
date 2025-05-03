@@ -25,7 +25,7 @@ import { Alert, AlertDescription, AlertTitle } from './ui/alert';
 import { AlertCircle } from 'lucide-react';
 import { useQueryClient, useQuery } from '@tanstack/react-query'; // To access character data from cache
 import type { Character } from '@/lib/types'; // Import Character type
-import { loadCharacter } from '@/services/character-service'; // Import loadCharacter to fetch data if needed
+import { loadCharacter } from '@/services/character-service'; // Import loadCharacter server action
 
 
 // Props to accept character details - these might be undefined if not passed directly

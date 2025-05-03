@@ -1,5 +1,3 @@
-
-
 /**
  * Represents the core data structure for a D&D character.
  */
@@ -8,7 +6,7 @@ export interface Character {
   playerName: string;
   characterName: string;
   race: string; // Name of the race (e.g., "Human", "Elf")
-  class: string; // Name of the class (e.g., "Fighter", "Wizard") // Consider array for multiclass
+  class: string; // Name of the primary class (e.g., "Fighter", "Wizard")
   level: number;
   background: string;
   alignment: string;
@@ -45,6 +43,15 @@ export interface Character {
   features: Feature[]; // Features from class and race (potentially including metadata for effects)
   // Record of choices made for features that offer options (e.g., Fighting Style: 'Archery')
   featureChoices?: Record<string, string | string[]>;
+  // Spellcasting specific data
+  spellcasting?: {
+    ability: keyof Character['stats'] | null; // e.g., 'intelligence' for Wizard
+    spellSaveDC: number; // Calculated
+    spellAttackBonus: number; // Calculated
+    slots: Record<string, { max: number; remaining: number }>; // Key is spell level (e.g., "1", "2")
+  };
+  spellsKnown?: string[]; // List of known spell names/keys (for Sorcerers, Bards, etc.)
+  spellsPrepared?: string[]; // List of prepared spell names/keys (for Clerics, Wizards, etc.)
   backstory: string;
   appearance: string;
   createdAt?: Date; // Optional: Timestamp for creation
@@ -109,7 +116,30 @@ type ChoiceGrantMetadata = {
     condition?: string;
 }
 
-// Add more effect types as needed (e.g., SpeedBonus, SpecialAction, etc.)
+// --- New Spellcasting Metadata ---
+// Feature grants spellcasting ability or modifies it
+type SpellcastingGrantMetadata = {
+    effectType: 'spellcastingGrant';
+    ability: keyof Character['stats']; // e.g., "intelligence"
+    preparationType?: 'prepared' | 'known'; // How spells are selected
+    spellListSource?: string; // e.g., "Wizard", "Cleric" (key to look up spell list)
+}
+
+// Feature grants specific spells known (e.g., racial spells)
+type SpellsKnownGrantMetadata = {
+    effectType: 'spellsKnownGrant';
+    spells: string[]; // List of spell keys/names granted
+    condition?: string; // e.g., "at level 3" (handled by feature association)
+}
+
+// Feature modifies spell slots
+type SpellSlotModificationMetadata = {
+    effectType: 'spellSlotModification';
+    level: number; // Which spell level slot is affected
+    change: number; // +1, -1 etc.
+    condition?: string;
+}
+
 
 // Union type for feature metadata
 export type FeatureEffectMetadata =
@@ -119,7 +149,10 @@ export type FeatureEffectMetadata =
   | ACCalculationMetadata // Added new type
   | AdvantageGrantMetadata
   | ResistanceGrantMetadata
-  | ChoiceGrantMetadata; // Added ChoiceGrant
+  | ChoiceGrantMetadata // Added ChoiceGrant
+  | SpellcastingGrantMetadata // Added Spellcasting
+  | SpellsKnownGrantMetadata
+  | SpellSlotModificationMetadata;
 // | SpeedBonusMetadata
 // | SpecialActionMetadata;
 
@@ -195,6 +228,8 @@ export interface CharacterClass {
   featuresByLevel?: { // Optional: Detailed feature progression
       [level: number]: string[]; // Array of feature keys/names gained at this level
   };
+  spellcastingAbility?: keyof Character['stats'] | null; // e.g., "intelligence", "wisdom"
+  spellProgression?: 'full' | 'half' | 'third' | 'pact' | 'none'; // How spell slots progress
   // features?: Feature[]; // Deprecated: Features should ideally be defined centrally or fetched dynamically
 }
 
@@ -268,13 +303,17 @@ export interface BackgroundInfo {
     timestamp: Date;
     actorId: string; // User ID or Character ID or 'system'
     actorName: string; // Display name of the actor
-    actionType: 'roll' | 'featureUse' | 'message' | 'statusChange' | 'combatStart' | 'combatEnd' | 'turnChange' | 'initiativeRoll' | 'hpChange' | 'hpSet' | string; // Type of action
+    actionType: 'roll' | 'featureUse' | 'message' | 'statusChange' | 'combatStart' | 'combatEnd' | 'turnChange' | 'initiativeRoll' | 'hpChange' | 'hpSet' | 'spellCast' | string; // Added spellCast
     details: string; // Description of the action
     rollDetails?: {
         dice: string;
         result: number;
         components?: { roll: number; modifier?: number };
     };
+     spellDetails?: { // Added spell details
+         name: string;
+         level: number;
+     };
  }
 
 /**
@@ -342,6 +381,29 @@ export interface Monster {
     actions?: Array<{ name: string; description: string; attackBonus?: number; damageDice?: string; damageBonus?: number }>;
  }
 
+/**
+ * Represents a Spell.
+ */
+export interface Spell {
+    name: string;
+    description: string;
+    level: 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9; // 0 for cantrips
+    school: string; // e.g., "Evocation", "Abjuration"
+    castingTime: string; // e.g., "1 action", "1 bonus action", "1 reaction"
+    range: string; // e.g., "Self", "Touch", "60 feet"
+    components: string[]; // e.g., ["V", "S", "M (a bit of bat guano)"]
+    duration: string; // e.g., "Instantaneous", "Concentration, up to 1 minute"
+    classes: string[]; // List of classes that can use this spell
+    higherLevel?: string; // Description of effects at higher levels
+    attackType?: 'ranged' | 'melee' | null; // If it's a spell attack
+    saveRequired?: keyof Character['stats'] | null; // Stat for saving throw, if any
+    damageDice?: string; // e.g., "3d6"
+    damageType?: string; // e.g., "Fire"
+    healingDice?: string; // e.g., "1d4+1"
+    conditionsInflicted?: string[]; // e.g., ["Blinded"]
+    ritual?: boolean;
+}
+
 
  /**
   * Represents a content source pack (e.g., SRD, custom DM content).
@@ -359,6 +421,7 @@ export interface Monster {
         npcs?: Record<string, Omit<NPC, 'id'>>;
         backgrounds?: Record<string, BackgroundInfo>; // Store full background info
         features?: Record<string, Omit<Feature, 'name'>>; // Keyed by unique feature name/key
+        spells?: Record<string, Omit<Spell, 'name'>>; // Added spells record
     };
     createdAt: Date;
     updatedAt: Date;
@@ -519,3 +582,80 @@ export interface CharacterLevel {
     // spellcasting?: { ... }; // Optional spellcasting details
     // Add other level-specific changes like ASI options
 }
+
+// Basic Spell Slot Progression Table (SRD)
+export const SPELL_SLOTS_BY_LEVEL: Record<string, number[]> = {
+    // Full Caster (Wizard, Cleric, Druid, Bard, Sorcerer)
+    'full': [
+        /* 1*/ [2, 0, 0, 0, 0, 0, 0, 0, 0],
+        /* 2*/ [3, 0, 0, 0, 0, 0, 0, 0, 0],
+        /* 3*/ [4, 2, 0, 0, 0, 0, 0, 0, 0],
+        /* 4*/ [4, 3, 0, 0, 0, 0, 0, 0, 0],
+        /* 5*/ [4, 3, 2, 0, 0, 0, 0, 0, 0],
+        /* 6*/ [4, 3, 3, 0, 0, 0, 0, 0, 0],
+        /* 7*/ [4, 3, 3, 1, 0, 0, 0, 0, 0],
+        /* 8*/ [4, 3, 3, 2, 0, 0, 0, 0, 0],
+        /* 9*/ [4, 3, 3, 3, 1, 0, 0, 0, 0],
+        /*10*/ [4, 3, 3, 3, 2, 0, 0, 0, 0],
+        /*11*/ [4, 3, 3, 3, 2, 1, 0, 0, 0],
+        /*12*/ [4, 3, 3, 3, 2, 1, 0, 0, 0],
+        /*13*/ [4, 3, 3, 3, 2, 1, 1, 0, 0],
+        /*14*/ [4, 3, 3, 3, 2, 1, 1, 0, 0],
+        /*15*/ [4, 3, 3, 3, 2, 1, 1, 1, 0],
+        /*16*/ [4, 3, 3, 3, 2, 1, 1, 1, 0],
+        /*17*/ [4, 3, 3, 3, 2, 1, 1, 1, 1],
+        /*18*/ [4, 3, 3, 3, 3, 1, 1, 1, 1],
+        /*19*/ [4, 3, 3, 3, 3, 2, 1, 1, 1],
+        /*20*/ [4, 3, 3, 3, 3, 2, 2, 1, 1],
+    ],
+    // Half Caster (Paladin, Ranger)
+    'half': [
+        /* 1*/ [0, 0, 0, 0, 0],
+        /* 2*/ [2, 0, 0, 0, 0],
+        /* 3*/ [3, 0, 0, 0, 0],
+        /* 4*/ [3, 0, 0, 0, 0],
+        /* 5*/ [4, 2, 0, 0, 0],
+        /* 6*/ [4, 2, 0, 0, 0],
+        /* 7*/ [4, 3, 0, 0, 0],
+        /* 8*/ [4, 3, 0, 0, 0],
+        /* 9*/ [4, 3, 2, 0, 0],
+        /*10*/ [4, 3, 2, 0, 0],
+        /*11*/ [4, 3, 3, 0, 0],
+        /*12*/ [4, 3, 3, 0, 0],
+        /*13*/ [4, 3, 3, 1, 0],
+        /*14*/ [4, 3, 3, 1, 0],
+        /*15*/ [4, 3, 3, 2, 0],
+        /*16*/ [4, 3, 3, 2, 0],
+        /*17*/ [4, 3, 3, 3, 1],
+        /*18*/ [4, 3, 3, 3, 1],
+        /*19*/ [4, 3, 3, 3, 2],
+        /*20*/ [4, 3, 3, 3, 2],
+    ],
+    // Third Caster (Eldritch Knight, Arcane Trickster) - Simplified, shares half caster table but offset
+    'third': [], // Needs specific logic or lookup based on primary class level
+    // Pact Magic (Warlock)
+    'pact': [
+        /* 1*/ [1, 0], /* Slots, Level */
+        /* 2*/ [2, 0],
+        /* 3*/ [2, 1],
+        /* 4*/ [2, 1],
+        /* 5*/ [2, 2],
+        /* 6*/ [2, 2],
+        /* 7*/ [2, 3],
+        /* 8*/ [2, 3],
+        /* 9*/ [2, 4],
+        /*10*/ [2, 4],
+        /*11*/ [3, 4],
+        /*12*/ [3, 4],
+        /*13*/ [3, 4],
+        /*14*/ [3, 4],
+        /*15*/ [3, 4],
+        /*16*/ [3, 4],
+        /*17*/ [4, 4],
+        /*18*/ [4, 4],
+        /*19*/ [4, 4],
+        /*20*/ [4, 4],
+    ],
+     'none': [],
+};
+

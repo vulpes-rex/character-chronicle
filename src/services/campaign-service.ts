@@ -1,4 +1,3 @@
-
 'use server';
 
 import { db } from '@/lib/firebase';
@@ -22,6 +21,7 @@ import {
   setDoc,
 } from 'firebase/firestore';
 import type { Campaign, GameLogEntry, SourcePack, UserRole, Monster, NPC } from '@/lib/types'; // Added NPC type
+import { logError, logMessage } from './logging-service'; // Import logging service
 
 const campaignsCollection = collection(db, 'campaigns');
 const gameLogsCollection = collection(db, 'gameLogs');
@@ -36,9 +36,11 @@ const sourcePacksCollection = collection(db, 'sourcePacks');
  * @param dmId - The User ID of the Dungeon Master creating the campaign.
  * @returns The ID of the newly created campaign.
  */
-export async function createCampaign(campaignData: Pick<Campaign, 'name' | 'description' | 'activeSourcePackIds'>, dmId: string): Promise<string> {
+export async function createCampaign(campaignData: Pick, dmId: string): Promise {
   if (!dmId) {
-    console.error("createCampaign: Attempted to create campaign without a DM ID.");
+    const errorMsg = "Attempted to create campaign without a DM ID.";
+    console.error("createCampaign:", errorMsg);
+    await logError(new Error(errorMsg), { function: 'createCampaign' });
     throw new Error('Dungeon Master ID is required to create a campaign.');
   }
   try {
@@ -56,12 +58,14 @@ export async function createCampaign(campaignData: Pick<Campaign, 'name' | 'desc
   } catch (e) {
     // Enhanced Logging
     const error = e instanceof Error ? e : new Error(String(e));
-    console.error(`Error in createCampaign for DM ${dmId}: Firestore operation failed.`, {
+    const context = {
         errorMessage: error.message,
         errorStack: error.stack,
         dmId: dmId,
-        campaignData: { name: campaignData.name } // Log partial data
-    });
+        campaignName: campaignData?.name, // Log only name
+    };
+    console.error(`Error in createCampaign for DM ${dmId}: Firestore operation failed.`, context);
+     await logError(error, context);
     throw new Error('Failed to create campaign.');
   }
 }
@@ -71,7 +75,7 @@ export async function createCampaign(campaignData: Pick<Campaign, 'name' | 'desc
  * @param campaignId - The ID of the campaign to load.
  * @returns The campaign data, or null if not found.
  */
-export async function loadCampaign(campaignId: string): Promise<Campaign | null> {
+export async function loadCampaign(campaignId: string): Promise {
   if (!campaignId) {
     console.warn("loadCampaign: Attempted to load campaign with empty ID.");
     return null;
@@ -94,11 +98,13 @@ export async function loadCampaign(campaignId: string): Promise<Campaign | null>
   } catch (e) {
      // Enhanced Logging
      const error = e instanceof Error ? e : new Error(String(e));
-     console.error(`Error in loadCampaign for ID ${campaignId}: Firestore operation failed.`, {
+     const context = {
          errorMessage: error.message,
          errorStack: error.stack,
          campaignId: campaignId,
-     });
+     };
+     console.error(`Error in loadCampaign for ID ${campaignId}: Firestore operation failed.`, context);
+     await logError(error, context);
     throw new Error(`Failed to load campaign ${campaignId}.`);
   }
 }
@@ -109,7 +115,7 @@ export async function loadCampaign(campaignId: string): Promise<Campaign | null>
  * @param userRole - The role of the user ('dm' or 'player'). Optional, helps optimize query.
  * @returns An array of campaign data.
  */
-export async function loadAllCampaigns(userId?: string, userRole?: UserRole): Promise<Campaign[]> {
+export async function loadAllCampaigns(userId?: string, userRole?: UserRole): Promise {
     if (!userId) {
         console.warn("loadAllCampaigns: Called without userId.");
         return [];
@@ -138,12 +144,14 @@ export async function loadAllCampaigns(userId?: string, userRole?: UserRole): Pr
     } catch (e) {
          // Enhanced Logging
         const error = e instanceof Error ? e : new Error(String(e));
-        console.error(`Error in loadAllCampaigns for user ${userId}: Firestore operation failed.`, {
+        const context = {
             errorMessage: error.message,
             errorStack: error.stack,
             userId: userId,
             userRole: userRole
-        });
+        };
+        console.error(`Error in loadAllCampaigns for user ${userId}: Firestore operation failed.`, context);
+        await logError(error, context);
         throw new Error('Failed to load campaigns.');
     }
 }
@@ -155,9 +163,11 @@ export async function loadAllCampaigns(userId?: string, userRole?: UserRole): Pr
  * @param campaignData - An object containing the fields to update (e.g., name, description).
  * @param currentUserId - The ID of the user attempting the update (for permission check).
  */
-export async function updateCampaign(campaignId: string, campaignData: Partial<Pick<Campaign, 'name' | 'description' | 'activeSourcePackIds'>>, currentUserId: string): Promise<void> {
+export async function updateCampaign(campaignId: string, campaignData: Partial>> , currentUserId: string): Promise {
   if (!campaignId || !currentUserId) {
-     console.error("updateCampaign: Missing campaignId or currentUserId.");
+     const errorMsg = "Missing campaignId or currentUserId.";
+     console.error("updateCampaign:", errorMsg);
+     await logError(new Error(errorMsg), { function: 'updateCampaign', campaignId, currentUserId: currentUserId || 'undefined' });
      throw new Error("Missing required parameters for campaign update.");
   }
   const campaignDocRef = doc(db, 'campaigns', campaignId);
@@ -165,15 +175,19 @@ export async function updateCampaign(campaignId: string, campaignData: Partial<P
   try {
       const campaign = await loadCampaign(campaignId);
       if (!campaign) {
-          console.error(`updateCampaign: Campaign with ID ${campaignId} not found.`);
-          throw new Error(`Campaign with ID ${campaignId} not found.`);
+          const errorMsg = `Campaign with ID ${campaignId} not found.`;
+          console.error(`updateCampaign: ${errorMsg}`);
+          await logError(new Error(errorMsg), { function: 'updateCampaign', campaignId, currentUserId });
+          throw new Error(errorMsg);
       }
       if (campaign.dmId !== currentUserId) {
-           console.warn(`updateCampaign: Permission denied for user ${currentUserId} to update campaign ${campaignId} owned by ${campaign.dmId}.`);
+           const errorMsg = `Permission denied: User ${currentUserId} cannot update campaign ${campaignId} owned by ${campaign.dmId}.`;
+           console.warn(`updateCampaign: ${errorMsg}`);
+           await logError(new Error('Permission denied'), { function: 'updateCampaign', campaignId, currentUserId, ownerId: campaign.dmId });
           throw new Error('Permission denied: Only the DM can update the campaign.');
       }
 
-      const dataToUpdate: Record<string, any> = {
+      const dataToUpdate: Record = {
         ...campaignData,
         updatedAt: serverTimestamp(),
       };
@@ -183,13 +197,15 @@ export async function updateCampaign(campaignId: string, campaignData: Partial<P
   } catch (e) {
      // Enhanced Logging
      const error = e instanceof Error ? e : new Error(String(e));
-     console.error(`Error in updateCampaign for ID ${campaignId} by user ${currentUserId}: Firestore operation failed or permission error.`, {
+     const context = {
         errorMessage: error.message,
         errorStack: error.stack,
         campaignId: campaignId,
         currentUserId: currentUserId,
         updateDataKeys: Object.keys(campaignData)
-     });
+     };
+     console.error(`Error in updateCampaign for ID ${campaignId} by user ${currentUserId}: Firestore operation failed or permission error.`, context);
+     await logError(error, context);
     // Re-throw specific permission error or generic failure
     if (error.message.startsWith('Permission denied')) {
          throw error;
@@ -203,9 +219,11 @@ export async function updateCampaign(campaignId: string, campaignData: Partial<P
  * @param campaignId - The ID of the campaign to delete.
  * @param currentUserId - The ID of the user attempting the delete (for permission check).
  */
-export async function deleteCampaign(campaignId: string, currentUserId: string): Promise<void> {
+export async function deleteCampaign(campaignId: string, currentUserId: string): Promise {
     if (!campaignId || !currentUserId) {
-       console.error("deleteCampaign: Missing campaignId or currentUserId.");
+       const errorMsg = "Missing campaignId or currentUserId.";
+       console.error("deleteCampaign:", errorMsg);
+       await logError(new Error(errorMsg), { function: 'deleteCampaign', campaignId, currentUserId: currentUserId || 'undefined' });
        throw new Error("Missing required parameters for campaign deletion.");
     }
    const campaignDocRef = doc(db, 'campaigns', campaignId);
@@ -213,11 +231,15 @@ export async function deleteCampaign(campaignId: string, currentUserId: string):
    try {
        const campaign = await loadCampaign(campaignId);
        if (!campaign) {
-            console.error(`deleteCampaign: Campaign with ID ${campaignId} not found.`);
-           throw new Error(`Campaign with ID ${campaignId} not found.`);
+            const errorMsg = `Campaign with ID ${campaignId} not found.`;
+            console.error(`deleteCampaign: ${errorMsg}`);
+             await logError(new Error(errorMsg), { function: 'deleteCampaign', campaignId, currentUserId });
+           throw new Error(errorMsg);
        }
        if (campaign.dmId !== currentUserId) {
-            console.warn(`deleteCampaign: Permission denied for user ${currentUserId} to delete campaign ${campaignId} owned by ${campaign.dmId}.`);
+            const errorMsg = `Permission denied: User ${currentUserId} cannot delete campaign ${campaignId} owned by ${campaign.dmId}.`;
+            console.warn(`deleteCampaign: ${errorMsg}`);
+             await logError(new Error('Permission denied'), { function: 'deleteCampaign', campaignId, currentUserId, ownerId: campaign.dmId });
            throw new Error('Permission denied: Only the DM can delete the campaign.');
        }
 
@@ -226,12 +248,14 @@ export async function deleteCampaign(campaignId: string, currentUserId: string):
    } catch (e) {
         // Enhanced Logging
         const error = e instanceof Error ? e : new Error(String(e));
-        console.error(`Error in deleteCampaign for ID ${campaignId} by user ${currentUserId}: Firestore operation failed or permission error.`, {
+        const context = {
             errorMessage: error.message,
             errorStack: error.stack,
             campaignId: campaignId,
             currentUserId: currentUserId,
-        });
+        };
+        console.error(`Error in deleteCampaign for ID ${campaignId} by user ${currentUserId}: Firestore operation failed or permission error.`, context);
+        await logError(error, context);
          if (error.message.startsWith('Permission denied')) {
             throw error;
         }
@@ -245,9 +269,11 @@ export async function deleteCampaign(campaignId: string, currentUserId: string):
  * @param playerId - The ID of the player user to add.
  * @param currentUserId - The ID of the user performing the action (should be DM).
  */
-export async function addPlayerToCampaign(campaignId: string, playerId: string, currentUserId: string): Promise<void> {
+export async function addPlayerToCampaign(campaignId: string, playerId: string, currentUserId: string): Promise {
     if (!campaignId || !playerId || !currentUserId) {
-       console.error("addPlayerToCampaign: Missing campaignId, playerId, or currentUserId.");
+       const errorMsg = "Missing campaignId, playerId, or currentUserId.";
+       console.error("addPlayerToCampaign:", errorMsg);
+        await logError(new Error(errorMsg), { function: 'addPlayerToCampaign', campaignId, playerId, currentUserId });
        throw new Error("Missing required parameters for adding player.");
     }
     const campaignDocRef = doc(db, 'campaigns', campaignId);
@@ -255,11 +281,15 @@ export async function addPlayerToCampaign(campaignId: string, playerId: string, 
     try {
         const campaign = await loadCampaign(campaignId);
         if (!campaign) {
-             console.error(`addPlayerToCampaign: Campaign with ID ${campaignId} not found.`);
-            throw new Error(`Campaign with ID ${campaignId} not found.`);
+             const errorMsg = `Campaign with ID ${campaignId} not found.`;
+             console.error(`addPlayerToCampaign: ${errorMsg}`);
+             await logError(new Error(errorMsg), { function: 'addPlayerToCampaign', campaignId, playerId, currentUserId });
+            throw new Error(errorMsg);
         }
         if (campaign.dmId !== currentUserId) {
-             console.warn(`addPlayerToCampaign: Permission denied for user ${currentUserId} to add player to campaign ${campaignId} owned by ${campaign.dmId}.`);
+             const errorMsg = `Permission denied: User ${currentUserId} cannot add player to campaign ${campaignId} owned by ${campaign.dmId}.`;
+             console.warn(`addPlayerToCampaign: ${errorMsg}`);
+             await logError(new Error('Permission denied'), { function: 'addPlayerToCampaign', campaignId, playerId, currentUserId, ownerId: campaign.dmId });
             throw new Error('Permission denied: Only the DM can add players.');
         }
         if (campaign.playerIds.includes(playerId)) {
@@ -275,14 +305,16 @@ export async function addPlayerToCampaign(campaignId: string, playerId: string, 
     } catch (e) {
          // Enhanced Logging
          const error = e instanceof Error ? e : new Error(String(e));
-         console.error(`Error in addPlayerToCampaign (Campaign: ${campaignId}, Player: ${playerId}, User: ${currentUserId}): Firestore operation failed or permission error.`, {
+         const context = {
             errorMessage: error.message,
             errorStack: error.stack,
             campaignId: campaignId,
             playerId: playerId,
             currentUserId: currentUserId,
-         });
-         if (error.message.startsWith('Permission denied')) {
+         };
+         console.error(`Error in addPlayerToCampaign (Campaign: ${campaignId}, Player: ${playerId}, User: ${currentUserId}): Firestore operation failed or permission error.`, context);
+         await logError(error, context);
+        if (error.message.startsWith('Permission denied')) {
             throw error;
         }
         throw new Error('Failed to add player.');
@@ -295,9 +327,11 @@ export async function addPlayerToCampaign(campaignId: string, playerId: string, 
  * @param playerId - The ID of the player user to remove.
  * @param currentUserId - The ID of the user performing the action (should be DM).
  */
-export async function removePlayerFromCampaign(campaignId: string, playerId: string, currentUserId: string): Promise<void> {
+export async function removePlayerFromCampaign(campaignId: string, playerId: string, currentUserId: string): Promise {
      if (!campaignId || !playerId || !currentUserId) {
-       console.error("removePlayerFromCampaign: Missing campaignId, playerId, or currentUserId.");
+       const errorMsg = "Missing campaignId, playerId, or currentUserId.";
+       console.error("removePlayerFromCampaign:", errorMsg);
+        await logError(new Error(errorMsg), { function: 'removePlayerFromCampaign', campaignId, playerId, currentUserId });
        throw new Error("Missing required parameters for removing player.");
     }
     const campaignDocRef = doc(db, 'campaigns', campaignId);
@@ -305,11 +339,15 @@ export async function removePlayerFromCampaign(campaignId: string, playerId: str
     try {
         const campaign = await loadCampaign(campaignId);
         if (!campaign) {
-            console.error(`removePlayerFromCampaign: Campaign with ID ${campaignId} not found.`);
-            throw new Error(`Campaign with ID ${campaignId} not found.`);
+            const errorMsg = `Campaign with ID ${campaignId} not found.`;
+            console.error(`removePlayerFromCampaign: ${errorMsg}`);
+            await logError(new Error(errorMsg), { function: 'removePlayerFromCampaign', campaignId, playerId, currentUserId });
+            throw new Error(errorMsg);
         }
         if (campaign.dmId !== currentUserId) {
-             console.warn(`removePlayerFromCampaign: Permission denied for user ${currentUserId} to remove player from campaign ${campaignId} owned by ${campaign.dmId}.`);
+             const errorMsg = `Permission denied: User ${currentUserId} cannot remove player from campaign ${campaignId} owned by ${campaign.dmId}.`;
+             console.warn(`removePlayerFromCampaign: ${errorMsg}`);
+             await logError(new Error('Permission denied'), { function: 'removePlayerFromCampaign', campaignId, playerId, currentUserId, ownerId: campaign.dmId });
             throw new Error('Permission denied: Only the DM can remove players.');
         }
         if (!campaign.playerIds.includes(playerId)) {
@@ -325,13 +363,15 @@ export async function removePlayerFromCampaign(campaignId: string, playerId: str
     } catch (e) {
          // Enhanced Logging
          const error = e instanceof Error ? e : new Error(String(e));
-         console.error(`Error in removePlayerFromCampaign (Campaign: ${campaignId}, Player: ${playerId}, User: ${currentUserId}): Firestore operation failed or permission error.`, {
+         const context = {
             errorMessage: error.message,
             errorStack: error.stack,
             campaignId: campaignId,
             playerId: playerId,
             currentUserId: currentUserId,
-         });
+         };
+         console.error(`Error in removePlayerFromCampaign (Campaign: ${campaignId}, Player: ${playerId}, User: ${currentUserId}): Firestore operation failed or permission error.`, context);
+         await logError(error, context);
         if (error.message.startsWith('Permission denied')) {
             throw error;
         }
@@ -347,9 +387,11 @@ export async function removePlayerFromCampaign(campaignId: string, playerId: str
  * @param logEntryData - The data for the log entry (excluding ID and timestamp).
  * @returns The ID of the newly created log entry.
  */
-export async function addGameLogEntry(logEntryData: Omit<GameLogEntry, 'id' | 'timestamp'>): Promise<string> {
+export async function addGameLogEntry(logEntryData: Omit, 'id' | 'timestamp'>): Promise {
    if (!logEntryData || !logEntryData.campaignId) {
-       console.error("addGameLogEntry: Missing log entry data or campaignId.");
+       const errorMsg = "Invalid log entry data provided (missing campaignId?).";
+       console.error("addGameLogEntry:", errorMsg);
+       await logError(new Error(errorMsg), { function: 'addGameLogEntry', logData: logEntryData });
        throw new Error("Invalid log entry data provided.");
    }
   try {
@@ -362,13 +404,15 @@ export async function addGameLogEntry(logEntryData: Omit<GameLogEntry, 'id' | 't
   } catch (e) {
      // Enhanced Logging
      const error = e instanceof Error ? e : new Error(String(e));
-     console.error(`Error in addGameLogEntry for campaign ${logEntryData.campaignId}: Firestore operation failed.`, {
+     const context = {
          errorMessage: error.message,
          errorStack: error.stack,
          campaignId: logEntryData.campaignId,
          actorId: logEntryData.actorId,
          actionType: logEntryData.actionType,
-     });
+     };
+     console.error(`Error in addGameLogEntry for campaign ${logEntryData.campaignId}: Firestore operation failed.`, context);
+     await logError(error, context);
     throw new Error('Failed to add game log entry.');
   }
 }
@@ -379,7 +423,7 @@ export async function addGameLogEntry(logEntryData: Omit<GameLogEntry, 'id' | 't
  * @param limitCount - Optional number of latest entries to retrieve.
  * @returns An array of game log entries.
  */
-export async function loadGameLogEntries(campaignId: string, limitCount?: number): Promise<GameLogEntry[]> {
+export async function loadGameLogEntries(campaignId: string, limitCount?: number): Promise {
   if (!campaignId) {
      console.warn("loadGameLogEntries: Attempted to load logs with empty campaignId.");
      return [];
@@ -404,12 +448,14 @@ export async function loadGameLogEntries(campaignId: string, limitCount?: number
   } catch (e) {
      // Enhanced Logging
      const error = e instanceof Error ? e : new Error(String(e));
-     console.error(`Error in loadGameLogEntries for campaign ${campaignId}: Firestore operation failed.`, {
+     const context = {
          errorMessage: error.message,
          errorStack: error.stack,
          campaignId: campaignId,
          limitCount: limitCount,
-     });
+     };
+     console.error(`Error in loadGameLogEntries for campaign ${campaignId}: Firestore operation failed.`, context);
+     await logError(error, context);
     throw new Error('Failed to load game log.');
   }
 }
@@ -422,14 +468,18 @@ export async function loadGameLogEntries(campaignId: string, limitCount?: number
  * @param currentUserId - The ID of the DM performing the action.
  * @returns The ID of the created/updated source pack.
  */
-export async function saveSourcePack(sourcePackData: Omit<SourcePack, 'createdAt' | 'updatedAt'> & { id?: string }, currentUserId: string): Promise<string> {
+export async function saveSourcePack(sourcePackData: Omit> & { id?: string }, currentUserId: string): Promise {
     if (!currentUserId) {
-        console.error("saveSourcePack: Missing currentUserId.");
-        throw new Error("User ID is required to save a source pack.");
+        const errorMsg = "User ID is required to save a source pack.";
+        console.error("saveSourcePack:", errorMsg);
+        await logError(new Error(errorMsg), { function: 'saveSourcePack' });
+        throw new Error(errorMsg);
     }
     if (!sourcePackData || !sourcePackData.name) {
-        console.error("saveSourcePack: Missing required pack data (e.g., name).");
-        throw new Error("Source pack name is required.");
+        const errorMsg = "Source pack name is required.";
+        console.error("saveSourcePack:", errorMsg);
+         await logError(new Error(errorMsg), { function: 'saveSourcePack', userId: currentUserId });
+        throw new Error(errorMsg);
     }
 
     const docRef = sourcePackData.id ? doc(db, 'sourcePacks', sourcePackData.id) : doc(collection(db, 'sourcePacks'));
@@ -438,15 +488,21 @@ export async function saveSourcePack(sourcePackData: Omit<SourcePack, 'createdAt
         if (sourcePackData.id) {
             const existingPack = await loadSourcePack(sourcePackData.id);
             if (!existingPack) {
-                console.error(`saveSourcePack: Source pack with ID ${sourcePackData.id} not found for update.`);
-                throw new Error(`Source pack with ID ${sourcePackData.id} not found.`);
+                const errorMsg = `Source pack with ID ${sourcePackData.id} not found.`;
+                console.error(`saveSourcePack: ${errorMsg}`);
+                 await logError(new Error(errorMsg), { function: 'saveSourcePack', packId: sourcePackData.id, userId: currentUserId });
+                throw new Error(errorMsg);
             }
             if (existingPack.creatorId !== currentUserId && existingPack.creatorId !== 'system') {
-                 console.warn(`saveSourcePack: Permission denied for user ${currentUserId} to update pack ${sourcePackData.id} owned by ${existingPack.creatorId}.`);
+                 const errorMsg = `Permission denied: User ${currentUserId} cannot update pack ${sourcePackData.id} owned by ${existingPack.creatorId}.`;
+                 console.warn(`saveSourcePack: ${errorMsg}`);
+                 await logError(new Error('Permission denied'), { function: 'saveSourcePack', packId: sourcePackData.id, userId: currentUserId, ownerId: existingPack.creatorId });
                 throw new Error('Permission denied: Cannot update this source pack.');
             }
         } else if (sourcePackData.creatorId && sourcePackData.creatorId !== currentUserId && sourcePackData.creatorId !== 'system') {
-             console.warn(`saveSourcePack: Permission denied for user ${currentUserId} to create pack with creatorId ${sourcePackData.creatorId}.`);
+             const errorMsg = `Permission denied: User ${currentUserId} cannot create pack with creatorId ${sourcePackData.creatorId}.`;
+             console.warn(`saveSourcePack: ${errorMsg}`);
+              await logError(new Error('Permission denied'), { function: 'saveSourcePack', attemptedCreatorId: sourcePackData.creatorId, userId: currentUserId });
              throw new Error('Permission denied: Cannot create source pack for another user.');
         }
 
@@ -464,12 +520,15 @@ export async function saveSourcePack(sourcePackData: Omit<SourcePack, 'createdAt
     } catch (e) {
          // Enhanced Logging
          const error = e instanceof Error ? e : new Error(String(e));
-         console.error(`Error in saveSourcePack (Pack ID: ${sourcePackData.id || 'new'}, User: ${currentUserId}): Firestore operation failed or permission error.`, {
+         const context = {
             errorMessage: error.message,
             errorStack: error.stack,
             packId: sourcePackData.id || 'new',
+            packName: sourcePackData.name,
             currentUserId: currentUserId,
-         });
+         };
+         console.error(`Error in saveSourcePack (Pack ID: ${sourcePackData.id || 'new'}, User: ${currentUserId}): Firestore operation failed or permission error.`, context);
+         await logError(error, context);
          if (error.message.startsWith('Permission denied')) {
             throw error;
          }
@@ -482,7 +541,7 @@ export async function saveSourcePack(sourcePackData: Omit<SourcePack, 'createdAt
  * @param sourcePackId - The ID of the source pack to load.
  * @returns The source pack data, or null if not found.
  */
-export async function loadSourcePack(sourcePackId: string): Promise<SourcePack | null> {
+export async function loadSourcePack(sourcePackId: string): Promise {
     if (!sourcePackId) {
         console.warn("loadSourcePack: Attempted to load pack with empty ID.");
         return null;
@@ -505,12 +564,14 @@ export async function loadSourcePack(sourcePackId: string): Promise<SourcePack |
     } catch (e) {
         // Enhanced Logging
         const error = e instanceof Error ? e : new Error(String(e));
-        console.error(`Error in loadSourcePack for ID ${sourcePackId}: Firestore operation failed.`, {
+        const context = {
             errorMessage: error.message,
             errorStack: error.stack,
             packId: sourcePackId,
-        });
-        // Don't throw here for getCombinedContentFromPacks
+        };
+        console.error(`Error in loadSourcePack for ID ${sourcePackId}: Firestore operation failed.`, context);
+        // Log error but allow null return for functions like getCombinedContentFromPacks
+        await logError(error, context);
         return null;
     }
 }
@@ -521,7 +582,7 @@ export async function loadSourcePack(sourcePackId: string): Promise<SourcePack |
  * @param creatorId - The ID of the DM or 'system'.
  * @returns An array of source pack data.
  */
-export async function loadSourcePacksByCreator(creatorId: string): Promise<SourcePack[]> {
+export async function loadSourcePacksByCreator(creatorId: string): Promise {
      if (!creatorId) {
         console.warn("loadSourcePacksByCreator: Attempted to load packs with empty creatorId.");
         return [];
@@ -543,11 +604,13 @@ export async function loadSourcePacksByCreator(creatorId: string): Promise<Sourc
     } catch (e) {
         // Enhanced Logging
         const error = e instanceof Error ? e : new Error(String(e));
-        console.error(`Error in loadSourcePacksByCreator for creator ${creatorId}: Firestore operation failed.`, {
+        const context = {
             errorMessage: error.message,
             errorStack: error.stack,
             creatorId: creatorId,
-        });
+        };
+        console.error(`Error in loadSourcePacksByCreator for creator ${creatorId}: Firestore operation failed.`, context);
+         await logError(error, context);
         throw new Error('Failed to load source packs.');
     }
 }
@@ -557,9 +620,11 @@ export async function loadSourcePacksByCreator(creatorId: string): Promise<Sourc
  * @param sourcePackId - The ID of the source pack to delete.
  * @param currentUserId - The ID of the user attempting the delete.
  */
-export async function deleteSourcePack(sourcePackId: string, currentUserId: string): Promise<void> {
+export async function deleteSourcePack(sourcePackId: string, currentUserId: string): Promise {
     if (!sourcePackId || !currentUserId) {
-       console.error("deleteSourcePack: Missing sourcePackId or currentUserId.");
+       const errorMsg = "Missing sourcePackId or currentUserId.";
+       console.error("deleteSourcePack:", errorMsg);
+       await logError(new Error(errorMsg), { function: 'deleteSourcePack', packId: sourcePackId, userId: currentUserId });
        throw new Error("Missing required parameters for source pack deletion.");
     }
     const packDocRef = doc(db, 'sourcePacks', sourcePackId);
@@ -567,15 +632,21 @@ export async function deleteSourcePack(sourcePackId: string, currentUserId: stri
     try {
         const pack = await loadSourcePack(sourcePackId);
         if (!pack) {
-            console.error(`deleteSourcePack: Source pack with ID ${sourcePackId} not found.`);
-            throw new Error(`Source pack with ID ${sourcePackId} not found.`);
+             const errorMsg = `Source pack with ID ${sourcePackId} not found.`;
+             console.error(`deleteSourcePack: ${errorMsg}`);
+             await logError(new Error(errorMsg), { function: 'deleteSourcePack', packId: sourcePackId, userId: currentUserId });
+            throw new Error(errorMsg);
         }
         if (pack.creatorId === 'system') {
+             const errorMsg = `Permission denied: Cannot delete system source packs.`;
              console.warn(`deleteSourcePack: Attempt by user ${currentUserId} to delete system pack ${sourcePackId}.`);
-            throw new Error('Permission denied: Cannot delete system source packs.');
+             await logError(new Error('Permission denied'), { function: 'deleteSourcePack', packId: sourcePackId, userId: currentUserId });
+            throw new Error(errorMsg);
         }
         if (pack.creatorId !== currentUserId) {
-             console.warn(`deleteSourcePack: Permission denied for user ${currentUserId} to delete pack ${sourcePackId} owned by ${pack.creatorId}.`);
+             const errorMsg = `Permission denied: User ${currentUserId} cannot delete pack ${sourcePackId} owned by ${pack.creatorId}.`;
+             console.warn(`deleteSourcePack: ${errorMsg}`);
+             await logError(new Error('Permission denied'), { function: 'deleteSourcePack', packId: sourcePackId, userId: currentUserId, ownerId: pack.creatorId });
             throw new Error('Permission denied: Cannot delete this source pack.');
         }
 
@@ -584,12 +655,14 @@ export async function deleteSourcePack(sourcePackId: string, currentUserId: stri
     } catch (e) {
          // Enhanced Logging
          const error = e instanceof Error ? e : new Error(String(e));
-         console.error(`Error in deleteSourcePack (Pack ID: ${sourcePackId}, User: ${currentUserId}): Firestore operation failed or permission error.`, {
+         const context = {
             errorMessage: error.message,
             errorStack: error.stack,
             packId: sourcePackId,
             currentUserId: currentUserId,
-         });
+         };
+         console.error(`Error in deleteSourcePack (Pack ID: ${sourcePackId}, User: ${currentUserId}): Firestore operation failed or permission error.`, context);
+         await logError(error, context);
          if (error.message.startsWith('Permission denied')) {
             throw error;
          }
@@ -598,7 +671,7 @@ export async function deleteSourcePack(sourcePackId: string, currentUserId: stri
 }
 
 // --- Helper to combine content from multiple source packs ---
-export async function getCombinedContentFromPacks(packIds: string[]): Promise<SourcePack['content']> {
+export async function getCombinedContentFromPacks(packIds: string[]): Promise>> {
     const combinedContent: SourcePack['content'] = {
         races: {},
         classes: {},
@@ -606,6 +679,8 @@ export async function getCombinedContentFromPacks(packIds: string[]): Promise<So
         monsters: {},
         npcs: {},
         backgrounds: {},
+        features: {},
+        spells: {}, // Added spells
     };
 
     if (!packIds || packIds.length === 0) {
@@ -632,6 +707,7 @@ export async function getCombinedContentFromPacks(packIds: string[]): Promise<So
 
     const srdPack = packs.find(p => p.id === 'srd');
     const otherPacks = packs.filter(p => p.id !== 'srd');
+    // Apply SRD first, then others override/add
     const sortedPacks = srdPack ? [srdPack, ...otherPacks] : otherPacks;
 
     for (const pack of sortedPacks) {
@@ -643,14 +719,18 @@ export async function getCombinedContentFromPacks(packIds: string[]): Promise<So
                  combinedContent.monsters = { ...combinedContent.monsters, ...pack.content.monsters };
                  combinedContent.npcs = { ...combinedContent.npcs, ...pack.content.npcs };
                  combinedContent.backgrounds = { ...combinedContent.backgrounds, ...pack.content.backgrounds };
+                 combinedContent.features = { ...combinedContent.features, ...pack.content.features };
+                 combinedContent.spells = { ...combinedContent.spells, ...pack.content.spells }; // Added spells merge
              } catch (mergeError) {
                  const error = mergeError instanceof Error ? mergeError : new Error(String(mergeError));
-                 console.error(`Error merging content from pack ${pack.id} (${pack.name}):`, {
+                 const context = {
                      errorMessage: error.message,
                      errorStack: error.stack,
                      packId: pack.id,
                      packName: pack.name,
-                 });
+                 };
+                 console.error(`Error merging content from pack ${pack.id} (${pack.name}):`, context);
+                 await logError(error, context);
                  // Decide how to handle merge errors: continue, stop, etc.
              }
         }

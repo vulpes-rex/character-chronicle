@@ -1,4 +1,3 @@
-
 'use client';
 
 import type { ReactNode } from 'react';
@@ -29,7 +28,8 @@ import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar'; // For user d
 import { Skeleton } from './ui/skeleton'; // Import Skeleton component
 import { useQuery } from '@tanstack/react-query';
 import { loadCharacter } from '@/services/character-service';
-import { FloatingDiceRoller } from './floating-dice-roller'; // Re-import FloatingDiceRoller
+// Removed import for FloatingDiceRoller as requested
+// import { FloatingDiceRoller } from './floating-dice-roller';
 
 export function AppLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
@@ -246,9 +246,10 @@ export function AppLayout({ children }: { children: ReactNode }) {
       </Sidebar>
       <SidebarInset>
          {children}
-         {/* Render FloatingDiceRoller unconditionally if user is logged in */}
-         {user && <FloatingDiceRoller onRoll={handleDiceRollLog} />}
+          {/* Conditional rendering removed as requested */}
+         {/* {user && <FloatingDiceRoller onRoll={handleDiceRollLog} />} */}
       </SidebarInset>
     </SidebarProvider>
   );
 }
+

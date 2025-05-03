@@ -1,11 +1,11 @@
 
-import type { CharacterClass as CharacterClassType, CharacterRace, Feature, CharacterLevel, EquipmentItem, HitPoints, BackgroundInfo, SourcePack } from '@/lib/types';
+import type { CharacterClass as CharacterClassType, CharacterRace, Feature, CharacterLevel, EquipmentItem, HitPoints, BackgroundInfo, SourcePack, Spell } from '@/lib/types'; // Added Spell
 import { logError, logMessage } from './logging-service'; // Import logging service
 import { getMultipleFeatureDefinitions } from './feature-service'; // Import feature service
 import { SRD_SOURCE_PACK } from '@/lib/srd-data'; // Import the SRD data definition
 
 // Re-export types from lib/types to ensure consistency
-export type { CharacterClass, CharacterRace, Feature, CharacterLevel, EquipmentItem, HitPoints, BackgroundInfo };
+export type { CharacterClass, CharacterRace, Feature, CharacterLevel, EquipmentItem, HitPoints, BackgroundInfo, Spell };
 
 
 /**
@@ -273,4 +273,24 @@ export async function getBackgroundDetails(
     return null;
 }
 
-    
+
+/**
+ * Fetches available spells, combining SRD and source pack content.
+ * @param combinedContent - Optional combined content from active source packs.
+ * @returns A promise that resolves to an array of Spell objects.
+ */
+export async function getSpells(combinedContent?: SourcePack['content']): Promise<Spell[]> {
+    logMessage('debug', 'getSpells: Fetching spells.');
+
+    // Start with SRD spells
+    let spellsMap = { ...(SRD_SOURCE_PACK.content.spells || {}) };
+
+    // Merge/Override with combined content
+    if (combinedContent?.spells) {
+        spellsMap = { ...spellsMap, ...combinedContent.spells };
+        logMessage('debug', `getSpells: Merged/overrode with ${Object.keys(combinedContent.spells).length} spells from source packs.`);
+    }
+
+    const spells = Object.entries(spellsMap).map(([name, data]) => ({ name, ...data }));
+    return spells.sort((a, b) => a.level - b.level || a.name.localeCompare(b.name)); // Sort by level, then name
+}

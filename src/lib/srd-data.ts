@@ -3,7 +3,7 @@
  * This data acts as the fallback for core D&D 5e rules if no other source packs provide them.
  */
 
-import type { SourcePack, Feature } from './types';
+import type { SourcePack, Feature, Spell } from './types';
 import { ALL_SKILLS } from './types'; // Ensure ALL_SKILLS is available if needed
 
 // Define SRD features here for easier management
@@ -82,7 +82,7 @@ const SRD_FEATURES: Record<string, Omit<Feature, 'name' | 'source'>> = {
     },
     "FightingStyleArchery": {
         description: "You gain a +2 bonus to attack rolls you make with ranged weapons.",
-        // Metadata: { effectType: 'attackBonus', value: 2, condition: 'ranged weapon' } // Requires logic during attack roll
+        metadata: { effectType: 'attackBonus', value: 2, condition: 'ranged weapon' } // Needs logic in roll calculation
     },
      "FightingStyleDefense": {
         description: "While you are wearing armor, you gain a +1 bonus to AC.",
@@ -92,7 +92,23 @@ const SRD_FEATURES: Record<string, Omit<Feature, 'name' | 'source'>> = {
             condition: "wearing armor",
         },
     },
-    // ... other specific fighting style definitions ...
+    "FightingStyleDueling": {
+        description: "When wielding a melee weapon in one hand and no other weapons, gain a +2 bonus to damage rolls with that weapon.",
+         metadata: { effectType: 'damageBonus', value: 2, condition: 'wielding melee weapon in one hand and no other weapon' } // Needs logic in damage roll
+    },
+     "FightingStyleGreatWeaponFighting": {
+        description: "When you roll a 1 or 2 on a damage die for an attack you make with a melee weapon that you are wielding with two hands, you can reroll the die and must use the new roll.",
+        // Metadata: Effect is situational, handled during damage roll logic
+    },
+     "FightingStyleProtection": {
+        description: "When a creature you can see attacks a target other than you that is within 5 feet of you, you can use your reaction to impose disadvantage on the attack roll. You must be wielding a shield.",
+        isActionable: true, // Reaction
+        // Metadata: Effect is situational, handled manually or by combat tracker
+    },
+     "FightingStyleTwoWeaponFighting": {
+        description: "When you engage in two-weapon fighting, you can add your ability modifier to the damage of the second attack.",
+        // Metadata: Effect is situational, handled during off-hand attack damage roll
+    },
     "SecondWind": {
         description: "On your turn, you can use a bonus action to regain hit points equal to 1d10 + your fighter level. Once you use this feature, you must finish a short or long rest before you can use it again.",
         isActionable: true,
@@ -108,25 +124,33 @@ const SRD_FEATURES: Record<string, Omit<Feature, 'name' | 'source'>> = {
      "Expertise": {
         description: "Choose two skill proficiencies, or one skill/tool proficiency. Double proficiency bonus for checks using chosen proficiencies.",
          metadata: {
-             effectType: "choiceGrant", // Better as choiceGrant? Or proficiencyGrant? Needs careful design.
-             type: 'skill', // Indicates primary type
-             choose: 2,
-             options: ALL_SKILLS, // Simplified - needs tool options too.
+             effectType: "proficiencyGrant", // Changed to proficiency grant
+             type: 'skill', // Primary type is skill
+             choose: 2, // Choose 2 skills OR 1 skill + 1 tool
+             options: [...ALL_SKILLS, "Thieves' Tools", "Disguise Kit", "Forgery Kit", "Herbalism Kit", "Navigator's Tools", "Poisoner's Kit"], // Example tools, needs full list
              choiceKey: "Expertise",
+             // Note: Doubling proficiency bonus needs specific logic during skill check calculation based on choices.
+             // The 'proficiencyGrant' here primarily handles making the *choice*.
          }
     },
     "SneakAttack": {
         description: "Once per turn, you can deal extra damage (scales with level) to one creature you hit with an attack under certain conditions.",
+         // Metadata: Damage scales, effect is conditional. Handled in damage calculation logic.
     },
      "ThievesCant": {
         description: "A secret mix of dialect, jargon, and code allowing hidden messages.",
+         metadata: { effectType: "proficiencyGrant", type: "language", proficiencies: ["Thieves' Cant"] }
     },
      "CunningAction": {
         description: "Use a bonus action to take the Dash, Disengage, or Hide action.",
         isActionable: true,
     },
     "Spellcasting": {
-        description: "You have learned to draw on divine magic through meditation and prayer to cast spells.", // Generic
+        description: "You have learned to draw on divine magic through meditation and prayer to cast spells.", // Generic description
+        metadata: {
+             effectType: 'spellcastingGrant', // Placeholder - specific ability/list defined in class
+             ability: 'intelligence', // Default, overridden by class
+         }
     },
     "ArcaneRecovery": {
         description: "You have learned to regain some of your magical energy by studying your spellbook. Once per day when you finish a short rest, you can choose expended spell slots to recover.",
@@ -171,6 +195,62 @@ const SRD_FEATURES: Record<string, Omit<Feature, 'name' | 'source'>> = {
     },
 };
 
+// Define SRD Spells
+const SRD_SPELLS: Record<string, Omit<Spell, 'name'>> = {
+     // Cantrips (Level 0)
+    "Acid Splash": {
+        description: "You hurl a bubble of acid. Choose one creature within range, or choose two creatures within range that are within 5 feet of each other...",
+        level: 0, school: "Conjuration", castingTime: "1 action", range: "60 feet",
+        components: ["V", "S"], duration: "Instantaneous", classes: ["Sorcerer", "Wizard"],
+        saveRequired: "dexterity", damageDice: "1d6", damageType: "Acid", // Scales with level
+    },
+    "Light": {
+        description: "You touch one object that is no larger than 10 feet in any dimension. Until the spell ends, the object sheds bright light in a 20-foot radius...",
+        level: 0, school: "Evocation", castingTime: "1 action", range: "Touch",
+        components: ["V", "M (a firefly or phosphorescent moss)"], duration: "1 hour", classes: ["Bard", "Cleric", "Sorcerer", "Wizard"],
+    },
+    "Mage Hand": {
+        description: "A spectral, floating hand appears at a point you choose within range...",
+        level: 0, school: "Conjuration", castingTime: "1 action", range: "30 feet",
+        components: ["V", "S"], duration: "1 minute", classes: ["Bard", "Sorcerer", "Warlock", "Wizard"],
+    },
+    "Prestidigitation": {
+        description: "This spell is a minor magical trick that novice spellcasters use for practice...",
+        level: 0, school: "Transmutation", castingTime: "1 action", range: "10 feet",
+        components: ["V", "S"], duration: "Up to 1 hour", classes: ["Bard", "Sorcerer", "Warlock", "Wizard"],
+    },
+     // Level 1 Spells
+     "Burning Hands": {
+        description: "As you hold your hands with thumbs touching and fingers spread, a thin sheet of flames shoots forth...",
+        level: 1, school: "Evocation", castingTime: "1 action", range: "Self (15-foot cone)",
+        components: ["V", "S"], duration: "Instantaneous", classes: ["Sorcerer", "Wizard"],
+        saveRequired: "dexterity", damageDice: "3d6", damageType: "Fire",
+        higherLevel: "When you cast this spell using a spell slot of 2nd level or higher, the damage increases by 1d6 for each slot level above 1st.",
+    },
+    "Cure Wounds": {
+        description: "A creature you touch regains a number of hit points equal to 1d8 + your spellcasting ability modifier.",
+        level: 1, school: "Evocation", castingTime: "1 action", range: "Touch",
+        components: ["V", "S"], duration: "Instantaneous", classes: ["Bard", "Cleric", "Druid", "Paladin", "Ranger"],
+        healingDice: "1d8", // Modifier added separately
+        higherLevel: "When you cast this spell using a spell slot of 2nd level or higher, the healing increases by 1d8 for each slot level above 1st.",
+    },
+    "Magic Missile": {
+        description: "You create three glowing darts of magical force. Each dart hits a creature of your choice that you can see within range...",
+        level: 1, school: "Evocation", castingTime: "1 action", range: "120 feet",
+        components: ["V", "S"], duration: "Instantaneous", classes: ["Sorcerer", "Wizard"],
+        damageDice: "1d4+1", damageType: "Force", // Deals 1d4+1 per missile
+        // Note: Special targeting rules, each missile hits automatically.
+        higherLevel: "When you cast this spell using a spell slot of 2nd level or higher, the spell creates one more dart for each slot level above 1st.",
+    },
+     "Shield": {
+        description: "An invisible barrier of magical force appears and protects you. Until the start of your next turn, you have a +5 bonus to AC...",
+        level: 1, school: "Abjuration", castingTime: "1 reaction (when hit by attack or targeted by magic missile)", range: "Self",
+        components: ["V", "S"], duration: "1 round", classes: ["Sorcerer", "Wizard"],
+    },
+     // Add many more SRD spells...
+};
+
+
 // Assign source property to all features
 Object.keys(SRD_FEATURES).forEach(key => {
     // Basic heuristic for source, needs refinement
@@ -203,7 +283,7 @@ export const SRD_SOURCE_PACK: SourcePack = {
         races: {
             "Human": {
                 name: 'Human',
-                description: 'Humans are the most common people in the worlds of D\&D, but they live nearly everywhere.',
+                description: 'Humans are the most common people in the worlds of D&D, but they live nearly everywhere.',
                 traits: ['HumanASI', 'ExtraLanguage'], // Feature keys
                 baseSpeed: 30,
                 size: "Medium",
@@ -245,7 +325,9 @@ export const SRD_SOURCE_PACK: SourcePack = {
                     1: ['FightingStyle', 'SecondWind'],
                     2: ['ActionSurge'],
                     // Add more levels/features as needed
-                 }
+                 },
+                 spellcastingAbility: null,
+                 spellProgression: 'none',
             },
              "Wizard": {
                 name: 'Wizard',
@@ -262,7 +344,9 @@ export const SRD_SOURCE_PACK: SourcePack = {
                     1: ['Spellcasting', 'ArcaneRecovery'],
                     2: ['ArcaneTradition'],
                     // ...
-                 }
+                 },
+                 spellcastingAbility: 'intelligence',
+                 spellProgression: 'full',
             },
              "Rogue": {
                 name: 'Rogue',
@@ -279,7 +363,9 @@ export const SRD_SOURCE_PACK: SourcePack = {
                     1: ['Expertise', 'SneakAttack', 'ThievesCant'],
                     2: ['CunningAction'],
                      // ...
-                 }
+                 },
+                 spellcastingAbility: null,
+                 spellProgression: 'none',
             },
              "Barbarian": { // Added Barbarian
                 name: 'Barbarian',
@@ -294,7 +380,9 @@ export const SRD_SOURCE_PACK: SourcePack = {
                 featuresByLevel: {
                     1: ['Rage', 'UnarmoredDefenseBarbarian'],
                     // ...
-                }
+                },
+                 spellcastingAbility: null,
+                 spellProgression: 'none',
              },
               "Monk": { // Added Monk
                  name: 'Monk',
@@ -310,7 +398,9 @@ export const SRD_SOURCE_PACK: SourcePack = {
                  featuresByLevel: {
                      1: ['UnarmoredDefenseMonk', 'MartialArts'],
                      // ...
-                 }
+                 },
+                  spellcastingAbility: null,
+                  spellProgression: 'none',
               },
         },
         items: {
@@ -348,6 +438,8 @@ export const SRD_SOURCE_PACK: SourcePack = {
              "Gaming Set": { name: "Gaming set", description: "Dice or cards.", weight: 0.5, cost: '1 sp', type: 'Tool' },
              "Disguise Kit": { name: "Disguise kit", description: "Tools for disguise.", weight: 3, cost: '25 gp', type: 'Tool'},
              "Quarterstaff": { name: 'Quarterstaff', description: 'Simple melee weapon', weight: 4, cost: '2 sp', type: 'Weapon', weaponCategory: 'Simple Melee', damageDice: '1d6', damageType: 'Bludgeoning', properties: ['Versatile (1d8)'] },
+             "Spellbook": { name: "Spellbook", description: "Required for Wizards to prepare spells.", weight: 3, cost: '50 gp', type: 'Adventuring Gear' },
+             "Component Pouch": { name: "Component Pouch", description: "A small pouch holding material components for spells.", weight: 2, cost: '25 gp', type: 'Adventuring Gear' },
 
         },
         monsters: {
@@ -396,7 +488,7 @@ export const SRD_SOURCE_PACK: SourcePack = {
              }
         },
         features: SRD_FEATURES,
+        spells: SRD_SPELLS, // Add spells here
     }
 };
 
-    

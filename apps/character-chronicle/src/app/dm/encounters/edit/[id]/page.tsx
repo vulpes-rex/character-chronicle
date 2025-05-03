@@ -1,7 +1,8 @@
 
 import { AppLayout } from '@/components/app-layout'; // Use alias
 import { EncounterForm } from '@/components/encounter-form'; // Use alias
-import { loadEncounter } from '@/services/encounter-service'; // Use alias
+import { loadEncounterAction } from '@/app/actions/encounter-actions'; // Use Server Action
+import { loadCampaignAction } from '@/app/actions/campaign-actions'; // Need campaign for permission check
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'; // Use alias
 import { AlertCircle } from 'lucide-react';
 
@@ -15,15 +16,30 @@ export default async function EditEncounterPage({ params }: EditEncounterPagePro
   const encounterId = params.id;
   let initialEncounterData = null;
   let errorLoading = null;
-  // TODO: Add permission checks based on campaign DM ID
+  // Placeholder for current user ID - replace with actual auth check
+  const currentUserId = "DM_USER_ID_PLACEHOLDER"; // Get this from server session/auth context
 
-  try {
-    initialEncounterData = await loadEncounter(encounterId);
-    // TODO: Add permission check here - ensure the logged-in user is the DM of the campaign (initialEncounterData.campaignId)
-  } catch (error) {
-    console.error("Failed to load encounter for editing:", error);
-    errorLoading = error instanceof Error ? error.message : 'An unknown error occurred.';
+  const encounterResult = await loadEncounterAction(encounterId);
+
+  if (!encounterResult.success) {
+      console.error("Failed to load encounter for editing:", encounterResult.error);
+      errorLoading = encounterResult.error || 'An unknown error occurred.';
+  } else if (!encounterResult.encounter) {
+      errorLoading = `Encounter with ID "${encounterId}" not found.`;
+  } else {
+      initialEncounterData = encounterResult.encounter;
+
+      // Fetch campaign to check DM permission
+      const campaignResult = await loadCampaignAction(initialEncounterData.campaignId);
+      if (!campaignResult.success || !campaignResult.campaign) {
+          errorLoading = `Failed to load campaign ${initialEncounterData.campaignId} for permission check.`;
+          initialEncounterData = null; // Prevent editing if campaign cannot be verified
+      } else if (campaignResult.campaign.dmId !== currentUserId) {
+          errorLoading = "Permission denied: You are not the DM of this encounter's campaign.";
+          initialEncounterData = null; // Prevent editing
+      }
   }
+
 
   return (
     <AppLayout>
@@ -37,6 +53,7 @@ export default async function EditEncounterPage({ params }: EditEncounterPagePro
           </Alert>
         )}
         {initialEncounterData ? (
+          // EncounterForm will use Server Actions for updates
           <EncounterForm initialData={initialEncounterData} />
         ) : (
           !errorLoading && (
@@ -51,3 +68,5 @@ export default async function EditEncounterPage({ params }: EditEncounterPagePro
     </AppLayout>
   );
 }
+
+    

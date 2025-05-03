@@ -1,10 +1,10 @@
 
 import { AppLayout } from '@/components/app-layout'; // Use alias
 import { CampaignForm } from '@/components/campaign-form'; // Use alias
-import { loadCampaign } from '@/services/campaign-service'; // Use alias
+import { loadCampaignAction } from '@/app/actions/campaign-actions'; // Use Server Action
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'; // Use alias
 import { AlertCircle } from 'lucide-react';
-// TODO: Import a way to get the current user ID server-side if possible, or handle auth client-side
+// TODO: Import a way to get the current user ID server-side if possible
 
 // This page should likely be protected and only accessible to the DM of the campaign.
 
@@ -16,20 +16,25 @@ export default async function EditCampaignPage({ params }: EditCampaignPageProps
   const campaignId = params.id;
   let initialCampaignData = null;
   let errorLoading = null;
-  // Placeholder for current user ID - replace with actual auth check
+  // Placeholder for current user ID - replace with actual auth check (e.g., from server session)
   const currentUserId = "DM_USER_ID_PLACEHOLDER"; // Get this from server session/auth context
 
-  try {
-    initialCampaignData = await loadCampaign(campaignId);
+  const { success, campaign, error } = await loadCampaignAction(campaignId);
+
+  if (!success) {
+    console.error("Failed to load campaign for editing:", error);
+    errorLoading = error || 'An unknown error occurred.';
+  } else if (!campaign) {
+    errorLoading = `Campaign with ID "${campaignId}" not found.`;
+  } else {
     // Permission Check: Ensure the logged-in user is the DM
-    if (initialCampaignData && initialCampaignData.dmId !== currentUserId) {
-        // Throw an error or set data to null to prevent editing
+    // This check should ideally happen within the action or using middleware
+    if (campaign.dmId !== currentUserId) {
         errorLoading = "Permission denied: You are not the DM of this campaign.";
         initialCampaignData = null; // Prevent passing data to form
+    } else {
+        initialCampaignData = campaign;
     }
-  } catch (error) {
-    console.error("Failed to load campaign for editing:", error);
-    errorLoading = error instanceof Error ? error.message : 'An unknown error occurred.';
   }
 
   return (
@@ -44,6 +49,7 @@ export default async function EditCampaignPage({ params }: EditCampaignPageProps
           </Alert>
         )}
         {initialCampaignData ? (
+          // CampaignForm will use Server Actions for updates
           <CampaignForm initialData={initialCampaignData} />
         ) : (
           !errorLoading && (
@@ -58,3 +64,5 @@ export default async function EditCampaignPage({ params }: EditCampaignPageProps
     </AppLayout>
   );
 }
+
+    

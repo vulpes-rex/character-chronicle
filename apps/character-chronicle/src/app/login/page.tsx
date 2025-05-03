@@ -1,4 +1,3 @@
-
 'use client';
 
 import { useState } from 'react';
@@ -13,7 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useToast } from '@/hooks/use-toast'; // Use alias
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'; // Use alias
 import { AlertCircle, Loader2 } from 'lucide-react';
-import { createUserProfile } from '@/services/user-service'; // Use alias
+import { createUserProfileAction } from '@/app/actions/user-actions'; // Use Server Action
 
 export default function LoginPage() {
   const [email, setEmail] = useState('');
@@ -32,7 +31,7 @@ export default function LoginPage() {
     try {
       await signInWithEmailAndPassword(auth, email, password);
       toast({ title: 'Login Successful', description: 'Welcome back!' });
-      router.push('/'); // Redirect to homepage after login
+      router.push('/'); // Redirect to homepage after login (will be handled by auth provider redirect)
     } catch (err: any) {
       console.error('Login Error:', err);
       setError(err.message || 'Failed to login. Please check your credentials.');
@@ -52,19 +51,25 @@ export default function LoginPage() {
     setIsLoading(true);
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-      // Create a basic user profile upon successful signup
-      await createUserProfile({
+      // Create a basic user profile upon successful signup using Server Action
+      const profileResult = await createUserProfileAction({
          id: userCredential.user.uid,
          email: userCredential.user.email,
          displayName: userCredential.user.email?.split('@')[0], // Default display name
          role: 'player', // Default role
       });
+
+      if (!profileResult.success) {
+          throw new Error(profileResult.error || 'Failed to create user profile.');
+      }
+
       toast({ title: 'Sign Up Successful', description: 'Welcome! Your account has been created.' });
-      router.push('/'); // Redirect to homepage after signup
+      router.push('/'); // Redirect to homepage after signup (will be handled by auth provider redirect)
     } catch (err: any) {
       console.error('Sign Up Error:', err);
       setError(err.message || 'Failed to sign up. Please try again.');
       toast({ variant: 'destructive', title: 'Sign Up Failed', description: err.message });
+      // Consider handling potential user deletion in Firebase Auth if profile creation fails
     } finally {
       setIsLoading(false);
     }
@@ -203,3 +208,5 @@ export default function LoginPage() {
     </div>
   );
 }
+
+    

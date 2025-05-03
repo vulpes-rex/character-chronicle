@@ -1,7 +1,7 @@
 
 import { AppLayout } from '@/components/app-layout'; // Use alias
 import { ContentPackForm } from '@/components/content-pack-form'; // Use alias
-import { loadSourcePack } from '@/services/campaign-service'; // Use alias
+import { loadSourcePackAction } from '@/app/actions/campaign-actions'; // Use Server Action
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'; // Use alias
 import { AlertCircle } from 'lucide-react';
 
@@ -15,13 +15,24 @@ export default async function EditContentPackPage({ params }: EditContentPackPag
   const packId = params.id;
   let initialPackData = null;
   let errorLoading = null;
+  // Placeholder for current user ID - replace with actual auth check
+  const currentUserId = "DM_USER_ID_PLACEHOLDER"; // Get this from server session/auth context
 
-  try {
-    initialPackData = await loadSourcePack(packId);
-    // TODO: Add permission check here - ensure the logged-in user is the creatorId
-  } catch (error) {
+  const { success, pack, error } = await loadSourcePackAction(packId);
+
+  if (!success) {
     console.error("Failed to load source pack for editing:", error);
-    errorLoading = error instanceof Error ? error.message : 'An unknown error occurred.';
+    errorLoading = error || 'An unknown error occurred.';
+  } else if (!pack) {
+    errorLoading = `Content pack with ID "${packId}" not found.`;
+  } else {
+      // TODO: Add permission check here - ensure the logged-in user is the creatorId
+      if (pack.creatorId !== currentUserId && pack.creatorId !== 'system') {
+           errorLoading = "Permission denied: You did not create this content pack.";
+           initialPackData = null;
+      } else {
+          initialPackData = pack;
+      }
   }
 
   return (
@@ -36,6 +47,7 @@ export default async function EditContentPackPage({ params }: EditContentPackPag
           </Alert>
         )}
         {initialPackData ? (
+          // ContentPackForm will use Server Actions for updates
           <ContentPackForm initialData={initialPackData} />
         ) : (
           !errorLoading && (
@@ -50,3 +62,5 @@ export default async function EditContentPackPage({ params }: EditContentPackPag
     </AppLayout>
   );
 }
+
+    

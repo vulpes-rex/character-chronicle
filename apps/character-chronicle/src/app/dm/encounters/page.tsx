@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { PlusCircle, Swords } from 'lucide-react';
 
 // This page should likely be protected and only accessible to DMs.
+// Authentication and role checks would happen in a middleware or higher-level component.
 
 export default function ManageEncountersPage() {
   return (
@@ -21,8 +22,11 @@ export default function ManageEncountersPage() {
               </Link>
            </Button>
         </div>
-        <EncounterList /> {/* Component to list, edit, delete encounters */}
+        {/* EncounterList component will list, edit, delete encounters using Server Actions */}
+        <EncounterList />
       </div>
     </AppLayout>
   );
 }
+
+    

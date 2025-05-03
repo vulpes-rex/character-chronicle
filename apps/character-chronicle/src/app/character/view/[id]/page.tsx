@@ -1,7 +1,7 @@
 
 import { CharacterSheet } from '@/components/character-sheet'; // Use alias
 import { AppLayout } from '@/components/app-layout'; // Use alias
-import { loadCharacter } from '@/services/character-service'; // Use alias
+import { loadCharacterAction } from '@/app/actions/character-actions'; // Use Server Action
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'; // Use alias
 import { AlertCircle } from 'lucide-react';
 import type { Character } from '@/lib/types'; // Use alias
@@ -18,12 +18,13 @@ export default async function ViewCharacterPage({ params }: ViewCharacterPagePro
   let characterData: Character | null = null;
   let errorLoading: string | null = null;
 
-  try {
-    // loadCharacter is a server action, safe to call directly
-    characterData = await loadCharacter(characterId);
-  } catch (error) {
-    console.error("Failed to load character:", error);
-    errorLoading = error instanceof Error ? error.message : 'An unknown error occurred.';
+  const { success, character, error } = await loadCharacterAction(characterId);
+
+  if (!success) {
+      console.error("Failed to load character:", error);
+      errorLoading = error || 'An unknown error occurred.';
+  } else {
+      characterData = character ?? null; // Assign null if character is undefined/null
   }
 
   return (
@@ -58,3 +59,5 @@ export default async function ViewCharacterPage({ params }: ViewCharacterPagePro
     </AppLayout>
   );
 }
+
+    

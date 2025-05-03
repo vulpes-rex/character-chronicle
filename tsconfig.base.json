@@ -1,4 +1,3 @@
-
 {
   "compilerOptions": {
     "rootDir": ".",
@@ -15,8 +14,8 @@
     "skipDefaultLibCheck": true,
     "baseUrl": ".",
     "paths": {
-      // Remove old "@/*" path that pointed to the deleted src folder
       "@/*": ["apps/character-chronicle/src/*"], // Point to the correct app's src
+      "@/nestjs/*": ["apps/api/src/*"], // Add path alias for NestJS modules
       "@character-chronicle/shared/data": ["libs/shared/data/src/index.ts"],
       "@character-chronicle/shared/firebase": [
         "libs/shared/firebase/src/index.ts"
@@ -35,3 +34,4 @@
   "exclude": ["node_modules", "tmp"]
 }
 
+    

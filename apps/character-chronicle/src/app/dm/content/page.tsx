@@ -21,8 +21,11 @@ export default function ManageContentPage() {
               </Link>
            </Button>
         </div>
-        <ContentManager /> {/* Component to list, edit, delete packs */}
+        {/* ContentManager component will list, edit, delete packs using Server Actions */}
+        <ContentManager />
       </div>
     </AppLayout>
   );
 }
+
+    

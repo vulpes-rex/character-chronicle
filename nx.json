@@ -1,4 +1,3 @@
-
 {
   "$schema": "./node_modules/nx/schemas/nx-schema.json",
   "defaultProject": "character-chronicle",
@@ -66,7 +65,23 @@
        "style": "none",
        "linter": "eslint"
      }
+  },
+  "targets": {
+    "serve:all": {
+      "executor": "nx:run-commands",
+      "options": {
+        "commands": [
+          {
+            "command": "nx serve character-chronicle",
+            "forwardAllArgs": false
+          },
+          {
+            "command": "nx serve api",
+            "forwardAllArgs": false
+          }
+        ],
+        "parallel": true
+      }
+    }
   }
 }
-
-       

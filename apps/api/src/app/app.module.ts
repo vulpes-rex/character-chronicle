@@ -1,8 +1,6 @@
 
 import { Module } from '@nestjs/common';
-
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
+import { ConfigModule } from '@nestjs/config'; // Import ConfigModule
 import { LoggingModule } from '../logging/logging.module';
 import { RulesModule } from '../rules/rules.module';
 import { FeaturesModule } from '../features/features.module';
@@ -11,14 +9,16 @@ import { CharacterModule } from '../character/character.module';
 import { CampaignModule } from '../campaign/campaign.module';
 import { EncounterModule } from '../encounter/encounter.module';
 import { UserModule } from '../user/user.module';
-import { ConfigModule } from '@nestjs/config'; // Import ConfigModule
+import { AppContainer } from './app-container'; // Import the container
 
 @Module({
   imports: [
-    ConfigModule.forRoot({ // Add ConfigModule.forRoot()
+    ConfigModule.forRoot({
       isGlobal: true, // Make config available globally
-      envFilePath: '.env', // Specify the env file path relative to root
+      envFilePath: ['.env.local', '.env'], // Specify env file paths
+      cache: true, // Enable caching
     }),
+    // Core Application Modules
     LoggingModule,
     RulesModule,
     FeaturesModule,
@@ -28,7 +28,10 @@ import { ConfigModule } from '@nestjs/config'; // Import ConfigModule
     EncounterModule,
     UserModule,
   ],
-  controllers: [AppController],
-  providers: [AppService],
+  providers: [AppContainer], // Provide the AppContainer
+  exports: [AppContainer], // Export if needed elsewhere (though usually accessed via getInstance)
+  // No controllers needed at the root level anymore
 })
 export class AppModule {}
+
+    

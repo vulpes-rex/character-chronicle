@@ -1,12 +1,11 @@
 
 import { AppLayout } from '@/components/app-layout'; // Use alias
 import { CharacterCreationWizard } from '@/components/character-creation/character-creation-wizard'; // Use alias
-import { loadCharacter } from '@/services/character-service'; // Use alias
+import { loadCharacterAction } from '@/app/actions/character-actions'; // Use Server Action
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'; // Use alias
 import { AlertCircle } from 'lucide-react';
 import type { Character } from '@/lib/types'; // Use alias
-import { Skeleton } from '@/components/ui/skeleton'; // Use alias
-import { useAuth } from '@/components/auth-provider'; // Use alias
+// import { useAuth } from '@/components/auth-provider'; // Auth check should happen server-side or via action
 
 // This page should likely be protected and only accessible to the owner of the character.
 
@@ -15,24 +14,25 @@ interface EditCharacterPageProps {
 }
 
 
-// Fetch character data server-side
+// Fetch character data server-side using Server Action
 async function getCharacterData(characterId: string): Promise<{ character: Character | null; error: string | null }> {
-    try {
-        const character = await loadCharacter(characterId);
-        if (!character) {
-            return { character: null, error: `Character with ID "${characterId}" not found.` };
-        }
-        // TODO: Add permission check here - compare character.playerId (if exists) or lookup ownership
-        // const { user } = useAuth(); // Cannot use hooks in Server Components directly for auth check like this
-        // Placeholder: Assume ownership check happens elsewhere or is skipped for now
-        // if (character.playerId !== currentUserId) {
-        //     return { character: null, error: 'You do not have permission to edit this character.' };
-        // }
-        return { character, error: null };
-    } catch (err: any) {
-        console.error(`Failed to load character ${characterId} for editing:`, err);
-        return { character: null, error: err.message || 'An unknown error occurred while loading the character.' };
+    const { success, character, error } = await loadCharacterAction(characterId);
+    if (!success) {
+        console.error(`Failed to load character ${characterId} for editing:`, error);
+        return { character: null, error: error || 'An unknown error occurred while loading the character.' };
     }
+    if (!character) {
+         return { character: null, error: `Character with ID "${characterId}" not found.` };
+    }
+
+    // TODO: Implement proper permission check server-side (e.g., using user session)
+    // Placeholder: Assume action handles permission or check here if possible
+    // const serverSession = await getServerSession(); // Example: Get session
+    // if (!serverSession || character.playerId !== serverSession.user.id) {
+    //     return { character: null, error: 'You do not have permission to edit this character.' };
+    // }
+
+    return { character, error: null };
 }
 
 
@@ -55,21 +55,17 @@ export default async function EditCharacterPage({ params }: EditCharacterPagePro
           <CharacterCreationWizard initialData={character} editMode={true} />
         ) : (
           !error && (
-            // Show loading state or a "not found" specific message if fetch returns null without error
+            // Show "not found" specific message if fetch returns null without error
             <Alert>
                <AlertCircle className="h-4 w-4" />
                <AlertTitle>Character Not Found</AlertTitle>
                <AlertDescription>The character with ID "{characterId}" could not be found or you don't have permission to edit it.</AlertDescription>
             </Alert>
-             // Or a skeleton loader:
-             // <div className="space-y-4">
-             //     <Skeleton className="h-8 w-1/4" />
-             //     <Skeleton className="h-4 w-full" />
-             //     <Skeleton className="h-64 w-full" />
-             // </div>
           )
         )}
       </div>
     </AppLayout>
   );
 }
+
+    

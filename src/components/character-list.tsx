@@ -132,7 +132,7 @@ export function CharacterList() {
               Player: {character.playerName || 'N/A'} | Alignment: {character.alignment || 'N/A'}
             </p>
              <p className="text-sm text-muted-foreground mt-2">
-                Last updated: {character.updatedAt ? character.updatedAt.toLocaleDateString() : 'N/A'}
+                Last updated: {character.updatedAt instanceof Date ? character.updatedAt.toLocaleDateString() : 'N/A'}
             </p>
           </CardContent>
           <CardFooter className="flex justify-end items-center gap-2">

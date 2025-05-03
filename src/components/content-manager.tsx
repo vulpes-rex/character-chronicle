@@ -125,7 +125,7 @@ export function ContentManager() {
                {Object.keys(pack.content.backgrounds || {}).length} Backgrounds
             </p>
              <p className="text-xs text-muted-foreground mt-1">
-                Last updated: {pack.updatedAt ? new Date(pack.updatedAt).toLocaleDateString() : 'N/A'}
+                Last updated: {pack.updatedAt instanceof Date ? pack.updatedAt.toLocaleDateString() : 'N/A'}
             </p>
           </CardContent>
           <CardFooter className="flex justify-end items-center gap-2">

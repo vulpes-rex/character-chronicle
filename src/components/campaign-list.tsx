@@ -98,7 +98,7 @@ export function CampaignList() {
              </div>
              {/* Potential: Show DM name? */}
              <p className="text-xs text-muted-foreground mt-2">
-                Last updated: {campaign.updatedAt ? new Date(campaign.updatedAt).toLocaleDateString() : 'N/A'}
+                Last updated: {campaign.updatedAt instanceof Date ? campaign.updatedAt.toLocaleDateString() : 'N/A'}
             </p>
           </CardContent>
           <CardFooter className="flex justify-end items-center gap-2">

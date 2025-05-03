@@ -127,7 +127,7 @@ export function EncounterList() {
                  Campaign ID: {encounter.campaignId.substring(0, 8)}... {/* Maybe show campaign name? */}
             </p>
              <p className="text-xs text-muted-foreground mt-1">
-                Last updated: {encounter.updatedAt ? new Date(encounter.updatedAt).toLocaleDateString() : 'N/A'}
+                Last updated: {encounter.updatedAt instanceof Date ? encounter.updatedAt.toLocaleDateString() : 'N/A'}
             </p>
           </CardContent>
           <CardFooter className="flex justify-end items-center gap-2">

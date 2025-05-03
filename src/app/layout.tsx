@@ -7,6 +7,7 @@ import { Providers } from '@/components/providers';
 import { AuthProvider } from '@/components/auth-provider'; // Import AuthProvider
 import React, { Suspense } from 'react'; // Import Suspense
 import { Skeleton } from '@/components/ui/skeleton'; // Import Skeleton for loading fallback
+import { DDDiceLoader } from '@/components/dddice-roller'; // Import DDDiceLoader
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
@@ -29,12 +30,13 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark"> {/* Default to dark mode */}
+    <html lang="en" className="dark">{/* Default to dark mode - Removed space after opening tag */}
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
         <Providers>
            <AuthProvider> {/* Wrap children with AuthProvider */}
               {/* Wrap children in Suspense for potential loading states */}
                <Suspense fallback={<RootLoadingSkeleton />}>
+                   <DDDiceLoader /> {/* Load DDDice assets */}
                   {children}
                </Suspense>
            </AuthProvider>

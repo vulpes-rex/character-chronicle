@@ -26,6 +26,7 @@ interface Step3Props {
 }
 
 export function Step3ClassSelection({ data, updateData, setValidity, availableClasses, combinedContent }: Step3Props) {
+    // Ensure data.selectedClasses is initialized if undefined
     const [selectedClasses, setSelectedClasses] = useState<{ [key: string]: number }>(data.selectedClasses || {});
     const [featureError, setFeatureError] = useState<string | null>(null);
 
@@ -65,17 +66,20 @@ export function Step3ClassSelection({ data, updateData, setValidity, availableCl
     // Update overall validity and parent state
     useEffect(() => {
         // Update Validity
-        setValidity(totalLevel > 0 && totalLevel <= 20 && !isLoadingFeatures && !featureError);
+        const isValidStep = totalLevel > 0 && totalLevel <= 20 && !isLoadingFeatures && !featureError;
+        setValidity(isValidStep);
 
         // Create update payload with current class selections
         const updatePayload: Partial<PartialCharacterFormData> = {
             class: Object.keys(selectedClasses)[0] || '', // Primary class for reference
             level: totalLevel || 1,
             selectedClasses: selectedClasses,
-             // Skills/Proficiencies derived from class/background are handled later or in final step
+             // Skills/Proficiencies derived from class/background are handled later or in final calculation
+             // Reset feature choices if class changes significantly? Maybe not, handled in Step 7
+             // featureChoices: { ...data.featureChoices } // Preserve existing choices initially
         };
 
-        // Compare specific parts before updating
+        // Compare specific parts before updating to avoid infinite loops
         const selectedClassesChanged = JSON.stringify(updatePayload.selectedClasses) !== JSON.stringify(data.selectedClasses);
         const levelChanged = updatePayload.level !== data.level;
 
@@ -91,8 +95,8 @@ export function Step3ClassSelection({ data, updateData, setValidity, availableCl
         featureError,
         setValidity,
         updateData,
-        data.selectedClasses,
-        data.level // Include level in dependency to update parent if totalLevel changes
+        data.selectedClasses, // Compare against existing data
+        data.level // Compare against existing data
     ]);
 
 
@@ -107,6 +111,7 @@ export function Step3ClassSelection({ data, updateData, setValidity, availableCl
         setSelectedClasses(prev => {
             const newState = { ...prev };
             delete newState[className];
+            // Reset feature choices related to this class? Needs careful consideration.
             return newState;
         });
     };
@@ -118,6 +123,7 @@ export function Step3ClassSelection({ data, updateData, setValidity, availableCl
             const level = newState[oldName];
             delete newState[oldName];
             newState[newName] = level;
+             // Reset feature choices related to the old class?
             return newState;
         });
     };
@@ -133,6 +139,7 @@ export function Step3ClassSelection({ data, updateData, setValidity, availableCl
          if (newLevel < 1) newLevel = 1;
 
         setSelectedClasses(prev => ({ ...prev, [className]: newLevel }));
+         // Reset feature choices if level decreases?
     };
 
 
@@ -179,6 +186,7 @@ export function Step3ClassSelection({ data, updateData, setValidity, availableCl
                                         <SelectValue placeholder="Select Class..." />
                                     </SelectTrigger>
                                     <SelectContent>
+                                        {availableClasses.length === 0 && <SelectItem value="" disabled>Loading classes...</SelectItem>}
                                         {availableClasses.map(c => (
                                             <SelectItem
                                                 key={c.name}

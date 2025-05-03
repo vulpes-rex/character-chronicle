@@ -8,10 +8,10 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/hooks/use-toast';
 import { saveCharacter, updateCharacter } from '@/services/character-service'; // Import updateCharacter
 import type { Character, EquipmentItem, Feature, HitPointsState, HitDiceState, CharacterClass as CharacterClassType, SourcePack } from '@/lib/types';
-import { getCharacterClasses, getCharacterRaces, getCumulativeClassFeatures, getAvailableEquipmentItems, getBackgroundDetails } from '@/services/dnd-api'; // Updated imports
-import { getBackgroundFeatures, getRaceFeatures } from '@/services/feature-service'; // Import feature service for background/race features
+import { getCharacterClasses, getCharacterRaces, getAvailableEquipmentItems, getBackgroundDetails } from '@/services/dnd-api'; // Keep base data fetchers
+import { getBackgroundFeatures, getRaceFeatures, getClassFeatures } from '@/services/feature-service'; // Import feature service
 import { calculateSkillModifier, SKILL_ABILITY_MAP, ALL_SKILLS, rollDice } from '@/lib/types';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueries } from '@tanstack/react-query'; // Use useQuery and useQueries
 import { Progress } from '@/components/ui/progress';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { AlertCircle, Loader2 } from 'lucide-react';
@@ -29,127 +29,152 @@ import { Step6Equipment } from './step-6-equipment';
 import { Step7Features } from './step-7-features'; // Import the new step
 
 export type PartialCharacterFormData = Partial<Omit<Character, 'id' | 'createdAt' | 'updatedAt' | 'hitPoints' | 'hitDice' | 'features' | 'proficiencies' | 'skills' | 'equipment'> & {
-    // Allow nested partials for stats and equipment
     stats?: Partial<Character['stats']>;
-    equipment?: Partial<EquipmentItem>[]; // Allow partial items during build
-    skills?: Partial<Record<string, boolean>>; // Track skill proficiency selections explicitly
-    selectedClasses?: { [key: string]: number }; // Track selected classes and levels
-    // Track choices made for features
-    featureChoices?: Record<string, string | string[]>; // { 'Fighting Style': 'Archery', 'ExtraLanguage': 'Elvish' }
-    // Remove tempFeatures and tempProficiencies - steps update core data directly
-    activeSourcePackIds?: string[]; // Track selected source packs (relevant if selectable during creation)
+    equipment?: Partial<EquipmentItem>[];
+    skills?: Partial<Record<string, boolean>>;
+    selectedClasses?: { [key: string]: number };
+    featureChoices?: Record<string, string | string[]>;
+    activeSourcePackIds?: string[];
 }>;
 
-// Helper to map full Character to PartialCharacterFormData for initialization
 const mapCharacterToFormData = (char: Character): PartialCharacterFormData => ({
     playerName: char.playerName,
     characterName: char.characterName,
     race: char.race,
-    class: char.class, // Keep for backward compatibility/reference if needed
+    class: char.class,
     level: char.level,
     background: char.background,
     alignment: char.alignment,
-    stats: char.stats, // Save the base stats as they are stored
-    skills: char.skills, // Direct skill proficiencies saved
-    equipment: (char.equipment as Partial<EquipmentItem>[])?.map(item => ({ ...item, name: item.name, quantity: item.quantity ?? 1})) || [], // Ensure name and quantity are present
+    stats: char.stats,
+    skills: char.skills,
+    equipment: (char.equipment as Partial<EquipmentItem>[])?.map(item => ({ ...item, name: item.name, quantity: item.quantity ?? 1 })) || [],
     backstory: char.backstory,
     appearance: char.appearance,
-    // Correctly initialize selectedClasses from character's class and level
-    selectedClasses: char.class ? { [char.class]: char.level } : {}, // Simple single class representation for now
-    featureChoices: char.featureChoices || {}, // Initialize feature choices
-    // Don't map features or proficiencies here, let loadCharacter handle derivation
-    activeSourcePackIds: ['srd'], // Default or needs fetching based on context (e.g., campaign)
+    selectedClasses: char.class ? { [char.class]: char.level } : {},
+    featureChoices: char.featureChoices || {},
+    activeSourcePackIds: ['srd'], // Default or needs fetching
 });
 
 
 interface CharacterCreationWizardProps {
-    initialData?: Character; // Optional initial data for editing
-    editMode?: boolean; // Flag for edit mode
+    initialData?: Character;
+    editMode?: boolean;
 }
 
 export function CharacterCreationWizard({ initialData, editMode = false }: CharacterCreationWizardProps) {
-    const TOTAL_STEPS = editMode ? 6 : 7; // Added Features step
+    const TOTAL_STEPS = editMode ? 6 : 7;
     const [currentStep, setCurrentStep] = useState(1);
     const [characterData, setCharacterData] = useState<PartialCharacterFormData>(
         initialData ? mapCharacterToFormData(initialData) : {
             playerName: '',
             characterName: '',
             race: '',
-            // class: '', // Remove direct initialization of class? Rely on selectedClasses
             level: 1,
             background: '',
             alignment: '',
-            stats: { strength: 10, dexterity: 10, constitution: 10, intelligence: 10, wisdom: 10, charisma: 10 }, // Initial base stats
-            skills: ALL_SKILLS.reduce((acc, skill) => { acc[skill] = false; return acc; }, {} as Record<string, boolean>), // Initialize all skills to not proficient
+            stats: { strength: 10, dexterity: 10, constitution: 10, intelligence: 10, wisdom: 10, charisma: 10 },
+            skills: ALL_SKILLS.reduce((acc, skill) => { acc[skill] = false; return acc; }, {} as Record<string, boolean>),
             equipment: [],
             backstory: '',
             appearance: '',
-            selectedClasses: {}, // Start empty
-            featureChoices: {}, // Initialize empty feature choices
-            // Removed tempFeatures and tempProficiencies
-            activeSourcePackIds: ['srd'], // Default to SRD
+            selectedClasses: {},
+            featureChoices: {},
+            activeSourcePackIds: ['srd'],
         }
     );
-    const [isValid, setIsValid] = useState(false); // Track if current step data is valid
+    const [isValid, setIsValid] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const [apiError, setApiError] = useState<string | null>(null);
     const router = useRouter();
     const { toast } = useToast();
 
-    // Fetch combined content based on active packs (defaults to 'srd')
-    // Use characterData.activeSourcePackIds which might be updated by a campaign selection step if added later
+    // Fetch combined content
     const { data: combinedContent, isLoading: isLoadingContent } = useQuery<SourcePack['content'], Error>({
         queryKey: ['combinedContent', characterData.activeSourcePackIds],
         queryFn: () => getCombinedContentFromPacks(characterData.activeSourcePackIds || ['srd']),
-        staleTime: 5 * 60 * 1000, // Cache for 5 minutes
-        enabled: true, // Always enabled, will refetch if activeSourcePackIds changes
+        staleTime: 5 * 60 * 1000,
+        enabled: true,
     });
 
-
-    // Fetch classes, races, etc. using the combined content
-     const { data: availableClasses = [], isLoading: isLoadingClasses } = useQuery<CharacterClassType[], Error>({
-        queryKey: ['characterClasses', combinedContent], // Include combinedContent in key
+    // Fetch base data (classes, races)
+    const { data: availableClasses = [], isLoading: isLoadingClasses } = useQuery<CharacterClassType[], Error>({
+        queryKey: ['characterClasses', combinedContent],
         queryFn: () => getCharacterClasses(combinedContent),
-        enabled: !!combinedContent, // Enable only when content is loaded
+        enabled: !!combinedContent,
         staleTime: Infinity,
     });
 
-    const { data: availableRaces = [], isLoading: isLoadingRaces } = useQuery<Awaited<ReturnType<typeof getCharacterRaces>>, Error>({
-        queryKey: ['characterRaces', combinedContent], // Include combinedContent in key
+    const { data: availableRaces = [], isLoading: isLoadingRaces } = useQuery<CharacterRace[], Error>({
+        queryKey: ['characterRaces', combinedContent],
         queryFn: () => getCharacterRaces(combinedContent),
-        enabled: !!combinedContent, // Enable only when content is loaded
+        enabled: !!combinedContent,
         staleTime: Infinity,
     });
 
-     // Fetch cumulative features for the current class/level selection
-     const currentLevel = Object.values(characterData.selectedClasses ?? {}).reduce((sum, lvl) => sum + lvl, 0) || 1;
-     const primaryClass = Object.keys(characterData.selectedClasses || {})[0];
-     const { data: cumulativeFeatures = [], isLoading: isLoadingFeatures } = useQuery<Feature[], Error>({
-        queryKey: ['cumulativeFeatures', primaryClass, currentLevel, combinedContent],
-        queryFn: () => primaryClass && combinedContent ? getCumulativeClassFeatures(primaryClass, currentLevel, combinedContent) : Promise.resolve([]),
-        enabled: !!primaryClass && currentLevel > 0 && !!combinedContent,
+    // --- Fetch all relevant features based on selections ---
+     const selectedRace = characterData.race;
+     const selectedBg = characterData.background;
+     const selectedClassEntries = Object.entries(characterData.selectedClasses ?? {});
+
+     // Fetch race features
+     const { data: raceFeatures = [], isLoading: isLoadingRaceFeatures } = useQuery<Feature[], Error>({
+         queryKey: ['raceFeatures', selectedRace, combinedContent],
+         queryFn: () => selectedRace && combinedContent ? getRaceFeatures(selectedRace, combinedContent) : Promise.resolve([]),
+         enabled: !!selectedRace && !!combinedContent,
      });
 
-    const isFetchingInitialData = isLoadingContent || isLoadingClasses || isLoadingRaces || isLoadingFeatures;
+     // Fetch background features
+     const { data: backgroundFeatures = [], isLoading: isLoadingBgFeatures } = useQuery<Feature[], Error>({
+         queryKey: ['backgroundFeatures', selectedBg, combinedContent],
+         queryFn: () => selectedBg && combinedContent ? getBackgroundFeatures(selectedBg, combinedContent) : Promise.resolve([]),
+         enabled: !!selectedBg && !!combinedContent,
+     });
+
+     // Fetch class features for each selected class/level pair
+     const classFeatureQueries = useMemo(() => selectedClassEntries
+         .filter(([_, level]) => level > 0)
+         .map(([className, level]) => ({
+             queryKey: ['classFeatures', className, level, combinedContent],
+             queryFn: () => getClassFeatures(className, level, combinedContent!),
+             enabled: !!combinedContent,
+             staleTime: Infinity,
+         })), [selectedClassEntries, combinedContent]);
+
+     const classFeatureResults = useQueries({ queries: classFeatureQueries });
+     const isLoadingClassFeatures = classFeatureResults.some(result => result.isLoading);
+     const allClassFeatures = useMemo(() => classFeatureResults.flatMap(result => result.data ?? []), [classFeatureResults]);
+
+     // Combine all features
+     const allFeatures = useMemo(() => [...raceFeatures, ...backgroundFeatures, ...allClassFeatures], [raceFeatures, backgroundFeatures, allClassFeatures]);
+     const isFetchingFeatures = isLoadingRaceFeatures || isLoadingBgFeatures || isLoadingClassFeatures;
 
 
-    // Memoize updateCharacterData to prevent re-renders in child components
-     const updateCharacterData = useCallback((newData: Partial<PartialCharacterFormData>) => {
-        console.log("Wizard: Updating parent data with:", newData); // Debug log
-        setCharacterData(prev => ({ ...prev, ...newData }));
-    }, []); // No dependencies, function identity is stable
+    const isFetchingInitialData = isLoadingContent || isLoadingClasses || isLoadingRaces || isFetchingFeatures;
 
 
-    // Memoize setValidity using useCallback
+    // Update character data state
+    const updateCharacterData = useCallback((newData: Partial<PartialCharacterFormData>) => {
+       console.log("Wizard: Updating parent data with:", newData);
+        setCharacterData(prev => {
+            // Avoid unnecessary updates if data hasn't changed
+             if (JSON.stringify({ ...prev, ...newData }) === JSON.stringify(prev)) {
+                 return prev;
+             }
+            return { ...prev, ...newData };
+        });
+    }, []);
+
+
+    // Set validity callback
      const setValidityCallback = useCallback((valid: boolean) => {
          setIsValid(valid);
-     }, []); // Dependency on the state setter function
+     }, []);
 
 
     const handleNext = () => {
         if (isValid) {
             setCurrentStep(prev => Math.min(prev + 1, TOTAL_STEPS));
-            setIsValid(false); // Reset validity for the next step using the state setter
+            setIsValid(false); // Reset validity for the next step
         } else {
             toast({ variant: 'destructive', title: 'Incomplete Step', description: 'Please complete the required fields.' });
         }
@@ -157,18 +182,18 @@ export function CharacterCreationWizard({ initialData, editMode = false }: Chara
 
     const handlePrevious = () => {
         setCurrentStep(prev => Math.max(prev - 1, 1));
-        setIsValid(true); // Assume previous step was valid, use state setter
+        setIsValid(true); // Assume previous step was valid
     };
 
 
     const handleFinalSubmit = async () => {
-        console.log("Wizard: Final Submit Triggered. Current State:", characterData); // Debug log
+        console.log("Wizard: Final Submit Triggered. Current State:", characterData);
         if (!isValid) {
             toast({ variant: 'destructive', title: 'Incomplete Step', description: 'Please complete the final step.' });
             return;
         }
-        if (!combinedContent) {
-             toast({ variant: 'destructive', title: 'Data Error', description: 'Core content data failed to load. Cannot save character.' });
+        if (!combinedContent || isFetchingInitialData) {
+             toast({ variant: 'destructive', title: 'Data Error', description: 'Core content data or features are still loading. Cannot save character.' });
              return;
         }
         setIsLoading(true);
@@ -177,63 +202,71 @@ export function CharacterCreationWizard({ initialData, editMode = false }: Chara
         try {
              // --- Aggregate chosen data ---
              const finalLevel = Object.values(characterData.selectedClasses ?? {}).reduce((sum, lvl) => sum + lvl, 0) || 1;
-             let primaryClassKey = Object.keys(characterData.selectedClasses || {})[0] || '';
+             const primaryClassKey = Object.keys(characterData.selectedClasses || {})[0] || '';
 
               if (!characterData.race) throw new Error("Character race selection is missing.");
               if (!primaryClassKey) throw new Error("Character class selection is missing.");
 
-             // --- Fetch ALL Features based on final selections ---
-             const raceFeatures = await getRaceFeatures(characterData.race, combinedContent);
-             const classFeatures = await getCumulativeClassFeatures(primaryClassKey, finalLevel, combinedContent);
-             const backgroundFeatures = characterData.background ? await getBackgroundFeatures(characterData.background, combinedContent) : [];
-             const allFeatures = [...raceFeatures, ...classFeatures, ...backgroundFeatures];
-
-             // Apply choices to feature list (e.g., replace "Fighting Style" with "Fighting Style: Archery")
-             // This is a simplified approach; a more robust system might store the choice alongside the base feature.
+            // --- Apply feature choices to the combined feature list ---
+            // Feature choices modify the effective list of features
              const featuresWithChoicesApplied = allFeatures.map(feature => {
                  if (feature.metadata?.effectType === 'choiceGrant') {
                     const choiceKey = feature.metadata.choiceKey;
                     const choice = characterData.featureChoices?.[choiceKey];
                      if (choice && typeof choice === 'string' && feature.metadata.options.includes(choice)) {
-                         // Create a specific feature based on the choice
-                         // This assumes the choice name maps directly to a more specific feature definition
-                         // For example, choosing "Archery" for "Fighting Style" might link to a "Fighting Style: Archery" feature
-                         // If not, we just keep the original feature name but might add the choice to its description/notes later.
-                         // Let's assume for now the choice IS the specific feature name fragment.
-                         const specificFeatureName = `${feature.name}: ${choice}`;
-                         // Try to find the definition for the specific feature choice
-                         // Look in combined content first, then potentially a base definition map if needed elsewhere
-                         const specificFeatureDef = combinedContent?.features?.[specificFeatureName];
-                         if (specificFeatureDef) {
-                            return { ...specificFeatureDef, name: specificFeatureName, source: feature.source };
-                         } else {
-                             // If no specific definition, return the original feature but maybe note the choice?
-                             // Or filter it out? For now, return original.
-                              console.warn(`Specific definition for choice "${choice}" of feature "${feature.name}" not found.`);
-                             return feature;
-                         }
+                          // Attempt to find the specific feature definition based on the choice
+                         // Assumes the choice name might directly map or form part of the specific feature name
+                         const specificFeatureKey = `${feature.name}: ${choice}`; // Example convention
+                         const specificFeatureDef = allFeatures.find(f => f.name === specificFeatureKey) || combinedContent?.features?.[specificFeatureKey];
+
+                          if (specificFeatureDef) {
+                             // Return the specific feature definition
+                              return {
+                                  ...specificFeatureDef,
+                                  name: specificFeatureKey, // Ensure name reflects the choice
+                                  source: feature.source,
+                                  // Carry over other essential properties if needed
+                              };
+                          } else {
+                             console.warn(`Specific definition for choice "${choice}" of feature "${feature.name}" not found.`);
+                             // Return the original generic feature? Or filter it out?
+                             // Return original for now, but mark it somehow?
+                             return { ...feature, description: `${feature.description} (Chosen: ${choice})`};
+                          }
+                     } else {
+                         // If no valid choice is made for a required choice feature, potentially filter it out
+                          console.warn(`No valid choice made for feature "${feature.name}".`);
+                         return null; // Indicate removal or invalid state
                      }
                  } else if (feature.metadata?.effectType === 'proficiencyGrant' && feature.metadata.choose && feature.metadata.options) {
-                      const choiceKey = feature.metadata.choiceKey || feature.name; // Use choiceKey or feature name
-                      const choices = characterData.featureChoices?.[choiceKey];
-                      if (choices && Array.isArray(choices)) {
-                          // Modify the feature to reflect the chosen proficiencies
-                          return {
-                              ...feature,
-                              description: `${feature.description} Chosen: ${choices.join(', ')}.`,
-                              // Optionally replace metadata proficiencies with chosen ones if applying rules here
-                          };
-                      }
+                     const choiceKey = feature.metadata.choiceKey || feature.name;
+                     const choices = characterData.featureChoices?.[choiceKey];
+                     if (choices && Array.isArray(choices) && choices.length === feature.metadata.choose) {
+                         // Modify the feature to reflect chosen proficiencies (for saving/reference)
+                         return {
+                             ...feature,
+                             metadata: {
+                                 ...feature.metadata,
+                                 proficiencies: choices, // Store the chosen proficiencies directly in metadata for saving
+                                 choose: undefined, // Indicate choice has been made
+                                 options: undefined,
+                             }
+                         };
+                     } else {
+                         // If choice not made or invalid count, potentially filter out
+                         console.warn(`Invalid or missing choices for proficiency feature "${feature.name}".`);
+                         return null; // Indicate removal or invalid state
+                     }
                  }
-                 return feature;
-             }).filter(f => f.metadata?.effectType !== 'choiceGrant'); // Remove the generic choice features
+                 return feature; // Return other features unchanged
+             }).filter((f): f is Feature => f !== null && f.metadata?.effectType !== 'choiceGrant'); // Filter out nulls and generic choiceGrant features
+
 
              // --- Calculate BASE Stats, HitPoints, HitDice (without derived rules applied yet) ---
              const baseStats = characterData.stats || { strength: 10, dexterity: 10, constitution: 10, intelligence: 10, wisdom: 10, charisma: 10 };
-             // Apply STAT bonuses from features TO BASE STATS - this is complex with Tasha's etc.
-             // Step 4 handles applying racial bonuses based on choices. We trust the `characterData.stats` from that step.
              const statsAfterRacial = { ...baseStats }; // Start with stats potentially modified by Step 4
 
+             // --- Calculate derived values based on final base stats and features ---
              // We need the final CON modifier AFTER applying potential feature bonuses here
              let tempCon = statsAfterRacial.constitution;
              featuresWithChoicesApplied.forEach(f => {
@@ -248,17 +281,17 @@ export function CharacterCreationWizard({ initialData, editMode = false }: Chara
              let primaryHitDie: HitDiceState['dieType'] = null;
 
             Object.entries(characterData.selectedClasses ?? { [primaryClassKey]: finalLevel }).forEach(([className, level], index) => {
-                const classData = combinedContent?.classes?.[className];
+                const classData = availableClasses.find(c => c.name === className); // Use fetched class data
                 if (!classData) return;
                 const classHitDieSides = parseInt(classData.hitDie.substring(1), 10);
                 if (index === 0) primaryHitDie = classData.hitDie;
 
-                if (index === 0) { // First class (or only class)
+                if (index === 0) {
                     finalMaxHp = classHitDieSides + finalConModifier;
                     if (level > 1) {
                         finalMaxHp += (level - 1) * (Math.ceil((classHitDieSides + 1) / 2) + finalConModifier);
                     }
-                } else { // Multiclass levels
+                } else {
                     for (let i = 0; i < level; i++) {
                         finalMaxHp += Math.ceil((classHitDieSides + 1) / 2) + finalConModifier;
                     }
@@ -277,23 +310,31 @@ export function CharacterCreationWizard({ initialData, editMode = false }: Chara
                  dieType: primaryHitDie,
              };
 
+             // --- Build Base Proficiencies from Class/Background/Race ---
+             // Note: applyFeatureRules service now handles merging these based on feature metadata
+             const initialProficiencies = {
+                 armor: [], weapons: [], tools: [], savingThrows: [], languages: [],
+             };
+             const initialSkills = ALL_SKILLS.reduce((acc, skill) => { acc[skill] = false; return acc; }, {} as Record<string, boolean>);
+
+
             // --- Construct final Character object for saving ---
-            // IMPORTANT: Save BASE stats, not derived ones. Save selected skills, not derived modifiers.
+            // IMPORTANT: Save BASE stats, chosen skills, features (including applied choices).
              const characterToSave: Partial<Omit<Character, 'id' | 'createdAt'>> & {id?: string} = {
                  id: initialData?.id,
                  playerName: characterData.playerName || '',
                  characterName: characterData.characterName || '',
                  race: characterData.race || '',
-                 class: primaryClassKey, // Store primary class key
+                 class: primaryClassKey,
                  level: finalLevel,
                  background: characterData.background || '',
                  alignment: characterData.alignment || '',
-                 stats: statsAfterRacial, // Save the BASE stats from the wizard state (including racial bonus application from Step 4)
-                 skills: characterData.skills || {}, // Save only the *selected* skill proficiencies
-                 hitPoints: finalHitPoints, // Save calculated HP
-                 hitDice: finalHitDice, // Save calculated Hit Dice
+                 stats: statsAfterRacial, // Save the BASE stats (with racial adjustments from Step 4)
+                 skills: characterData.skills || initialSkills, // Save the skill PROFICIENCY selections made
+                 hitPoints: finalHitPoints,
+                 hitDice: finalHitDice,
                  equipment: (characterData.equipment as EquipmentItem[])?.map(item => ({ // Ensure full item structure
-                    name: item.name || 'Unnamed Item', // Ensure name exists
+                    name: item.name || 'Unnamed Item',
                     quantity: item.quantity ?? 1,
                     description: item.description,
                     weight: item.weight,
@@ -311,20 +352,13 @@ export function CharacterCreationWizard({ initialData, editMode = false }: Chara
                     strengthRequirement: item.strengthRequirement,
                     stealthDisadvantage: item.stealthDisadvantage,
                  })) || [],
-                 proficiencies: { // Start with empty base proficiencies - features will add them on load
-                      armor: [],
-                      weapons: [],
-                      tools: [],
-                      savingThrows: [],
-                      languages: [],
-                 },
-                 features: featuresWithChoicesApplied, // Save the feature objects including choices applied
-                 featureChoices: characterData.featureChoices || {}, // Persist the choices made
+                 proficiencies: initialProficiencies, // Save INITIAL proficiencies; derived ones come from features
+                 features: featuresWithChoicesApplied, // Save the *final* list of features after applying choices
+                 featureChoices: characterData.featureChoices || {},
                  backstory: characterData.backstory || '',
                  appearance: characterData.appearance || '',
-                 campaignId: initialData?.campaignId, // Preserve campaign ID if editing
+                 campaignId: initialData?.campaignId,
              };
-
 
             // Remove temporary or undefined fields before saving
             delete (characterToSave as any).selectedClasses;
@@ -333,10 +367,9 @@ export function CharacterCreationWizard({ initialData, editMode = false }: Chara
             if (editMode && initialData?.id) {
                 await updateCharacter(initialData.id, characterToSave);
                 toast({ title: 'Character Updated', description: `${characterToSave.characterName} has been successfully updated.` });
-                router.push(`/character/view/${initialData.id}`); // Redirect to view page
-                router.refresh(); // Force refresh to show updated data
+                router.push(`/character/view/${initialData.id}`);
+                router.refresh();
             } else {
-                // Remove ID for creation
                 delete characterToSave.id;
                 const newId = await saveCharacter(characterToSave as Omit<Character, 'id' | 'createdAt' | 'updatedAt'>);
                 toast({ title: 'Character Created', description: `${characterToSave.characterName} has been successfully created.` });
@@ -353,37 +386,30 @@ export function CharacterCreationWizard({ initialData, editMode = false }: Chara
     };
 
     const renderStep = () => {
-        // Pass combinedContent to steps that need it
         switch (currentStep) {
             case 1:
                 return <Step1BasicInfo data={characterData} updateData={updateCharacterData} setValidity={setValidityCallback} />;
             case 2:
-                // Pass combinedContent to Step2RaceSelection for trait details
                 return <Step2RaceSelection data={characterData} updateData={updateCharacterData} setValidity={setValidityCallback} availableRaces={availableRaces} combinedContent={combinedContent} />;
             case 3:
-                // Pass combinedContent to Step3ClassSelection for feature details
                 return <Step3ClassSelection data={characterData} updateData={updateCharacterData} setValidity={setValidityCallback} availableClasses={availableClasses} combinedContent={combinedContent} />;
             case 4:
-                // Race data is needed here for racial bonus display/Tasha's rule interaction
                 return <Step4AbilityScores data={characterData} updateData={updateCharacterData} setValidity={setValidityCallback} availableRaces={availableRaces} editMode={editMode} />;
             case 5:
-                 // Pass combinedContent to Step5Background for details and suggestions
                 return <Step5Background data={characterData} updateData={updateCharacterData} setValidity={setValidityCallback} combinedContent={combinedContent} />;
-             case 6: // Features step (moved equipment to last)
+             case 6: // Features step
                 return <Step7Features
                             data={characterData}
                             updateData={updateCharacterData}
                             setValidity={setValidityCallback}
-                            allFeatures={cumulativeFeatures} // Pass features derived from class/race/background
-                            isLoadingFeatures={isLoadingFeatures}
-                            combinedContent={combinedContent} // Pass content for fetching feature options if needed
+                            allFeatures={allFeatures} // Pass all derived features
+                            isLoadingFeatures={isFetchingFeatures}
+                            combinedContent={combinedContent}
                         />;
-            case 7: // Equipment Step (Now last)
+            case 7: // Equipment Step
                  if (!editMode) {
-                     // Pass combinedContent to Step6Equipment for item definitions
                     return <Step6Equipment data={characterData} updateData={updateCharacterData} setValidity={setValidityCallback} combinedContent={combinedContent} />;
                  }
-                 // In edit mode, step 6 (Features) is the last step
                  return <div>Character details saved. Navigate back or view sheet.</div>;
             default:
                 return <div>Invalid Step</div>;

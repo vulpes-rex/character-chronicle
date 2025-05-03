@@ -27,7 +27,7 @@ const BASE_FEATURE_DEFINITIONS: Record<string, Feature> = {
     "HumanASI": {
         name: "Ability Score Increase",
         description: "Your ability scores each increase by 1.",
-        source: "Human Race (Base)",
+        source: "Human",
         metadata: {
             effectType: "statBonus",
             stats: { strength: 1, dexterity: 1, constitution: 1, intelligence: 1, wisdom: 1, charisma: 1 },
@@ -36,7 +36,7 @@ const BASE_FEATURE_DEFINITIONS: Record<string, Feature> = {
     "ExtraLanguage": {
         name: "Extra Language",
         description: "You can speak, read, and write one extra language of your choice.",
-        source: "Human Race (Base)",
+        source: "Human",
         metadata: { // Add metadata for choice
             effectType: "proficiencyGrant",
             type: "language",
@@ -49,12 +49,12 @@ const BASE_FEATURE_DEFINITIONS: Record<string, Feature> = {
     "Darkvision": {
         name: "Darkvision",
         description: "Accustomed to twilit forests and the night sky, you have superior vision in dark and dim conditions. You can see in dim light within 60 feet of you as if it were bright light, and in darkness as if it were dim light.",
-        source: "Elf/Dwarf Race (Base)",
+        source: "Elf/Dwarf",
     },
     "FeyAncestry": {
         name: "Fey Ancestry",
         description: "You have advantage on saving throws against being charmed, and magic can't put you to sleep.",
-        source: "Elf Race (Base)",
+        source: "Elf",
         metadata: {
             effectType: "advantage",
             target: "savingThrow",
@@ -64,12 +64,12 @@ const BASE_FEATURE_DEFINITIONS: Record<string, Feature> = {
     "Trance": {
         name: "Trance",
         description: "Elves don’t need to sleep. Instead, they meditate deeply, remaining semiconscious, for 4 hours a day.",
-        source: "Elf Race (Base)",
+        source: "Elf",
     },
     "DwarvenResilience": {
         name: "Dwarven Resilience",
         description: "You have advantage on saving throws against poison, and you have resistance against poison damage.",
-        source: "Dwarf Race (Base)",
+        source: "Dwarf",
         metadata: {
             effectType: "resistance",
             damageType: "Poison",
@@ -79,13 +79,13 @@ const BASE_FEATURE_DEFINITIONS: Record<string, Feature> = {
     "Stonecunning": {
         name: "Stonecunning",
         description: "Whenever you make an Intelligence (History) check related to the origin of stonework, you are considered proficient in the History skill and add double your proficiency bonus to the check, instead of your normal proficiency bonus.",
-        source: "Dwarf Race (Base)",
+        source: "Dwarf",
         // Note: Expertise/double proficiency bonus needs specific handling, possibly a new metadata type or logic in skill calculation
     },
     "Lucky": {
         name: "Lucky",
         description: "When you roll a 1 on an attack roll, ability check, or saving throw, you can reroll the die and must use the new roll.",
-        source: "Halfling Race (Base)",
+        source: "Halfling",
         isActionable: true, // Or maybe passive reaction?
         maxUses: null,
         usesResetOn: null,
@@ -93,7 +93,7 @@ const BASE_FEATURE_DEFINITIONS: Record<string, Feature> = {
     "Brave": {
         name: "Brave",
         description: "You have advantage on saving throws against being frightened.",
-        source: "Halfling Race (Base)",
+        source: "Halfling",
         metadata: {
             effectType: "advantage",
             target: "savingThrow",
@@ -103,14 +103,14 @@ const BASE_FEATURE_DEFINITIONS: Record<string, Feature> = {
     "HalflingNimbleness": {
         name: "Halfling Nimbleness",
         description: "You can move through the space of any creature that is of a size larger than yours.",
-        source: "Halfling Race (Base)",
+        source: "Halfling",
     },
 
     // Class Features (Definitions)
      "FightingStyle": { // Generic Fighting Style feature
         name: "Fighting Style",
         description: "You adopt a particular style of fighting as your specialty. Choose one option.",
-        source: "Fighter Class (Base)",
+        source: "Fighter",
         metadata: {
             effectType: "choiceGrant",
             choose: 1,
@@ -122,14 +122,14 @@ const BASE_FEATURE_DEFINITIONS: Record<string, Feature> = {
     "FightingStyleArchery": {
         name: "Fighting Style: Archery",
         description: "You gain a +2 bonus to attack rolls you make with ranged weapons.",
-        source: "Fighter Class (Base)",
+        source: "Fighter",
         // Note: This bonus needs to be applied during attack roll calculation, not directly to stats. Informational metadata.
         // Consider adding metadata like: { effectType: 'attackBonus', value: 2, condition: 'ranged weapon' }
     },
      "FightingStyleDefense": {
         name: "Fighting Style: Defense",
         description: "While you are wearing armor, you gain a +1 bonus to AC.",
-        source: "Fighter Class (Base)",
+        source: "Fighter",
         metadata: {
             effectType: "acBonus",
             value: 1,
@@ -140,7 +140,7 @@ const BASE_FEATURE_DEFINITIONS: Record<string, Feature> = {
     "SecondWind": {
         name: "Second Wind",
         description: "On your turn, you can use a bonus action to regain hit points equal to 1d10 + your fighter level. Once you use this feature, you must finish a short or long rest before you can use it again.",
-        source: "Fighter Class (Base)",
+        source: "Fighter",
         isActionable: true,
         maxUses: 1,
         usesResetOn: 'short-rest',
@@ -148,7 +148,7 @@ const BASE_FEATURE_DEFINITIONS: Record<string, Feature> = {
     "ActionSurge": {
         name: "Action Surge",
         description: "On your turn, you can take one additional action. Once you use this feature, you must finish a short or long rest before you can use it again.",
-        source: "Fighter Class (Base)",
+        source: "Fighter",
         isActionable: true,
         maxUses: 1,
         usesResetOn: 'short-rest',
@@ -156,7 +156,7 @@ const BASE_FEATURE_DEFINITIONS: Record<string, Feature> = {
      "Expertise": {
         name: "Expertise",
         description: "Choose two skill proficiencies, or one skill/tool proficiency. Double proficiency bonus for checks using chosen proficiencies.",
-        source: "Rogue Class (Base)",
+        source: "Rogue",
          metadata: { // Add metadata for choice
              effectType: "proficiencyGrant", // Or potentially 'choiceGrant' if not directly granting proficiency?
              type: 'skill', // Primary type is skill
@@ -170,29 +170,29 @@ const BASE_FEATURE_DEFINITIONS: Record<string, Feature> = {
     "SneakAttack": {
         name: "Sneak Attack",
         description: "Once per turn, you can deal extra damage (scales with level) to one creature you hit with an attack under certain conditions.",
-        source: "Rogue Class (Base)",
+        source: "Rogue",
          // Damage calculation handled elsewhere.
     },
      "ThievesCant": {
         name: "Thieves' Cant",
         description: "A secret mix of dialect, jargon, and code allowing hidden messages.",
-        source: "Rogue Class (Base)",
+        source: "Rogue",
     },
      "CunningAction": {
         name: "Cunning Action",
         description: "Use a bonus action to take the Dash, Disengage, or Hide action.",
-        source: "Rogue Class (Base)",
+        source: "Rogue",
         isActionable: true,
     },
     "Spellcasting": { // Example generic spellcasting feature
         name: "Spellcasting",
         description: "You have learned to draw on divine magic through meditation and prayer to cast spells as a cleric does.",
-        source: "Wizard Class (Base)" // Source should be specific class
+        source: "Wizard" // Source should be specific class
     },
     "ArcaneRecovery": {
         name: "Arcane Recovery",
         description: "You have learned to regain some of your magical energy by studying your spellbook. Once per day when you finish a short rest, you can choose expended spell slots to recover.",
-        source: "Wizard Class (Base)",
+        source: "Wizard",
         isActionable: true, // Action happens during short rest
         maxUses: 1,
         usesResetOn: 'long-rest', // Once per day implies long rest reset
@@ -200,7 +200,7 @@ const BASE_FEATURE_DEFINITIONS: Record<string, Feature> = {
      "ArcaneTradition": {
         name: "Arcane Tradition",
         description: "At 2nd level, you choose an arcane tradition, shaping your practice of magic through one of eight schools.",
-        source: "Wizard Class (Base)",
+        source: "Wizard",
         // Metadata might indicate a choice of sub-features/subclass
          metadata: { // Example metadata for subclass choice
              effectType: "choiceGrant",
@@ -212,7 +212,7 @@ const BASE_FEATURE_DEFINITIONS: Record<string, Feature> = {
     "UnarmoredDefenseBarbarian": {
         name: 'Unarmored Defense (Barbarian)',
         description: 'While you are not wearing any armor, your Armor Class equals 10 + your Dexterity modifier + your Constitution modifier. You can use a shield and still gain this benefit.',
-        source: 'Barbarian Class (Base)',
+        source: 'Barbarian',
         metadata: {
             effectType: 'acCalculation', // Changed from acBonus, needs specific handling
             formula: '10 + dexMod + conMod',
@@ -222,7 +222,7 @@ const BASE_FEATURE_DEFINITIONS: Record<string, Feature> = {
     "UnarmoredDefenseMonk": {
         name: 'Unarmored Defense (Monk)',
         description: 'Beginning at 1st level, while you are wearing no armor and not wielding a shield, your AC equals 10 + your Dexterity modifier + your Wisdom modifier.',
-        source: 'Monk Class (Base)',
+        source: 'Monk',
         metadata: {
             effectType: 'acCalculation', // Changed from acBonus
             formula: '10 + dexMod + wisMod',

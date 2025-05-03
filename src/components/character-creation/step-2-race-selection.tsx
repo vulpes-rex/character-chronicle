@@ -28,7 +28,7 @@ export function Step2RaceSelection({ data, updateData, setValidity, availableRac
 
     // Fetch trait details using the race name and combinedContent via feature service
     const { data: traitDetails, isLoading: isLoadingTraits } = useQuery<Feature[], Error>({
-        queryKey: ['raceFeatures', selectedRace?.name, combinedContent], // Include combinedContent in key
+        queryKey: ['raceFeatures', selectedRaceName, combinedContent], // Include combinedContent in key
         queryFn: () => selectedRaceName && combinedContent ? getRaceFeatures(selectedRaceName, combinedContent) : Promise.resolve([]), // Use getRaceFeatures
         enabled: !!selectedRaceName && !!combinedContent, // Enable only when race and content are available
         staleTime: Infinity, // Trait details are static for a given content set
@@ -40,21 +40,16 @@ export function Step2RaceSelection({ data, updateData, setValidity, availableRac
         // Validity depends only on selection
         setValidity(!!selectedRaceName);
 
-        // Only update parent if a race is selected
-        if (selectedRaceName) {
+        // Only update parent if a race is selected and it's different from current data
+        if (selectedRaceName && selectedRaceName !== data.race) {
             const updatePayload: Partial<PartialCharacterFormData> = {
                 race: selectedRaceName,
-                // Clear or update skills/proficiencies based on the race might happen here,
-                // but currently handled in wizard's final submit or dedicated step.
-                // For now, just update the selected race.
+                 // Reset Tasha's choices if race changes? Maybe not, let Step 4 handle it.
+                 // featureChoices: { ...data.featureChoices } // Preserve existing choices initially
             };
-            if (updatePayload.race !== data.race) {
-                console.log("Step 2: Updating parent data with selected race");
-                updateData(updatePayload);
-            }
+             console.log("Step 2: Updating parent data with selected race:", selectedRaceName);
+            updateData(updatePayload);
         }
-
-
     }, [selectedRaceName, setValidity, updateData, data.race]);
 
 
@@ -63,6 +58,7 @@ export function Step2RaceSelection({ data, updateData, setValidity, availableRac
             {/* Race Gallery */}
              <ScrollArea className="h-[500px] md:col-span-2 border rounded-lg p-4">
                 <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
+                    {availableRaces.length === 0 && <p className="text-muted-foreground col-span-full text-center">Loading races...</p>}
                     {availableRaces.map((race) => (
                         <Card
                             key={race.name}
@@ -71,6 +67,8 @@ export function Step2RaceSelection({ data, updateData, setValidity, availableRac
                                 selectedRaceName === race.name ? "ring-2 ring-primary shadow-lg scale-[1.02]" : "shadow-sm"
                             )}
                             onClick={() => setSelectedRaceName(race.name)}
+                            tabIndex={0} // Make card focusable
+                            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setSelectedRaceName(race.name); }}
                         >
                             <CardHeader className="p-0 relative aspect-square overflow-hidden rounded-t-lg">
                                 <Image

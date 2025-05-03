@@ -1,4 +1,4 @@
-{// @ts-nocheck - Disabling TypeScript checks for rapid prototyping
+// @ts-nocheck - Disabling TypeScript checks for rapid prototyping
 'use client';
 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -447,10 +447,10 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
     }
 
     // --- Dice Rolling Handler (Generic) ---
-    const performRoll = async (rollString: string, label: string) => {
+    const performRoll = async (diceString: string, label: string) => {
        try {
-           const roll = rollDice(rollString); // Use the utility function for calculation
-           triggerVisualRoll(rollString, `${label}: ${roll}`); // Trigger the visual dddice roll
+           const roll = rollDice(diceString); // Use the utility function for calculation
+           triggerVisualRoll(diceString, `${label}: ${roll}`); // Trigger the visual dddice roll
 
            // Log the roll to the game log
            if (characterData?.campaignId && user) {
@@ -459,8 +459,8 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
                    actorId: user.uid, // Or characterData.id ?
                    actorName: userProfile?.displayName || characterData.playerName || 'Player',
                    actionType: 'roll',
-                   details: `${characterData.characterName} rolled ${label}: ${roll} (${rollString})`,
-                   rollDetails: { dice: rollString, result: roll },
+                   details: `${characterData.characterName} rolled ${label}: ${roll} (${diceString})`,
+                   rollDetails: { dice: diceString, result: roll },
                });
            } else {
                console.warn("Could not log dice roll: Missing campaignId or user info");
@@ -1297,4 +1297,3 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
     </>
   );
 }
-

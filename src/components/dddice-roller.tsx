@@ -1,3 +1,4 @@
+
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
@@ -14,14 +15,17 @@ export function DDDiceRoller({ resultText }: DDDiceRollerProps) {
     const [isVisible, setIsVisible] = useState(false);
     // State hook for the dynamically imported module
     const [DDDiceModule, setDDDiceModule] = useState<typeof import('dddice-js') | null>(null);
+    const [rollerKey, setRollerKey] = useState(0); // Key to help re-trigger initialization
 
     // Load the module dynamically on the client
     useEffect(() => {
         if (typeof window !== 'undefined') {
             // Ensure dddice-js is imported dynamically only on the client-side
-            import('dddice-js')
+            import('dddice-js') // <-- Make sure this path is correct if lib structure changes
             .then(module => {
                 setDDDiceModule(module);
+                 // Increment rollerKey to potentially help re-initialization if needed
+                setRollerKey(prev => prev + 1);
             })
             .catch(err => {
                 console.error("Failed to load dddice-js module:", err);
@@ -31,22 +35,26 @@ export function DDDiceRoller({ resultText }: DDDiceRollerProps) {
     }, []); // Empty dependency array ensures this runs once on mount
 
     useEffect(() => {
-        // Ensure DDDiceModule is loaded before trying to initialize
-        if (!DDDiceModule || sdk || !canvasRef.current) return; // Don't initialize if already done, module not loaded, or canvas not ready
+        // Ensure DDDiceModule is loaded and has the DDDice constructor before trying to initialize
+        if (!DDDiceModule?.DDDice || sdk || !canvasRef.current) {
+            console.log("DDDice SDK initialization prerequisites not met:", { hasModule: !!DDDiceModule, hasConstructor: !!DDDiceModule?.DDDice, hasSdk: !!sdk, hasCanvas: !!canvasRef.current });
+            return;
+        }
 
         console.log("Attempting to initialize DDDice SDK...");
         const initializeDDDice = async () => {
             try {
                 // Replace with your actual room slug if needed
                 const roomSlug = 'character-chronicle-room'; // Use a generic or configurable room slug
-                // Initialize SDK - Use API Key if needed
-                // const diceSdk = new DDDiceModule.DDDice('YOUR_API_KEY');
-                const diceSdk = new DDDiceModule.DDDice(); // Initialize without API key for basic use
 
-                // Pass the canvas element directly
-                await diceSdk.connect(roomSlug, undefined, canvasRef.current);
+                // Correctly access the constructor from the module
+                const DDDiceConstructor = DDDiceModule.DDDice;
+                const diceSdk = new DDDiceConstructor(undefined, canvasRef.current); // Pass canvas ref here
+
+                // Pass the canvas element directly - now done in constructor
+                await diceSdk.connect(roomSlug); // Removed canvas from connect
                 setSdk(diceSdk);
-                console.log("DDDice SDK Initialized");
+                console.log("DDDice SDK Initialized and Connected");
             } catch (error) {
                 console.error('Failed to initialize DDDice SDK:', error);
                 // Optionally show an error message to the user
@@ -61,8 +69,8 @@ export function DDDiceRoller({ resultText }: DDDiceRollerProps) {
             setSdk(null);
             console.log("DDDice SDK Disconnected");
         };
-    // Add sdk and DDDiceModule to dependency array
-    }, [sdk, DDDiceModule]); // Rerun initialization if module reloads or sdk changes
+    // Add DDDiceModule and rollerKey to dependency array
+    }, [DDDiceModule, sdk, rollerKey]); // Rerun initialization if module reloads or rollerKey changes
 
 
     // --- Dice Rolling Logic ---
@@ -76,10 +84,14 @@ export function DDDiceRoller({ resultText }: DDDiceRollerProps) {
                  try {
                       console.log(`Rolling dddice with notation: ${diceNotation}`);
                      // Use the parsed dice notation directly
-                     const roll: DiceRoll = {
-                         dice: [{ type: diceNotation, theme: 'dddice-standard' }], // Use standard theme
+                      const roll: DiceRoll = {
+                         // dddice-js expects dice in the format { type: 'd6', theme: 'standard' } or similar
+                         // We need to parse the notation like "2d8+3" into this format
+                         // Simplified: Assuming single dice type for now based on common rolls
+                         dice: [{ type: `d${diceNotation.split('d')[1].split(/[+-]/)[0]}`, theme: 'dddice-standard', value: undefined }], // Extract dice type, value is result later
                          // operator: [], // Operators if needed based on notation parsing
-                     };
+                         // modifier: ... // Extract modifier if needed
+                      };
                       // Use the SDK's roll method
                       sdk.roll([roll]);
                      setIsVisible(true);

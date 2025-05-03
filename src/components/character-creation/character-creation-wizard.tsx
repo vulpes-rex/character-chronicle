@@ -10,7 +10,7 @@ import { saveCharacter, updateCharacter } from '@/services/character-service'; /
 import type { Character, EquipmentItem, Feature, HitPointsState, HitDiceState, CharacterClass as CharacterClassType, SourcePack } from '@/lib/types';
 import { getCharacterClasses, getCharacterRaces, getCumulativeClassFeatures, getAvailableEquipmentItems, getBackgroundDetails } from '@/services/dnd-api'; // Updated imports
 import { getBackgroundFeatures, getRaceFeatures } from '@/services/feature-service'; // Import feature service for background/race features
-import { calculateSkillModifier, SKILL_ABILITY_MAP, ALL_SKILLS, rollDice, BASE_FEATURE_DEFINITIONS } from '@/lib/types'; // Import BASE_FEATURE_DEFINITIONS
+import { calculateSkillModifier, SKILL_ABILITY_MAP, ALL_SKILLS, rollDice } from '@/lib/types';
 import { useQuery } from '@tanstack/react-query';
 import { Progress } from '@/components/ui/progress';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
@@ -202,7 +202,8 @@ export function CharacterCreationWizard({ initialData, editMode = false }: Chara
                          // Let's assume for now the choice IS the specific feature name fragment.
                          const specificFeatureName = `${feature.name}: ${choice}`;
                          // Try to find the definition for the specific feature choice
-                         const specificFeatureDef = BASE_FEATURE_DEFINITIONS[specificFeatureName] ?? combinedContent?.features?.[specificFeatureName];
+                         // Look in combined content first, then potentially a base definition map if needed elsewhere
+                         const specificFeatureDef = combinedContent?.features?.[specificFeatureName];
                          if (specificFeatureDef) {
                             return { ...specificFeatureDef, name: specificFeatureName, source: feature.source };
                          } else {

@@ -69,6 +69,7 @@ type ProficiencyGrantMetadata = {
   choose?: number; // Optional: Number of choices allowed from the list
   options?: string[]; // Optional: List of options if 'choose' is present
   condition?: string;
+  choiceKey?: string; // Added choiceKey to link choices in Character.featureChoices
 };
 
 type ACBonusMetadata = {

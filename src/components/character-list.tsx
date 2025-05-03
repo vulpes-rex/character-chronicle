@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation'; // For navigation after delete
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { loadAllCharacters, deleteCharacter } from '@/services/character-service';
 import type { Character } from '@/lib/types';
+import { useAuth } from '@/components/auth-provider'; // Import useAuth
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -19,24 +20,25 @@ export function CharacterList() {
   const queryClient = useQueryClient();
   const router = useRouter();
   const { toast } = useToast();
+  const { user, loading: authLoading } = useAuth(); // Get user and loading state
   const [isDeleting, setIsDeleting] = useState<string | null>(null); // Track which character ID is being deleted
 
-  const { data: characters = [], isLoading, error, isError } = useQuery<Character[], Error>({
-    queryKey: ['characters'],
-    queryFn: loadAllCharacters,
-    // staleTime: 5 * 60 * 1000, // Refetch every 5 minutes
+  const { data: characters = [], isLoading: charactersLoading, error, isError } = useQuery<Character[], Error>({
+    queryKey: ['characters', user?.uid], // Include user ID in query key
+    queryFn: () => loadAllCharacters(user!.uid), // Pass user ID to fetch function
+    enabled: !authLoading && !!user, // Only run query when user is loaded
   });
 
   const deleteMutation = useMutation({
-    mutationFn: deleteCharacter,
+    mutationFn: (characterId: string) => deleteCharacter(characterId, user!.uid), // Pass user ID for permission check
     onMutate: async (characterId: string) => {
       setIsDeleting(characterId);
       // Optimistic UI update: Cancel any outgoing refetches
-      await queryClient.cancelQueries({ queryKey: ['characters'] });
+      await queryClient.cancelQueries({ queryKey: ['characters', user?.uid] });
       // Snapshot the previous value
-      const previousCharacters = queryClient.getQueryData<Character[]>(['characters']);
+      const previousCharacters = queryClient.getQueryData<Character[]>(['characters', user?.uid]);
       // Optimistically remove the character from the list
-      queryClient.setQueryData<Character[]>(['characters'], (old = []) =>
+      queryClient.setQueryData<Character[]>(['characters', user?.uid], (old = []) =>
         old.filter((char) => char.id !== characterId)
       );
       // Return context with the previous data
@@ -44,7 +46,7 @@ export function CharacterList() {
     },
     onError: (err, characterId, context) => {
       // Rollback on failure
-      queryClient.setQueryData(['characters'], context?.previousCharacters);
+      queryClient.setQueryData(['characters', user?.uid], context?.previousCharacters);
       console.error("Deletion failed:", err);
       toast({
         variant: "destructive",
@@ -57,13 +59,11 @@ export function CharacterList() {
         title: "Character Deleted",
         description: `Character successfully deleted.`,
       });
-      // Invalidation already happened or can be triggered explicitly if needed
-      // queryClient.invalidateQueries({ queryKey: ['characters'] });
     },
     onSettled: (data, error, characterId) => {
       setIsDeleting(null); // Stop showing loading spinner for this item
        // Always refetch after error or success:
-      queryClient.invalidateQueries({ queryKey: ['characters'] });
+      queryClient.invalidateQueries({ queryKey: ['characters', user?.uid] });
     },
   });
 
@@ -73,7 +73,7 @@ export function CharacterList() {
   };
 
 
-  if (isLoading) {
+  if (authLoading || charactersLoading) {
     return (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {[1, 2, 3].map((i) => (
@@ -95,6 +95,16 @@ export function CharacterList() {
       </div>
     );
   }
+
+   if (!user && !authLoading) { // Check if user fetch finished and user is null
+       return (
+           <Alert>
+              <AlertCircle className="h-4 w-4" />
+              <AlertTitle>Not Logged In</AlertTitle>
+              <AlertDescription>Please log in to view your characters.</AlertDescription>
+           </Alert>
+       )
+   }
 
   if (isError) {
     return (

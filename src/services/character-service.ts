@@ -1,3 +1,4 @@
+
 'use server'; // Indicate this module can contain server-only logic (like direct DB access)
 
 import { db } from '@/lib/firebase';
@@ -26,10 +27,17 @@ const charactersCollection = collection(db, 'characters');
  * Derived values (final stats, AC, modifiers) are calculated on load.
  *
  * @param characterData - The character data to save (without ID, createdAt, updatedAt). It should contain base values.
+ * @param userId - The ID of the user creating the character.
  * @returns The ID of the newly created character.
  */
-export async function saveCharacter(characterData: Omit<Character, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> {
-  if (!characterData || !characterData.characterName || !characterData.playerName) {
+export async function saveCharacter(characterData: Omit<Character, 'id' | 'createdAt' | 'updatedAt'>, userId: string): Promise<string> {
+  if (!userId) {
+       const errorMsg = "Attempted to save character without a user ID.";
+       console.error("saveCharacter:", errorMsg);
+       await logError(new Error(errorMsg), { function: 'saveCharacter', characterName: characterData?.characterName });
+       throw new Error("User ID is required to save a character.");
+   }
+   if (!characterData || !characterData.characterName || !characterData.playerName) {
       const errorMsg = "Attempted to save character with missing core data.";
       console.error("saveCharacter:", errorMsg);
       await logError(new Error(errorMsg), { function: 'saveCharacter', characterName: characterData?.characterName });
@@ -40,6 +48,7 @@ export async function saveCharacter(characterData: Omit<Character, 'id' | 'creat
 
     // Prepare data for saving: ensure only base fields are included
     const dataToSave = {
+        playerId: userId, // Add the owner's ID
         playerName: characterData.playerName,
         characterName: characterData.characterName,
         race: characterData.race,
@@ -83,6 +92,7 @@ export async function saveCharacter(characterData: Omit<Character, 'id' | 'creat
         function: 'saveCharacter',
         characterName: characterData.characterName,
         playerName: characterData.playerName,
+        userId: userId, // Log the user ID
         race: characterData.race,
         class: characterData.class,
     });
@@ -93,16 +103,18 @@ export async function saveCharacter(characterData: Omit<Character, 'id' | 'creat
 /**
  * Updates specific fields of an existing character in Firestore.
  * Only saves base data fields. Derived values should not be updated directly.
+ * Includes permission check to ensure only the owner can update.
  *
  * @param characterId - The ID of the character to update.
  * @param characterUpdates - An object containing only the base character fields to update.
+ * @param userId - The ID of the user attempting the update.
  */
-export async function updateCharacter(characterId: string, characterUpdates: Partial<Omit<Character, 'id' | 'createdAt'>>): Promise<void> {
-  if (!characterId) {
-      const errorMsg = "Attempted to update character with missing ID.";
+export async function updateCharacter(characterId: string, characterUpdates: Partial<Omit<Character, 'id' | 'createdAt' | 'playerId'>>, userId: string): Promise<void> {
+  if (!characterId || !userId) {
+      const errorMsg = "Attempted to update character with missing ID or User ID.";
       console.error("updateCharacter:", errorMsg);
-       await logError(new Error(errorMsg), { function: 'updateCharacter' });
-      throw new Error("Character ID is required for update.");
+       await logError(new Error(errorMsg), { function: 'updateCharacter', characterId, userId });
+      throw new Error("Character ID and User ID are required for update.");
   }
    if (!characterUpdates || Object.keys(characterUpdates).length === 0) {
       console.warn(`updateCharacter: Attempted to update character ${characterId} with empty data.`);
@@ -110,65 +122,78 @@ export async function updateCharacter(characterId: string, characterUpdates: Par
   }
   const characterDoc = doc(db, 'characters', characterId);
 
-  // Prepare data for update, ensuring only allowed fields are included
-  const dataToUpdate: Record<string, any> = { ...characterUpdates };
-
-  // Explicitly disallow updating derived fields - remove them if present
-  // Example: delete dataToUpdate.derivedStats;
-  // Only allow updating base stats if explicitly provided
-  if (!characterUpdates.stats) delete dataToUpdate.stats;
-  if (!characterUpdates.proficiencies) delete dataToUpdate.proficiencies;
-  // Ensure featureChoices is an object if provided
-  if ('featureChoices' in dataToUpdate) {
-      dataToUpdate.featureChoices = dataToUpdate.featureChoices || {};
-  }
-  // Ensure spells are arrays if provided
-   if ('spellsKnown' in dataToUpdate && !Array.isArray(dataToUpdate.spellsKnown)) {
-      dataToUpdate.spellsKnown = [];
-   }
-   if ('spellsPrepared' in dataToUpdate && !Array.isArray(dataToUpdate.spellsPrepared)) {
-      dataToUpdate.spellsPrepared = [];
-   }
-   // Current/Temp HP and Remaining HD are exceptions - they represent current state
-   // Ensure `hitPoints` and `hitDice` objects are not accidentally replaced entirely if only current/remaining change
-    if (characterUpdates.hitPoints && (!('max' in characterUpdates.hitPoints))) {
-        // Only updating current/temp, fetch existing max
-        const existingChar = await loadCharacter(characterId, false); // Load base data only
-        if (existingChar?.hitPoints?.max !== undefined) {
-            dataToUpdate.hitPoints = {
-                max: existingChar.hitPoints.max,
-                current: characterUpdates.hitPoints.current ?? existingChar.hitPoints.current,
-                temporary: characterUpdates.hitPoints.temporary ?? existingChar.hitPoints.temporary,
-            };
-        } else {
-            // Fallback or handle error if maxHP couldn't be retrieved
-            delete dataToUpdate.hitPoints;
-            console.warn(`updateCharacter: Could not verify max HP for ${characterId} when updating current/temp HP.`);
-        }
-    }
-     if (characterUpdates.hitDice && (!('total' in characterUpdates.hitDice) || !('dieType' in characterUpdates.hitDice))) {
-        // Only updating remaining, fetch existing total/dieType
-        const existingChar = await loadCharacter(characterId, false); // Load base data only
-        if (existingChar?.hitDice?.total !== undefined && existingChar?.hitDice?.dieType !== undefined) {
-            dataToUpdate.hitDice = {
-                total: existingChar.hitDice.total,
-                remaining: characterUpdates.hitDice.remaining ?? existingChar.hitDice.remaining,
-                dieType: existingChar.hitDice.dieType,
-            };
-        } else {
-            // Fallback or handle error if total/dieType couldn't be retrieved
-             delete dataToUpdate.hitDice;
-             console.warn(`updateCharacter: Could not verify total/dieType for ${characterId} when updating remaining HD.`);
-        }
-    }
-
-
-  // Always add the update timestamp
-  dataToUpdate.updatedAt = serverTimestamp();
-
-  logMessage('debug', `Updating character ${characterId} with data:`, dataToUpdate);
-
   try {
+    // Permission Check: Load base character data to check ownership
+    const existingChar = await loadCharacter(characterId, false);
+    if (!existingChar) {
+       throw new Error(`Character ${characterId} not found.`);
+    }
+    if (existingChar.playerId !== userId) {
+        const errorMsg = `Permission denied: User ${userId} cannot update character ${characterId} owned by ${existingChar.playerId}.`;
+        console.warn(`updateCharacter: ${errorMsg}`);
+        await logError(new Error('Permission denied'), { function: 'updateCharacter', characterId, userId, ownerId: existingChar.playerId });
+       throw new Error('You do not have permission to update this character.');
+    }
+
+    // Prepare data for update, ensuring only allowed fields are included
+    const dataToUpdate: Record<string, any> = { ...characterUpdates };
+
+    // Explicitly disallow updating derived fields - remove them if present
+    // Example: delete dataToUpdate.derivedStats;
+    // Only allow updating base stats if explicitly provided
+    if (!characterUpdates.stats) delete dataToUpdate.stats;
+    if (!characterUpdates.proficiencies) delete dataToUpdate.proficiencies;
+    // Ensure featureChoices is an object if provided
+    if ('featureChoices' in dataToUpdate) {
+        dataToUpdate.featureChoices = dataToUpdate.featureChoices || {};
+    }
+    // Ensure spells are arrays if provided
+     if ('spellsKnown' in dataToUpdate && !Array.isArray(dataToUpdate.spellsKnown)) {
+        dataToUpdate.spellsKnown = [];
+     }
+     if ('spellsPrepared' in dataToUpdate && !Array.isArray(dataToUpdate.spellsPrepared)) {
+        dataToUpdate.spellsPrepared = [];
+     }
+     // Current/Temp HP and Remaining HD are exceptions - they represent current state
+     // Ensure `hitPoints` and `hitDice` objects are not accidentally replaced entirely if only current/remaining change
+      if (characterUpdates.hitPoints && (!('max' in characterUpdates.hitPoints))) {
+          // Only updating current/temp, use existing max
+          if (existingChar?.hitPoints?.max !== undefined) {
+              dataToUpdate.hitPoints = {
+                  max: existingChar.hitPoints.max,
+                  current: characterUpdates.hitPoints.current ?? existingChar.hitPoints.current,
+                  temporary: characterUpdates.hitPoints.temporary ?? existingChar.hitPoints.temporary,
+              };
+          } else {
+              // Fallback or handle error if maxHP couldn't be retrieved
+              delete dataToUpdate.hitPoints;
+              console.warn(`updateCharacter: Could not verify max HP for ${characterId} when updating current/temp HP.`);
+          }
+      }
+       if (characterUpdates.hitDice && (!('total' in characterUpdates.hitDice) || !('dieType' in characterUpdates.hitDice))) {
+          // Only updating remaining, use existing total/dieType
+          if (existingChar?.hitDice?.total !== undefined && existingChar?.hitDice?.dieType !== undefined) {
+              dataToUpdate.hitDice = {
+                  total: existingChar.hitDice.total,
+                  remaining: characterUpdates.hitDice.remaining ?? existingChar.hitDice.remaining,
+                  dieType: existingChar.hitDice.dieType,
+              };
+          } else {
+              // Fallback or handle error if total/dieType couldn't be retrieved
+               delete dataToUpdate.hitDice;
+               console.warn(`updateCharacter: Could not verify total/dieType for ${characterId} when updating remaining HD.`);
+          }
+      }
+
+      // Prevent changing playerId
+      delete dataToUpdate.playerId;
+
+    // Always add the update timestamp
+    dataToUpdate.updatedAt = serverTimestamp();
+
+    logMessage('debug', `Updating character ${characterId} with data:`, dataToUpdate);
+
+
     await updateDoc(characterDoc, dataToUpdate);
     console.log('Character updated with ID: ', characterId);
   } catch (e) {
@@ -177,8 +202,13 @@ export async function updateCharacter(characterId: string, characterUpdates: Par
      await logError(error, {
          function: 'updateCharacter',
          characterId: characterId,
+         userId: userId,
          updateDataKeys: Object.keys(characterUpdates),
      });
+    // Re-throw specific permission error or generic failure
+    if (error.message.startsWith('Permission denied')) {
+        throw error;
+    }
     throw new Error('Failed to update character.');
   }
 }
@@ -210,6 +240,7 @@ export async function loadCharacter(characterId: string, applyRules: boolean = t
         const baseCharacter: Character = {
             ...data,
             id: docSnap.id,
+            playerId: data.playerId || null, // Include playerId
             createdAt: createdAt,
             updatedAt: updatedAt,
             // Ensure required fields have defaults if missing in Firestore
@@ -261,12 +292,17 @@ export async function loadCharacter(characterId: string, applyRules: boolean = t
 }
 
 /**
- * Loads all characters and applies feature rules to each.
+ * Loads all characters belonging to a specific player.
+ * Applies feature rules to each character.
+ * @param playerId - The ID of the player whose characters to load.
  * @returns An array of Character objects with derived values applied.
  */
-export async function loadAllCharacters(): Promise<Character[]> {
-  // TODO: Add filtering by player ID if authentication is implemented
-  const q = query(charactersCollection); // Simple query for all characters for now
+export async function loadAllCharacters(playerId?: string): Promise<Character[]> {
+  if (!playerId) {
+    console.warn("loadAllCharacters called without a playerId.");
+    return []; // Return empty if no player ID provided
+  }
+  const q = query(charactersCollection, where('playerId', '==', playerId));
   try {
     const querySnapshot = await getDocs(q);
     const characters: Character[] = [];
@@ -281,6 +317,7 @@ export async function loadAllCharacters(): Promise<Character[]> {
         const baseCharacter: Character = {
             ...data,
             id: docSnap.id,
+            playerId: data.playerId, // Ensure playerId is included
             createdAt: createdAt,
             updatedAt: updatedAt,
             // Ensure required fields have defaults if missing in Firestore
@@ -319,24 +356,40 @@ export async function loadAllCharacters(): Promise<Character[]> {
   } catch (e) {
     const error = e instanceof Error ? e : new Error(String(e));
     console.error('Error in loadAllCharacters: Firestore operation failed.', error);
-    await logError(error, { function: 'loadAllCharacters' });
+    await logError(error, { function: 'loadAllCharacters', playerId: playerId });
     throw new Error('Failed to load characters.');
   }
 }
 
 /**
  * Deletes a character from Firestore.
+ * Includes permission check to ensure only the owner can delete.
  * @param characterId - The ID of the character to delete.
+ * @param userId - The ID of the user attempting the deletion.
  */
-export async function deleteCharacter(characterId: string): Promise<void> {
-   if (!characterId) {
-       const errorMsg = "Attempted to delete character with missing ID.";
+export async function deleteCharacter(characterId: string, userId: string): Promise<void> {
+   if (!characterId || !userId) {
+       const errorMsg = "Attempted to delete character with missing ID or User ID.";
        console.error("deleteCharacter:", errorMsg);
-       await logError(new Error(errorMsg), { function: 'deleteCharacter' });
-       throw new Error("Character ID is required for deletion.");
+       await logError(new Error(errorMsg), { function: 'deleteCharacter', characterId, userId });
+       throw new Error("Character ID and User ID are required for deletion.");
    }
   const characterDoc = doc(db, 'characters', characterId);
+
   try {
+    // Permission Check: Load base character data to check ownership
+    const existingChar = await loadCharacter(characterId, false);
+    if (!existingChar) {
+       throw new Error(`Character ${characterId} not found.`);
+    }
+    if (existingChar.playerId !== userId) {
+        const errorMsg = `Permission denied: User ${userId} cannot delete character ${characterId} owned by ${existingChar.playerId}.`;
+        console.warn(`deleteCharacter: ${errorMsg}`);
+        await logError(new Error('Permission denied'), { function: 'deleteCharacter', characterId, userId, ownerId: existingChar.playerId });
+       throw new Error('You do not have permission to delete this character.');
+    }
+
+
     await deleteDoc(characterDoc);
     console.log('Character deleted with ID: ', characterId);
   } catch (e) {
@@ -345,7 +398,12 @@ export async function deleteCharacter(characterId: string): Promise<void> {
      await logError(error, {
          function: 'deleteCharacter',
          characterId: characterId,
+         userId: userId,
      });
+     // Re-throw specific permission error or generic failure
+     if (error.message.startsWith('Permission denied')) {
+         throw error;
+     }
     throw new Error('Failed to delete character.');
   }
 }

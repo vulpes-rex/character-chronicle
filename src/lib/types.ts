@@ -3,6 +3,7 @@
  */
 export interface Character {
   id: string; // Unique identifier (e.g., Firestore document ID)
+  playerId: string | null; // Firebase Auth UID of the character's owner (null if unassigned)
   playerName: string;
   characterName: string;
   race: string; // Name of the race (e.g., "Human", "Elf")
@@ -536,40 +537,40 @@ export const ALL_SKILLS = Object.keys(SKILL_ABILITY_MAP);
  * Calculates the modifier for a given skill.
  * Considers base ability score, proficiency bonus if applicable, and potential expertises (not yet implemented).
  */
-export const calculateSkillModifier = (
-    skillName: string,
-    stats: Character['stats'] | NPC['stats'] | Monster['stats'] | undefined, // Use base stats
-    proficient: boolean,
-    proficiencyBonus: number
-): number => {
-    const skillLower = skillName.toLowerCase();
-    const ability = SKILL_ABILITY_MAP[skillLower];
+// export const calculateSkillModifier = (
+//     skillName: string,
+//     stats: Character['stats'] | NPC['stats'] | Monster['stats'] | undefined, // Use base stats
+//     proficient: boolean,
+//     proficiencyBonus: number
+// ): number => {
+//     const skillLower = skillName.toLowerCase();
+//     const ability = SKILL_ABILITY_MAP[skillLower];
 
-    if (!stats) {
-        console.warn(`Stats object is missing for skill calculation: ${skillName}.`);
-        return 0;
-    }
+//     if (!stats) {
+//         console.warn(`Stats object is missing for skill calculation: ${skillName}.`);
+//         return 0;
+//     }
 
-    // Handle direct skill modifiers from monsters/NPCs if available (these override calculation)
-     if ('skills' in stats && stats.skills && typeof stats.skills[skillLower] === 'number') {
-       return stats.skills[skillLower] as number;
-     }
+//     // Handle direct skill modifiers from monsters/NPCs if available (these override calculation)
+//      if ('skills' in stats && stats.skills && typeof stats.skills[skillLower] === 'number') {
+//        return stats.skills[skillLower] as number;
+//      }
 
-    // Calculate based on ability score if skill override not present
-     if (!ability || typeof stats[ability] !== 'number') {
-        // Log only if the ability mapping itself is the issue
-        if (!ability) {
-             console.warn(`Could not find ability mapping for skill: ${skillName}.`);
-        }
-        // Don't warn if stats just aren't present for that ability (e.g., monster with low INT)
-        return 0;
-    }
+//     // Calculate based on ability score if skill override not present
+//      if (!ability || typeof stats[ability] !== 'number') {
+//         // Log only if the ability mapping itself is the issue
+//         if (!ability) {
+//              console.warn(`Could not find ability mapping for skill: ${skillName}.`);
+//         }
+//         // Don't warn if stats just aren't present for that ability (e.g., monster with low INT)
+//         return 0;
+//     }
 
-    const abilityModifier = Math.floor((stats[ability]! - 10) / 2);
-    const proficiencyValue = proficient ? proficiencyBonus : 0;
-    // TODO: Add check for expertise (would double proficiencyValue)
-    return abilityModifier + proficiencyValue;
-};
+//     const abilityModifier = Math.floor((stats[ability]! - 10) / 2);
+//     const proficiencyValue = proficient ? proficiencyBonus : 0;
+//     // TODO: Add check for expertise (would double proficiencyValue)
+//     return abilityModifier + proficiencyValue;
+// };
 
 /**
  * Interface defining the structure for a character level progression.
@@ -658,4 +659,3 @@ export const SPELL_SLOTS_BY_LEVEL: Record<string, number[]> = {
     ],
      'none': [],
 };
-

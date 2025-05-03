@@ -1,19 +1,19 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
-import { Button } from '@/components/ui/button';
-import { useToast } from '@/hooks/use-toast';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { Button } from '@/components/ui/button'; // Use alias
+import { useToast } from '@/hooks/use-toast'; // Use alias
 import { useRouter } from 'next/navigation';
 import { saveCharacterAction, updateCharacterAction } from '@/app/actions/character-actions'; // Use Server Actions
-import type { Character, EquipmentItem, Feature, HitPointsState, HitDiceState, CharacterClass as CharacterClassType, SourcePack, BackgroundInfo, CharacterRace, Spell } from '@/lib/types';
+import type { Character, EquipmentItem, Feature, HitPointsState, HitDiceState, CharacterClass as CharacterClassType, SourcePack, BackgroundInfo, CharacterRace, Spell } from '@/lib/types'; // Use alias
 import { getCharacterClassesAction, getCharacterRacesAction, getAvailableEquipmentItemsAction, getAvailableBackgroundsAction, getBackgroundDetailsAction, getSpellsAction } from '@/app/actions/dnd-api-actions'; // Use Server Actions
-import { getBackgroundFeaturesAction, getRaceFeaturesAction, getClassFeaturesAction } from '@/app/actions/feature-actions'; // Use Server Actions
+import { getBackgroundFeaturesAction, getClassFeaturesAction, getRaceFeaturesAction, applyFeatureRulesAction } from '@/app/actions/feature-actions'; // Use Server Actions
 import { calculateSkillModifier, SKILL_ABILITY_MAP, ALL_SKILLS, rollDice } from '@/lib/types'; // Import type helpers directly
-import { Progress } from '@/components/ui/progress';
-import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
+import { Progress } from '@/components/ui/progress'; // Use alias
+import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert'; // Use alias
 import { AlertCircle, Loader2 } from 'lucide-react';
-import { Skeleton } from '@/components/ui/skeleton';
-// No direct feature service needed here anymore, actions call the NestJS FeatureService
+import { Skeleton } from '@/components/ui/skeleton'; // Use alias
+import { useAuth } from '@/components/auth-provider'; // Import useAuth hook
 
 // Import step components
 import { Step1BasicInfo } from './step-1-basic-info';
@@ -22,19 +22,20 @@ import { Step3ClassSelection } from './step-3-class-selection';
 import { Step4AbilityScores } from './step-4-ability-scores';
 import { Step5Background } from './step-5-background';
 import { Step6Equipment } from './step-6-equipment';
-import { Step7Review } from './step-7-review';
-import { Step8Spells } from './step-8-spells'; // Import Step 8
-import { useAuth } from '@/components/auth-provider'; // Import useAuth hook
-
+import { Step7FeatureChoices } from './step-7-feature-choices'; // Import Step 7
+import { Step8Review } from './step-8-review'; // Import Step 8 (Review)
 
 // Total number of steps in the wizard
-const TOTAL_STEPS = 8; // Increased to 8 for Spells
+const TOTAL_STEPS = 8; // 7 steps + Review
 
 // Partial type for form data across steps
-export type PartialCharacterFormData = Partial<Omit<Character, 'id' | 'createdAt' | 'updatedAt' | 'stats'>> & {
+export type PartialCharacterFormData = Partial<Omit<Character, 'id' | 'createdAt' | 'updatedAt' | 'stats' | 'spellcasting'>> & {
     stats?: Partial<Character['baseStats']>; // Use baseStats during creation/edit
+    featureChoices?: Record<string, string | string[]>; // Store feature choices
     // Add temporary fields if needed during creation that aren't directly on Character model
     selectedClassLevels?: Record<string, number>; // For multiclassing levels
+    // Temporary fields to hold derived data before final calculation if needed
+    _calculatedFeatures?: Feature[];
 };
 
 interface CharacterCreationWizardProps {
@@ -56,6 +57,7 @@ export function CharacterCreationWizard({ initialData, editMode = false }: Chara
             skills: initialData.skills || {},
             spellsKnown: initialData.spellsKnown || [],
             spellsPrepared: initialData.spellsPrepared || [],
+            featureChoices: initialData.featureChoices || {}, // Load existing choices
         } : {
             level: 1, // Default level
             hitPoints: { max: 0, current: 0, temporary: 0 },
@@ -67,6 +69,7 @@ export function CharacterCreationWizard({ initialData, editMode = false }: Chara
             spellsKnown: [],
             spellsPrepared: [],
             selectedClassLevels: {},
+            featureChoices: {}, // Initialize feature choices
             stats: { strength: 10, dexterity: 10, constitution: 10, intelligence: 10, wisdom: 10, charisma: 10 }, // Default base stats
         }
     );
@@ -141,79 +144,47 @@ export function CharacterCreationWizard({ initialData, editMode = false }: Chara
         setCharacterData(prev => ({ ...prev, ...newData }));
     }, []); // Memoize update function
 
-    // Function to dynamically calculate features based on race and class selections
-    const recalculateFeatures = useCallback(async () => {
-         if (!characterData.race || !characterData.selectedClassLevels || Object.keys(characterData.selectedClassLevels).length === 0) {
-            return { baseFeatures: [], backgroundFeatures: [] }; // No race/class selected yet
+
+    // Calculate features based on current selections (Memoized)
+     const calculatedFeatures = useMemo(() => {
+         let features: Feature[] = [];
+         // Add race features (assuming these are static based on race name)
+         const raceDef = availableRaces.find(r => r.name === characterData.race);
+         if (raceDef?.traits) {
+             // TODO: Fetch actual feature definitions based on trait keys
+             // features.push(...getRaceFeatures(raceDef.traits));
          }
 
-         const raceFeaturesResult = await getRaceFeaturesAction(characterData.race, campaignId);
-         let raceFeatures: Feature[] = [];
-         if (raceFeaturesResult.success) {
-            raceFeatures = raceFeaturesResult.features;
-         } else {
-            console.error("Failed to load race features:", raceFeaturesResult.error);
+         // Add class features (cumulative up to selected levels)
+         if (characterData.selectedClassLevels) {
+             Object.entries(characterData.selectedClassLevels).forEach(([className, level]) => {
+                 // TODO: Fetch actual class features based on className and level
+                 // features.push(...getClassFeatures(className, level));
+             });
          }
 
-         const classFeaturePromises = Object.entries(characterData.selectedClassLevels).map(([className, level]) =>
-            getClassFeaturesAction(className, level, campaignId)
-         );
-         const classFeatureResults = await Promise.all(classFeaturePromises);
-         const classFeatures = classFeatureResults.flatMap(result => {
-            if (result.success) {
-                 return result.features;
-            } else {
-                 console.error("Failed to load class features:", result.error);
-                 return [];
-            }
-         });
-
-         // Fetch background features if background is selected
-         let backgroundFeatures: Feature[] = [];
+         // Add background features
          if (characterData.background) {
-             const bgFeaturesResult = await getBackgroundFeaturesAction(characterData.background, campaignId);
-             if (bgFeaturesResult.success) {
-                 backgroundFeatures = bgFeaturesResult.features;
-             } else {
-                 console.error("Failed to load background features:", bgFeaturesResult.error);
-             }
+             // TODO: Fetch actual background features
+             // features.push(...getBackgroundFeatures(characterData.background));
          }
 
+         // Combine and unique (simple example)
+          const uniqueFeatures = [...new Map(features.map(f => [f.name, f])).values()];
+          return uniqueFeatures;
+     }, [characterData.race, characterData.selectedClassLevels, characterData.background, availableRaces]); // Dependencies
 
-         // Combine and unique features (basic combination)
-         const baseFeatures = [...new Map([...raceFeatures, ...classFeatures].map(f => [f.name, f])).values()];
-
-          // Update derived state (like proficiencies, maybe HP) based on new features
-         // This part might be complex and could involve calling applyFeatureRulesAction
-         // For now, just return the collected features
-          return { baseFeatures, backgroundFeatures };
-
-     }, [characterData.race, characterData.selectedClassLevels, characterData.background, campaignId]);
-
-     // Update features whenever race, class, level, or background changes
-     useEffect(() => {
-        const updateFeatures = async () => {
-            const { baseFeatures, backgroundFeatures } = await recalculateFeatures();
-            // Combine all features for the character state
-            const allFeatures = [...new Map([...baseFeatures, ...backgroundFeatures].map(f => [f.name, f])).values()];
-            updateCharacterData({ features: allFeatures });
-        };
-        updateFeatures();
-    }, [recalculateFeatures, updateCharacterData]);
+    // Update features in main state whenever calculated features change
+    useEffect(() => {
+         // updateCharacterData({ features: calculatedFeatures });
+          // Use _calculatedFeatures to avoid direct update loop? Or handle carefully.
+           setCharacterData(prev => ({ ...prev, _calculatedFeatures: calculatedFeatures }));
+    }, [calculatedFeatures]); // Removed updateCharacterData dependency
 
 
     const handleNext = () => {
         if (isStepValid) {
-            // Determine if spellcasting step should be shown
-            const isSpellcaster = characterData.features?.some(f => f.metadata?.effectType === 'spellcastingGrant');
-            let nextStep = currentStep + 1;
-
-            // Skip Step 8 (Spells) if not a spellcaster OR if in edit mode (handle spell editing separately if needed)
-             if (currentStep === TOTAL_STEPS - 1 && (!isSpellcaster || editMode)) {
-                 nextStep = TOTAL_STEPS; // Go directly to review if skipping spells
-             }
-
-            setCurrentStep(prev => Math.min(nextStep, TOTAL_STEPS));
+            setCurrentStep(prev => Math.min(prev + 1, TOTAL_STEPS));
             setIsStepValid(false); // Reset validity for the next step
         } else {
             toast({ variant: 'destructive', title: 'Incomplete Step', description: 'Please complete the required fields or selections for this step.' });
@@ -221,14 +192,7 @@ export function CharacterCreationWizard({ initialData, editMode = false }: Chara
     };
 
     const handleBack = () => {
-         let prevStep = currentStep - 1;
-         // Skip Step 8 (Spells) backwards if not a spellcaster OR if in edit mode
-          const isSpellcaster = characterData.features?.some(f => f.metadata?.effectType === 'spellcastingGrant');
-          if (currentStep === TOTAL_STEPS && (!isSpellcaster || editMode)) {
-               prevStep = TOTAL_STEPS - 2; // Skip back over spells step
-          }
-
-        setCurrentStep(prev => Math.max(1, prevStep));
+        setCurrentStep(prev => Math.max(1, prev - 1));
         setIsStepValid(true); // Assume previous step was valid
     };
 
@@ -237,49 +201,58 @@ export function CharacterCreationWizard({ initialData, editMode = false }: Chara
              toast({ variant: 'destructive', title: 'Authentication Error', description: 'You must be logged in to save a character.' });
              return;
         }
+        if (!isStepValid && currentStep === TOTAL_STEPS) { // Check validity on the final (review) step
+             toast({ variant: 'destructive', title: 'Review Needed', description: 'Please review the character details.' });
+             // Or perhaps the review step is always considered "valid" once reached.
+             // setValidity(true) could be called unconditionally in the review step's useEffect.
+             // For now, let's assume the review step sets its own validity.
+             return;
+        }
 
         setApiError(null);
         setIsLoading(true);
 
-        // Prepare final character data for saving
-        const finalData: Omit<Character, 'id' | 'createdAt' | 'updatedAt' | 'stats' | 'spellcasting'> & { baseStats?: Partial<Character['baseStats']> } = {
+        // Prepare final character data for saving - Use base stats and choices
+        const baseData: Partial<Omit<Character, 'id' | 'createdAt' | 'updatedAt' | 'stats' | 'spellcasting' | 'proficiencies' | 'skills' | 'hitPoints' | 'hitDice'>> & { baseStats?: Partial<Character['baseStats']> } = {
             playerId: user.uid,
-            playerName: characterData.playerName || 'Unknown Player',
-            characterName: characterData.characterName || 'Unnamed Character',
-            race: characterData.race || 'Unknown Race',
-            class: characterData.class || 'Unknown Class', // Assuming single class for now
-            level: characterData.level || 1,
-            background: characterData.background || 'Unknown Background',
-            alignment: characterData.alignment || 'Neutral',
-            baseStats: characterData.stats, // Save base stats
-            skills: characterData.skills || {},
-            hitPoints: characterData.hitPoints || { max: 0, current: 0, temporary: 0 },
-            hitDice: characterData.hitDice || { total: 1, remaining: 1, dieType: null },
-            equipment: characterData.equipment || [],
-            proficiencies: characterData.proficiencies || { armor: [], weapons: [], tools: [], savingThrows: [], languages: [] },
-            features: characterData.features || [],
-            featureChoices: characterData.featureChoices || {},
-            spellsKnown: characterData.spellsKnown || [],
-            spellsPrepared: characterData.spellsPrepared || [],
-            backstory: characterData.backstory || '',
-            appearance: characterData.appearance || '',
+            playerName: characterData.playerName,
+            characterName: characterData.characterName,
+            race: characterData.race,
+            class: characterData.class, // Assuming single class for now
+            level: characterData.level,
+            background: characterData.background,
+            alignment: characterData.alignment,
+            baseStats: characterData.stats, // Save base stats from Step 4
+            equipment: characterData.equipment,
+            features: characterData.features, // Save the collected features
+            featureChoices: characterData.featureChoices, // Save choices
+            spellsKnown: characterData.spellsKnown,
+            spellsPrepared: characterData.spellsPrepared,
+            backstory: characterData.backstory,
+            appearance: characterData.appearance,
             campaignId: characterData.campaignId,
+            // HP, Skills, Proficiencies, etc., will be calculated server-side on load/update based on features/class/level/stats
         };
+
 
         try {
             let result;
             if (editMode && initialData?.id) {
                 // Update existing character
-                result = await updateCharacterAction(initialData.id, finalData, user.uid);
+                result = await updateCharacterAction(initialData.id, baseData, user.uid);
             } else {
                 // Save new character
-                result = await saveCharacterAction(finalData as any, user.uid); // Need to cast as Omit<...>
+                 // Ensure required fields are present before casting
+                 if (!baseData.playerName || !baseData.characterName || !baseData.race || !baseData.class || !baseData.level || !baseData.background || !baseData.alignment || !baseData.baseStats) {
+                      throw new Error("Missing required character information before saving.");
+                 }
+                result = await saveCharacterAction(baseData as Omit<Character, 'id' | 'createdAt' | 'updatedAt'>, user.uid);
             }
 
             if (result.success) {
                 toast({
                     title: editMode ? 'Character Updated' : 'Character Created',
-                    description: `${finalData.characterName} has been saved successfully.`,
+                    description: `${baseData.characterName} has been saved successfully.`,
                 });
                 const characterId = editMode ? initialData?.id : result.characterId;
                 router.push(characterId ? `/character/view/${characterId}` : '/'); // Redirect to view or list
@@ -314,27 +287,12 @@ export function CharacterCreationWizard({ initialData, editMode = false }: Chara
             case 6:
                  return <Step6Equipment data={characterData} updateData={updateCharacterData} setValidity={setIsStepValid} availableItems={availableItems} isLoading={isLoadingItems} availableClasses={availableClasses} availableBackgrounds={availableBackgrounds} />;
             case 7:
-                 // Determine if spells step should be shown based on features
-                  const isSpellcaster = characterData.features?.some(f => f.metadata?.effectType === 'spellcastingGrant');
-                  if (isSpellcaster && !editMode) { // Show spells only if spellcaster and not in edit mode (for simplicity)
-                       return <Step8Spells
-                                data={characterData}
-                                updateData={updateCharacterData}
-                                setValidity={setIsStepValid}
-                                availableSpells={availableSpells} // Pass spells
-                                availableClasses={availableClasses} // Pass class info
-                                isLoadingSpells={isLoadingSpells}
-                            />;
-                  }
-                  // Skip spell step in edit mode or if not a spellcaster
-                  if (currentStep === 7) { // Use 7 because step increments after render potentially
-                     setCurrentStep(prev => prev + 1); // Auto-advance if skipped
-                     return <Loader2 className="h-8 w-8 animate-spin text-center mx-auto" />; // Show loader briefly
-                  }
-                  // Fallthrough to review if spell step was skipped incorrectly (shouldn't happen)
-                 return <Step7Review characterData={characterData} />;
+                // Step 7: Feature Choices
+                 return <Step7FeatureChoices data={characterData} updateData={updateCharacterData} setValidity={setIsStepValid} />;
              case 8:
-                 return <Step7Review characterData={characterData} />; // Review is now step 8 if spells included
+                 // Step 8: Review
+                 // Pass the potentially updated characterData with choices to Review step
+                 return <Step8Review characterData={characterData} />;
 
             default:
                 return <div>Invalid Step</div>;
@@ -349,7 +307,7 @@ export function CharacterCreationWizard({ initialData, editMode = false }: Chara
 
     if (isFetchingInitialData && !initialData) { // Show loader only on initial create load
         return (
-            <div className="space-y-4 p-4 md:p-6">
+             <div className="space-y-4 p-4 md:p-6">
                 <Skeleton className="h-8 w-1/3" />
                 <Skeleton className="h-4 w-full" />
                 <Skeleton className="h-64 w-full" />
@@ -357,19 +315,13 @@ export function CharacterCreationWizard({ initialData, editMode = false }: Chara
                     <Skeleton className="h-10 w-24" />
                     <Skeleton className="h-10 w-24" />
                 </div>
-            </div>
+             </div>
         );
     }
 
-
-     // Determine the actual final step number, considering the spell step skip
-     const isSpellcasterForFinalStep = characterData.features?.some(f => f.metadata?.effectType === 'spellcastingGrant');
-     const actualTotalSteps = (isSpellcasterForFinalStep && !editMode) ? TOTAL_STEPS : TOTAL_STEPS - 1;
-
-
     return (
         <div className="p-4 md:p-6 max-w-4xl mx-auto">
-            <h1 className="text-2xl font-bold mb-2">{editMode ? 'Edit Character' : 'Create New Character'} - Step {currentStep} of {actualTotalSteps}</h1>
+            <h1 className="text-2xl font-bold mb-2">{editMode ? 'Edit Character' : 'Create New Character'} - Step {currentStep} of {finalStepNumber}</h1>
             <Progress value={progress} className="w-full mb-6" />
 
             {apiError && (
@@ -393,7 +345,7 @@ export function CharacterCreationWizard({ initialData, editMode = false }: Chara
                 >
                     Back
                 </Button>
-                {currentStep < actualTotalSteps ? (
+                {currentStep < finalStepNumber ? (
                     <Button
                         onClick={handleNext}
                         disabled={!isStepValid || isLoading}
@@ -403,7 +355,7 @@ export function CharacterCreationWizard({ initialData, editMode = false }: Chara
                 ) : (
                     <Button
                         onClick={handleSubmit}
-                        disabled={!isStepValid || isLoading} // Ensure final step is also valid before submitting
+                        disabled={isLoading || !isStepValid} // Ensure final step is valid before submitting
                     >
                         {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                         {editMode ? 'Update Character' : 'Finish & Save Character'}

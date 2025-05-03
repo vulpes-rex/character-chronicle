@@ -7,11 +7,11 @@ import { Separator } from '@/components/ui/separator';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 
-interface Step7ReviewProps {
+interface Step8ReviewProps {
     characterData: PartialCharacterFormData;
 }
 
-export function Step7Review({ characterData }: Step7ReviewProps) {
+export function Step8Review({ characterData }: Step8ReviewProps) {
     const {
         playerName,
         characterName,
@@ -24,6 +24,7 @@ export function Step7Review({ characterData }: Step7ReviewProps) {
         skills,
         proficiencies,
         features,
+        featureChoices, // Added feature choices
         equipment,
         spellsKnown, // Added spells
         spellsPrepared, // Added spells
@@ -35,6 +36,12 @@ export function Step7Review({ characterData }: Step7ReviewProps) {
         if (score === null || score === undefined) return '+0';
         const mod = Math.floor((score - 10) / 2);
         return mod >= 0 ? `+${mod}` : `${mod}`;
+    };
+
+    const getChoiceDisplay = (featureKey: string | undefined): string | null => {
+       if (!featureKey || !featureChoices || !featureChoices[featureKey]) return null;
+       const choice = featureChoices[featureKey];
+       return Array.isArray(choice) ? choice.join(', ') : choice;
     };
 
     return (
@@ -63,11 +70,11 @@ export function Step7Review({ characterData }: Step7ReviewProps) {
                         <div>
                             <h4 className="font-semibold mb-2">Ability Scores</h4>
                             <div className="grid grid-cols-3 gap-2">
-                                {stats && Object.entries(stats).map(([stat, score]) => (
+                                {stats && (Object.keys(stats) as Array<keyof typeof stats>).map((stat) => (
                                     <div key={stat} className="text-center border rounded p-2">
                                         <div className="text-xs uppercase text-muted-foreground">{stat.substring(0, 3)}</div>
-                                        <div className="font-bold text-lg">{score ?? '-'}</div>
-                                        <div className="text-xs">{getModifier(score)}</div>
+                                        <div className="font-bold text-lg">{stats[stat] ?? '-'}</div>
+                                        <div className="text-xs">{getModifier(stats[stat])}</div>
                                     </div>
                                 ))}
                             </div>
@@ -106,9 +113,16 @@ export function Step7Review({ characterData }: Step7ReviewProps) {
                             <div>
                                 <h4 className="font-semibold mb-2">Features & Traits</h4>
                                 <ul className="space-y-1 list-disc pl-5 text-xs">
-                                    {features.map(feature => (
-                                        <li key={feature.name}>{feature.name} ({feature.source})</li>
-                                    ))}
+                                    {features.map(feature => {
+                                        const choiceKey = feature.metadata?.effectType === 'choiceGrant' ? feature.metadata.choiceKey : undefined;
+                                        const selectedChoice = getChoiceDisplay(choiceKey);
+                                        return (
+                                            <li key={feature.name}>
+                                                 {feature.name} ({feature.source})
+                                                 {selectedChoice && <span className="text-muted-foreground italic"> - Chosen: {selectedChoice}</span>}
+                                             </li>
+                                        );
+                                    })}
                                 </ul>
                             </div>
                         )}

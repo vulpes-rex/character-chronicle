@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react'; // Added useEffect, useCallback
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -16,16 +16,17 @@ import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Slider } from '@/components/ui/slider'; // Using Slider for dice selection
 import { HeartPulse } from 'lucide-react'; // Removed Dices
-import type { HitPoints } from '@/services/dnd-api';
+import type { HitPointsState, HitDiceState } from '@/lib/types'; // Corrected HitPoints import
 import { useToast } from '@/hooks/use-toast';
+import { calculateAbilityModifier } from '@/services/rules-service'; // Import calculator
 
 interface ShortRestDialogProps {
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
   maxHitDice: number;
   currentHitDice: number;
-  hitDieType: HitPoints['hitDieType'];
-  constitutionModifier: number;
+  hitDieType: HitDiceState['dieType']; // Use correct type from HitDiceState
+  constitutionScore: number; // Changed from modifier to score
   maxHp: number;
   currentHp: number;
   onConfirm: (hitDiceSpent: number, hpRecovered: number) => void;
@@ -38,7 +39,7 @@ export function ShortRestDialog({
   maxHitDice,
   currentHitDice,
   hitDieType,
-  constitutionModifier,
+  constitutionScore, // Updated prop
   maxHp,
   currentHp,
   onConfirm,
@@ -47,18 +48,27 @@ export function ShortRestDialog({
   const [diceToSpend, setDiceToSpend] = useState<number>(0);
   const [calculatedRecovery, setCalculatedRecovery] = useState<number>(0);
   const [isRolling, setIsRolling] = useState(false);
+  const [constitutionModifier, setConstitutionModifier] = useState(0); // State for modifier
   const { toast } = useToast();
+
+   // Calculate modifier when score changes
+   useEffect(() => {
+       const calculateMod = async () => {
+           setConstitutionModifier(await calculateAbilityModifier(constitutionScore));
+       };
+       calculateMod();
+   }, [constitutionScore]);
 
   const maxDiceCanSpend = useMemo(() => Math.min(currentHitDice, maxHitDice), [currentHitDice, maxHitDice]);
 
    // Reset state when dialog opens/closes
-   useState(() => {
+   useEffect(() => {
      if (!isOpen) {
        setDiceToSpend(0);
        setCalculatedRecovery(0);
        setIsRolling(false);
      }
-   });
+   }, [isOpen]); // Depend only on isOpen
 
    const handleSliderChange = (value: number[]) => {
      setDiceToSpend(value[0]);
@@ -67,7 +77,7 @@ export function ShortRestDialog({
    };
 
 
-  const handleRollHitDice = async () => { // Make async
+  const handleRollHitDice = useCallback(async () => { // Make async and useCallback
       if (!hitDieType || diceToSpend <= 0) return;
       setIsRolling(true);
 
@@ -77,7 +87,7 @@ export function ShortRestDialog({
       for (let i = 0; i < diceToSpend; i++) {
           // Use the passed rollDiceFn (which now uses dddice and logs)
           const roll = await rollDiceFn(hitDieType, `Hit Die #${i + 1}`);
-          const recoveryThisDie = Math.max(0, roll + constitutionModifier); // Minimum 0 HP recovered per die
+          const recoveryThisDie = Math.max(0, roll + constitutionModifier); // Use state modifier
           totalRecovered += recoveryThisDie;
           rollsDescription += `${i > 0 ? ', ' : ''}${roll}`;
       }
@@ -92,7 +102,7 @@ export function ShortRestDialog({
       //     description: `Rolled ${diceToSpend} ${hitDieType}: [${rollsDescription}]. Base recovery: ${totalRecovered} HP. Actual recovery capped at ${finalRecovery} HP.`,
       // });
       setIsRolling(false); // Set rolling to false after completion
-  };
+  }, [diceToSpend, hitDieType, rollDiceFn, constitutionModifier, maxHp, currentHp, toast]); // Include dependencies
 
    const handleConfirmRest = () => {
      // Confirmation happens even if 0 dice were rolled (to reset features)
@@ -176,4 +186,3 @@ export function ShortRestDialog({
   );
 }
 
-    

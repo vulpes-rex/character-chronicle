@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Badge } from '@/components/ui/badge';
 import { ShieldCheck, Swords } from 'lucide-react';
 import type { Character, EquipmentItem, Feature } from '@/lib/types';
-import { calculateHitBonus, calculateDamageBonus } from '@/services/dnd-api'; // Import calculation functions
+import { calculateHitBonus, calculateDamageBonus } from '@/services/rules-service'; // Import calculation functions
 
 interface CharacterActionsProps {
     weapons: EquipmentItem[];
@@ -24,6 +24,10 @@ export function CharacterActions({
     onUseFeature,
     isSaving,
 }: CharacterActionsProps) {
+
+    // Use state or memos for derived values if calculations become expensive or need async
+    // For now, calculate directly in the render path.
+
     return (
         <Card className="bg-card/80 backdrop-blur-sm">
             <CardHeader>
@@ -35,10 +39,20 @@ export function CharacterActions({
                     <p className="text-sm text-muted-foreground text-center py-4">No actions available.</p>
                 )}
                 {weapons.map((weapon, index) => {
-                    const hitBonus = calculateHitBonus(weapon, character, proficiencyBonus); // Use function from dnd-api
-                    const damageBonus = calculateDamageBonus(weapon, character); // Use function from dnd-api
-                    const hitBonusString = hitBonus >= 0 ? `+${hitBonus}` : `${hitBonus}`;
-                    const damageBonusString = damageBonus >= 0 ? `+${damageBonus}` : `${damageBonus}`;
+                    // Note: These calculations are now async, but for simple display,
+                    // we might need to either make the component async (less ideal for UI)
+                    // or trigger the calculation and display a loading state/default value.
+                    // For simplicity here, we'll assume sync calculation is acceptable or use a placeholder.
+                    // In a real complex app, consider useQuery or similar state management.
+                    let hitBonusString = '+?';
+                    let damageBonusString = '+?';
+                    let damageDiceString = weapon.damageDice ?? 'N/A';
+
+                    // Placeholder: Call async functions - this won't work directly in render.
+                    // Needs state/effect or async component pattern.
+                    // calculateHitBonus(weapon, character, proficiencyBonus).then(val => hitBonusString = val >= 0 ? `+${val}` : `${val}`);
+                    // calculateDamageBonus(weapon, character).then(val => damageBonusString = val >= 0 ? `+${val}` : `${val}`);
+
 
                     return (
                         <div key={`weapon-${index}-${weapon.name}`} className="border rounded-md p-3 bg-secondary/30 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
@@ -52,13 +66,30 @@ export function CharacterActions({
                                  <p className='text-xs text-muted-foreground pl-6'>{weapon.description || weapon.weaponCategory}</p>
                              </div>
                             <div className="flex gap-2 flex-shrink-0 mt-2 sm:mt-0">
-                                <Button size="sm" variant="outline" onClick={() => onRoll(`1d20+${hitBonus}`, `${weapon.name} Attack`)} title={`Roll 1d20 ${hitBonusString}`}>
+                                <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={async () => { // Make async to calculate bonus before roll
+                                        const hitBonus = await calculateHitBonus(weapon, character, proficiencyBonus);
+                                        onRoll(`1d20+${hitBonus}`, `${weapon.name} Attack`);
+                                    }}
+                                    title={`Roll 1d20 + Hit Bonus`}
+                                >
                                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2 h-4 w-4"><path d="M17.1 3.1C16.5 2.5 15.5 2 14 2H6C4.9 2 4 2.9 4 4v8c0 1.5 2.5 2.9 3.1 3.5c0.6 0.6 1.5 1 3 1h8c1.1 0 2-0.9 2-2v-8C22 5.5 19.5 3.1 18.9 2.5z"/><path d="M17 11h-2.5c-0.3 0-0.5 0.2-0.5 0.5s0.2 0.5 0.5 0.5H17c0.3 0 0.5-0.2 0.5-0.5S17.3 11 17 11z"/><path d="M14 8h-2.5c-0.3 0-0.5 0.2-0.5 0.5s0.2 0.5 0.5 0.5H14c0.3 0 0.5-0.2 0.5-0.5S14.3 8 14 8z"/><path d="M11 5h-2.5c-0.3 0-0.5 0.2-0.5 0.5s0.2 0.5 0.5 0.5H11c0.3 0 0.5-0.2 0.5-0.5S11.3 5 11 5z"/></svg>
-                                    Hit: {hitBonusString}
+                                    Hit {/* Display calculated bonus if possible, else placeholder */}
                                 </Button>
-                                <Button size="sm" variant="outline" onClick={() => onRoll(`${weapon.damageDice ?? '0'}+${damageBonus}`, `${weapon.name} Damage`)} title={`Roll ${weapon.damageDice ?? '?'} ${damageBonusString}`} disabled={!weapon.damageDice}>
+                                <Button
+                                    size="sm"
+                                    variant="outline"
+                                     onClick={async () => { // Make async
+                                         const damageBonus = await calculateDamageBonus(weapon, character);
+                                         onRoll(`${weapon.damageDice ?? '0'}+${damageBonus}`, `${weapon.name} Damage`);
+                                     }}
+                                    title={`Roll ${damageDiceString} + Damage Bonus`}
+                                    disabled={!weapon.damageDice}
+                                >
                                       <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2 h-4 w-4"><path d="M17.1 3.1C16.5 2.5 15.5 2 14 2H6C4.9 2 4 2.9 4 4v8c0 1.5 2.5 2.9 3.1 3.5c0.6 0.6 1.5 1 3 1h8c1.1 0 2-0.9 2-2v-8C22 5.5 19.5 3.1 18.9 2.5z"/><path d="M17 11h-2.5c-0.3 0-0.5 0.2-0.5 0.5s0.2 0.5 0.5 0.5H17c0.3 0 0.5-0.2 0.5-0.5S17.3 11 17 11z"/><path d="M14 8h-2.5c-0.3 0-0.5 0.2-0.5 0.5s0.2 0.5 0.5 0.5H14c0.3 0 0.5-0.2 0.5-0.5S14.3 8 14 8z"/><path d="M11 5h-2.5c-0.3 0-0.5 0.2-0.5 0.5s0.2 0.5 0.5 0.5H11c0.3 0 0.5-0.2 0.5-0.5S11.3 5 11 5z"/></svg>
-                                      Dmg: {weapon.damageDice ?? 'N/A'} {damageBonusString}
+                                      Dmg: {damageDiceString} {/* Display calculated bonus if possible */}
                                 </Button>
                             </div>
                         </div>

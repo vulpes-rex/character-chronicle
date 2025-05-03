@@ -3,10 +3,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { HeartPulse } from 'lucide-react';
 import type { HitPointsState, HitDiceState } from '@/lib/types';
+import { calculateAbilityModifier } from '@/services/rules-service'; // Import
+import { useState, useEffect } from 'react'; // Import hooks
 
 interface CharacterCombatStatsProps {
+    dexterityScore: number; // Pass score instead of pre-calculated initiative
     armorClass: number;
-    initiative: number;
     speed: string;
     hitPoints: HitPointsState;
     hitDice: HitDiceState;
@@ -15,14 +17,28 @@ interface CharacterCombatStatsProps {
 }
 
 export function CharacterCombatStats({
+    dexterityScore, // Updated prop
     armorClass,
-    initiative,
     speed,
     hitPoints,
     hitDice,
     onHpChange,
     isSaving,
 }: CharacterCombatStatsProps) {
+    const [initiative, setInitiative] = useState<number | string>('...'); // State for initiative
+
+    useEffect(() => {
+        const calculateInitiative = async () => {
+            const dexMod = await calculateAbilityModifier(dexterityScore);
+            setInitiative(dexMod);
+        };
+        calculateInitiative();
+    }, [dexterityScore]);
+
+    const initiativeString = typeof initiative === 'number'
+        ? (initiative >= 0 ? `+${initiative}` : `${initiative}`)
+        : initiative; // Show '...' while loading
+
     return (
         <Card className="bg-card/80 backdrop-blur-sm">
             <CardHeader>
@@ -35,7 +51,7 @@ export function CharacterCombatStats({
                 </div>
                 <div className="border rounded-md p-3 bg-secondary/30">
                     <Label className="text-xs uppercase text-muted-foreground">Initiative</Label>
-                    <div className="text-3xl font-bold mt-1">{initiative >= 0 ? '+' : ''}{initiative}</div>
+                    <div className="text-3xl font-bold mt-1">{initiativeString}</div>
                 </div>
                 <div className="border rounded-md p-3 bg-secondary/30">
                     <Label className="text-xs uppercase text-muted-foreground">Speed</Label>

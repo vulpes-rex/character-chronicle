@@ -1,3 +1,4 @@
+
 // @ts-nocheck - Disabling TypeScript checks for rapid prototyping
 'use client';
 
@@ -20,7 +21,7 @@ import { rollDice } from '@/lib/types'; // Keep base rollDice for now
 import { addGameLogEntry } from '@/services/campaign-service'; // Import campaign service
 import { useAuth } from './auth-provider'; // Import useAuth
 import { useDiceRoller } from './dice-roll-context'; // Import useDiceRoller hook
-import { calculateAbilityModifier, calculateArmorClass, calculateHitBonus, calculateDamageBonus, calculateSpellSaveDC, calculateSpellAttackBonus } from '@/services/rules-service'; // Import calculation functions
+import { calculateAbilityModifier, calculateArmorClass, calculateHitBonus, calculateDamageBonus, calculateSpellSaveDC, calculateSpellAttackBonus, calculateMaxHitPoints } from '@/services/rules-service'; // Import calculation functions
 import { getCombinedContentFromPacks } from '@/services/campaign-service'; // Needed for content context
 
 // Import sub-components
@@ -89,15 +90,7 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
     // --- Derived Values (Using rules-service) ---
     const finalStats = useMemo(() => characterData?.stats || initialCharacter.stats, [characterData, initialCharacter.stats]);
 
-    const modifiers = useMemo(() => ({
-        strength: calculateAbilityModifier(finalStats.strength),
-        dexterity: calculateAbilityModifier(finalStats.dexterity),
-        constitution: calculateAbilityModifier(finalStats.constitution),
-        intelligence: calculateAbilityModifier(finalStats.intelligence),
-        wisdom: calculateAbilityModifier(finalStats.wisdom),
-        charisma: calculateAbilityModifier(finalStats.charisma),
-    }), [finalStats]);
-
+    // Proficiency Bonus
     const proficiencyBonus = useMemo(() => {
         const level = characterData?.level ?? 1;
         if (level >= 17) return 6;
@@ -107,25 +100,31 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
         return 2;
     }, [characterData?.level]);
 
-    // AC requires the full character object with features and equipment
-    const armorClass = useMemo(() => characterData ? calculateArmorClass(characterData) : 10, [characterData]);
+    // AC, Spell Save DC, Spell Attack Bonus (Calculated Asynchronously)
+    const [armorClass, setArmorClass] = useState(10);
+    const [spellSaveDC, setSpellSaveDC] = useState(0);
+    const [spellAttackBonus, setSpellAttackBonus] = useState(0);
 
-    const spellSaveDC = useMemo(() => {
-        if (!characterData?.spellcasting?.ability) return 0;
-        const abilityScore = characterData.stats[characterData.spellcasting.ability] ?? 10;
-        return calculateSpellSaveDC(proficiencyBonus, abilityScore);
-    }, [characterData?.spellcasting?.ability, characterData?.stats, proficiencyBonus]);
+    useEffect(() => {
+        const calculateDerived = async () => {
+            if (!characterData) return;
+            setArmorClass(await calculateArmorClass(characterData));
 
-    const spellAttackBonus = useMemo(() => {
-        if (!characterData?.spellcasting?.ability) return 0;
-        const abilityScore = characterData.stats[characterData.spellcasting.ability] ?? 10;
-        return calculateSpellAttackBonus(proficiencyBonus, abilityScore);
-    }, [characterData?.spellcasting?.ability, characterData?.stats, proficiencyBonus]);
+            if (characterData.spellcasting?.ability) {
+                const abilityScore = characterData.stats[characterData.spellcasting.ability] ?? 10;
+                setSpellSaveDC(await calculateSpellSaveDC(proficiencyBonus, abilityScore));
+                setSpellAttackBonus(await calculateSpellAttackBonus(proficiencyBonus, abilityScore));
+            } else {
+                setSpellSaveDC(0);
+                setSpellAttackBonus(0);
+            }
+        };
+        calculateDerived();
+    }, [characterData, proficiencyBonus]); // Recalculate when character or proficiency bonus changes
 
-
+    // Other derived data
     const allFeaturesAndTraits = useMemo(() => characterData?.features ?? [], [characterData?.features]);
     const equippedWeapons = useMemo(() => characterData?.equipment.filter(item => item.isEquipped && item.type === 'Weapon') ?? [], [characterData?.equipment]);
-    // Actionable features now read currentUses directly from characterData
     const actionableFeatures = useMemo(() =>
         allFeaturesAndTraits.filter(f => f.isActionable),
         [allFeaturesAndTraits]
@@ -180,7 +179,7 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
              }
 
             if (Object.keys(editableUpdates).length > 0) {
-                await updateCharacter(characterData.id, editableUpdates);
+                await updateCharacter(characterData.id, editableUpdates, user!.uid); // Pass user ID
                 queryClient.invalidateQueries({ queryKey: ['character', characterData.id] });
                 // Let the query refetch handle the UI update
                 toast({ title: "Character Updated" });
@@ -195,7 +194,7 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
         } finally {
             setIsSaving(false);
         }
-    }, [characterData, queryClient, toast]);
+    }, [characterData, queryClient, toast, user]); // Add user to dependencies
 
     // --- Event Handlers (Simplified - call updateCharacterState) ---
     const handleHitPointChange = (type: 'current' | 'temporary', value: string) => {
@@ -320,6 +319,7 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
              let hpUpdates: Partial<Character> = {};
              if (featureName === 'Second Wind' && characterData.hitPoints) {
                  const healingRoll = await performRoll('1d10', 'Second Wind Healing Die');
+                 // Assuming level is available directly on characterData
                  const healing = healingRoll + characterData.level;
                  const newHpState = { ...characterData.hitPoints, current: Math.min(characterData.hitPoints.max, characterData.hitPoints.current + healing) };
                  hpUpdates = { hitPoints: newHpState };
@@ -329,7 +329,14 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
             // Pass only the changed features and HP updates to the state updater
             await updateCharacterState({ ...hpUpdates, features: updatedFeatures });
              if (characterData?.campaignId && user) {
-                 await addGameLogEntry({ campaignId: characterData.campaignId, actorId: user.uid, actorName: userProfile?.displayName || characterData.playerName || 'Player', actionType: 'featureUse', details: `${characterData.characterName} used ${featureName} (${newUses}/${feature.maxUses} remaining).${hpUpdates.hitPoints ? ` Healed for ${hpUpdates.hitPoints.current - characterData.hitPoints.current} HP.` : ''}` });
+                 const healAmount = hpUpdates.hitPoints ? hpUpdates.hitPoints.current - (characterData.hitPoints?.current || 0) : 0;
+                 await addGameLogEntry({
+                     campaignId: characterData.campaignId,
+                     actorId: user.uid,
+                     actorName: userProfile?.displayName || characterData.playerName || 'Player',
+                     actionType: 'featureUse',
+                     details: `${characterData.characterName} used ${featureName} (${newUses}/${feature.maxUses} remaining).${healAmount > 0 ? ` Healed for ${healAmount} HP.` : ''}`
+                 });
              }
             // Toast is handled by updateCharacterState on success
         } else {
@@ -477,7 +484,8 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
 
                         <TabsContent value="core">
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                                <CharacterStats stats={finalStats} baseStats={baseCharacter.stats} modifiers={modifiers} />
+                                {/* Pass base stats for comparison */}
+                                <CharacterStats stats={finalStats} baseStats={baseCharacter.stats} />
                                 <CharacterSkills character={characterData} proficiencyBonus={proficiencyBonus} onRoll={performRoll} />
                                 {/* Pass characterData.features which includes currentUses */}
                                 <CharacterFeatures features={allFeaturesAndTraits} uses={Object.fromEntries(characterData.features.map(f => [f.name, f.currentUses]))} />
@@ -488,7 +496,7 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                                 <CharacterCombatStats
                                     armorClass={armorClass}
-                                    initiative={modifiers.dexterity}
+                                    dexterityScore={finalStats.dexterity} // Pass score for async calculation
                                     speed={`${characterData.race === 'Dwarf' ? 25 : 30} ft`} // Simplistic speed
                                     hitPoints={characterData.hitPoints}
                                     hitDice={characterData.hitDice}
@@ -559,7 +567,7 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
                  maxHitDice={characterData.hitDice.total}
                  currentHitDice={characterData.hitDice.remaining}
                  hitDieType={characterData.hitDice.dieType}
-                 constitutionModifier={modifiers.constitution}
+                 constitutionModifier={calculateAbilityModifier(finalStats.constitution)} // Calculate mod directly
                  maxHp={characterData.hitPoints.max}
                  currentHp={characterData.hitPoints.current}
                  onConfirm={handleShortRest}
@@ -608,3 +616,4 @@ function NotFoundDisplay() {
         </div>
     );
 }
+

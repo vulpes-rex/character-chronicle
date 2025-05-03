@@ -7,10 +7,10 @@ import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Trash2, PlusCircle } from 'lucide-react';
-import { AddEquipmentDialog } from '../add-equipment-dialog'; // Assuming this exists
+import { AddEquipmentDialog } from '../add-equipment-dialog'; // Corrected relative path
 import { useToast } from '@/hooks/use-toast';
-import { updateCharacterAction } from '@/app/actions/character-actions'; // Use server action
-import { useAuth } from '../auth-provider';
+import { updateCharacterAction, loadCharacterAction } from '@/app/actions/character-actions'; // Use server action
+import { useAuth } from '../auth-provider'; // Corrected relative path
 
 interface CharacterEquipmentInventoryProps {
     characterId: string;
@@ -19,6 +19,7 @@ interface CharacterEquipmentInventoryProps {
     availableItems: EquipmentItem[]; // Pass all available items for the dialog
     isLoadingItems: boolean; // Indicate if items are loading
     onCharacterUpdate: (updatedCharacter: Character | null) => void; // Callback to update parent state
+     characterData: Character; // Pass the full character data for fallback updates
 }
 
 export function CharacterEquipmentInventory({
@@ -28,6 +29,7 @@ export function CharacterEquipmentInventory({
     availableItems,
     isLoadingItems,
     onCharacterUpdate,
+     characterData, // Receive character data
 }: CharacterEquipmentInventoryProps) {
     const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
     const { toast } = useToast();
@@ -38,14 +40,14 @@ export function CharacterEquipmentInventory({
              toast({ variant: "destructive", title: "Error", description: "Not authorized to modify this character." });
              return;
         }
-        const updatedEquipment = [...equipment];
+        const updatedEquipment = [...(equipment || [])]; // Handle case where equipment might be initially undefined
         // Check if item already exists to stack quantity
         const existingItemIndex = updatedEquipment.findIndex(item => item.name === itemToAdd.name);
 
         if (existingItemIndex > -1) {
             updatedEquipment[existingItemIndex].quantity = (updatedEquipment[existingItemIndex].quantity || 1) + (itemToAdd.quantity || 1);
         } else {
-            updatedEquipment.push({ ...itemToAdd, isEquipped: false }); // Add new item, ensure quantity defaults if needed
+            updatedEquipment.push({ ...itemToAdd, quantity: itemToAdd.quantity || 1, isEquipped: false }); // Add new item, ensure quantity defaults if needed
         }
 
         try {
@@ -53,11 +55,13 @@ export function CharacterEquipmentInventory({
              if (result.success) {
                  // Fetch updated character to refresh the whole sheet state via callback
                   const updatedCharResult = await loadCharacterAction(characterId); // Assumes loadCharacterAction exists
-                  if (updatedCharResult.success) {
+                  if (updatedCharResult.success && updatedCharResult.character) {
                      onCharacterUpdate(updatedCharResult.character);
+                     toast({ title: "Item Added", description: `${itemToAdd.name} added.` });
                   } else {
                      // Fallback: update local state partially if reload fails
-                     onCharacterUpdate({ ...characterData, equipment: updatedEquipment } as Character); // Pass current character data with updated equipment
+                     toast({ title: "Item Added (Local Update)", description: `${itemToAdd.name} added locally, but failed to reload full sheet.` });
+                     onCharacterUpdate({ ...characterData, equipment: updatedEquipment }); // Pass current character data with updated equipment
                   }
              } else {
                  throw new Error(result.error || 'Failed to update equipment.');
@@ -69,16 +73,18 @@ export function CharacterEquipmentInventory({
 
     const handleRemoveItem = async (indexToRemove: number) => {
          if (!user || user.uid !== playerId) return;
-         const updatedEquipment = equipment.filter((_, index) => index !== indexToRemove);
+         const updatedEquipment = (equipment || []).filter((_, index) => index !== indexToRemove);
          try {
              const result = await updateCharacterAction(characterId, { equipment: updatedEquipment }, user.uid);
               if (result.success) {
                  // Reload character or update locally
                  const updatedCharResult = await loadCharacterAction(characterId);
-                 if (updatedCharResult.success) {
+                 if (updatedCharResult.success && updatedCharResult.character) {
                     onCharacterUpdate(updatedCharResult.character);
+                     toast({ title: "Item Removed" });
                  } else {
-                    onCharacterUpdate({ ...characterData, equipment: updatedEquipment } as Character);
+                     toast({ title: "Item Removed (Local Update)", description: "Failed to reload full sheet." });
+                    onCharacterUpdate({ ...characterData, equipment: updatedEquipment });
                  }
               } else {
                   throw new Error(result.error || 'Failed to remove item.');
@@ -90,7 +96,7 @@ export function CharacterEquipmentInventory({
 
     const handleToggleEquip = async (indexToToggle: number) => {
          if (!user || user.uid !== playerId) return;
-         const updatedEquipment = equipment.map((item, index) =>
+         const updatedEquipment = (equipment || []).map((item, index) =>
              index === indexToToggle ? { ...item, isEquipped: !item.isEquipped } : item
          );
          try {
@@ -98,10 +104,11 @@ export function CharacterEquipmentInventory({
               if (result.success) {
                  // Reload character or update locally
                   const updatedCharResult = await loadCharacterAction(characterId);
-                  if (updatedCharResult.success) {
+                  if (updatedCharResult.success && updatedCharResult.character) {
                      onCharacterUpdate(updatedCharResult.character);
                   } else {
-                     onCharacterUpdate({ ...characterData, equipment: updatedEquipment } as Character);
+                      toast({ title: "Equip Status Changed (Local Update)", description: "Failed to reload full sheet." });
+                     onCharacterUpdate({ ...characterData, equipment: updatedEquipment });
                   }
               } else {
                   throw new Error(result.error || 'Failed to toggle equip status.');
@@ -111,9 +118,6 @@ export function CharacterEquipmentInventory({
          }
     };
 
-    // Placeholder: Assumes characterData is available in scope for partial updates
-    // This needs to be passed in or fetched if not available
-    const characterData = { id: characterId, playerId, equipment }; // Simplified placeholder
 
     return (
         <>
@@ -126,11 +130,11 @@ export function CharacterEquipmentInventory({
                 </CardHeader>
                 <CardContent>
                     <ScrollArea className="h-[300px] w-full pr-4"> {/* Adjust height as needed */}
-                        {equipment.length === 0 ? (
+                        {(equipment || []).length === 0 ? (
                             <p className="text-sm text-muted-foreground text-center py-4">Inventory is empty.</p>
                         ) : (
                             <ul className="space-y-2">
-                                {equipment.map((item, index) => (
+                                {(equipment || []).map((item, index) => (
                                     <li key={`${item.name}-${index}`} className="flex items-center justify-between text-sm py-1 border-b border-dashed last:border-b-0">
                                         <div className="flex items-center space-x-2 flex-1 min-w-0">
                                              <Checkbox
@@ -168,11 +172,4 @@ export function CharacterEquipmentInventory({
              />
         </>
     );
-}
-
-// Helper function (if not using server action) - remove if loadCharacterAction is used
-async function loadCharacterAction(characterId: string): Promise<{ success: boolean, character?: Character | null, error?: string }> {
-     // Placeholder implementation - replace with actual action call
-     console.warn("loadCharacterAction placeholder used in CharacterEquipmentInventory");
-     return { success: false, error: "loadCharacterAction not implemented" };
 }

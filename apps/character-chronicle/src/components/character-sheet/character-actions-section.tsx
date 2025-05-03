@@ -5,7 +5,7 @@ import type { Character, EquipmentItem, Feature } from '@/lib/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
-import { useDiceRoller } from '@/components/dice-roll-context'; // Import the hook
+import { useDiceRoller } from '@/components/dice-roll-context'; // Fix import path
 import { calculateHitBonusAction, calculateDamageBonusAction } from '@/app/actions/rules-actions'; // Use server actions
 import { useFeatureAction, castSpellAction } from '@/app/actions/character-actions'; // Use server actions
 import { useToast } from '@/hooks/use-toast';
@@ -40,7 +40,7 @@ export function CharacterActionsSection({ character, onCharacterUpdate }: Charac
         if (result.success) {
             const damageBonus = result.bonus;
             const damageDice = weapon.damageDice || '1d4'; // Default to 1d4 if missing
-            const rollString = damageBonus ? `${damageDice}+${damageBonus}` : damageDice;
+            const rollString = damageBonus > 0 ? `${damageDice}+${damageBonus}` : (damageBonus < 0 ? `${damageDice}${damageBonus}` : damageDice); // Include sign
             rollDice(rollString, `${character.characterName}'s ${weapon.name} damage`);
         } else {
             toast({ variant: "destructive", title: "Error", description: `Failed to calculate damage bonus: ${result.error}` });
@@ -105,65 +105,69 @@ export function CharacterActionsSection({ character, onCharacterUpdate }: Charac
                 {equippedWeapons.length > 0 && (
                     <div>
                         <h4 className="font-semibold mb-2 text-sm uppercase text-muted-foreground">Attacks</h4>
-                        {equippedWeapons.map((weapon, index) => (
-                             <div key={`${weapon.name}-${index}`} className="flex items-center justify-between space-x-2 mb-2 p-2 border rounded-md">
-                                <span className="font-medium flex-1">{weapon.name}</span>
-                                <div className="flex space-x-1">
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => handleAttackRoll(weapon)}
-                                        className="text-xs px-2 py-1 h-auto"
-                                    >
-                                         <Dices className="mr-1 h-3 w-3" />
-                                         Hit (+{
-                                             // Calculate hit bonus preview (consider async calculation if complex)
-                                             (() => {
-                                                  const profBonus = character.level >= 17 ? 6 : character.level >= 13 ? 5 : character.level >= 9 ? 4 : character.level >= 5 ? 3 : 2;
-                                                  const isProficient = character.proficiencies?.weapons?.includes(weapon.weaponCategory || '') || character.proficiencies?.weapons?.includes(weapon.name);
-                                                  const strMod = Math.floor(((character.stats?.strength || 10) - 10) / 2);
-                                                  const dexMod = Math.floor(((character.stats?.dexterity || 10) - 10) / 2);
-                                                  let abilityMod = 0;
-                                                  if (weapon.properties?.includes('Finesse')) abilityMod = Math.max(strMod, dexMod);
-                                                  else if (weapon.weaponCategory?.toLowerCase().includes('ranged')) abilityMod = dexMod;
-                                                  else abilityMod = strMod;
-                                                  let bonus = abilityMod + (isProficient ? profBonus : 0);
-                                                   // Quick check for Archery style bonus
-                                                   if (character.features.some(f => f.name === 'Fighting Style: Archery') && weapon.weaponCategory?.toLowerCase().includes('ranged')) {
-                                                      bonus += 2;
-                                                   }
-                                                  return bonus >= 0 ? `+${bonus}` : bonus;
-                                             })()
-                                         })
-                                    </Button>
-                                     <Button
-                                         variant="outline"
-                                         size="sm"
-                                         onClick={() => handleDamageRoll(weapon)}
-                                         className="text-xs px-2 py-1 h-auto"
-                                     >
-                                          <Dices className="mr-1 h-3 w-3" />
-                                          Dmg ({
-                                                // Calculate damage preview
-                                                (() => {
-                                                     const strMod = Math.floor(((character.stats?.strength || 10) - 10) / 2);
-                                                     const dexMod = Math.floor(((character.stats?.dexterity || 10) - 10) / 2);
-                                                     let abilityMod = 0;
-                                                     if (weapon.properties?.includes('Finesse')) abilityMod = Math.max(strMod, dexMod);
-                                                     else if (weapon.weaponCategory?.toLowerCase().includes('ranged')) abilityMod = dexMod;
-                                                     else abilityMod = strMod;
-                                                      // Quick check for Dueling style bonus
-                                                     if (character.features.some(f => f.name === 'Fighting Style: Dueling') /*&& isWieldingOneHanded*/) { // Condition check needed
-                                                        abilityMod += 2;
-                                                     }
-                                                     const bonusString = abilityMod > 0 ? `+${abilityMod}` : (abilityMod < 0 ? `${abilityMod}` : '');
-                                                     return `${weapon.damageDice || '1d4'}${bonusString}`;
-                                                })()
-                                          })
-                                      </Button>
+                        {equippedWeapons.map((weapon, index) => {
+                             const profBonus = character.level >= 17 ? 6 : character.level >= 13 ? 5 : character.level >= 9 ? 4 : character.level >= 5 ? 3 : 2;
+                             const isProficient = character.proficiencies?.weapons?.includes(weapon.weaponCategory || '') || character.proficiencies?.weapons?.includes(weapon.name);
+                             const strMod = Math.floor(((character.stats?.strength || 10) - 10) / 2);
+                             const dexMod = Math.floor(((character.stats?.dexterity || 10) - 10) / 2);
+                             let hitAbilityMod = 0;
+                             let damageAbilityMod = 0;
+
+                             if (weapon.properties?.includes('Finesse')) {
+                                 hitAbilityMod = Math.max(strMod, dexMod);
+                                 damageAbilityMod = Math.max(strMod, dexMod);
+                             } else if (weapon.weaponCategory?.toLowerCase().includes('ranged')) {
+                                 hitAbilityMod = dexMod;
+                                 damageAbilityMod = dexMod;
+                             } else {
+                                 hitAbilityMod = strMod;
+                                 damageAbilityMod = strMod;
+                             }
+
+                             let hitBonus = hitAbilityMod + (isProficient ? profBonus : 0);
+                             // Quick check for Archery style bonus
+                             if (character.features.some(f => f.name === 'Fighting Style: Archery') && weapon.weaponCategory?.toLowerCase().includes('ranged')) {
+                                hitBonus += 2;
+                             }
+
+                             let damageBonus = damageAbilityMod;
+                             // Quick check for Dueling style bonus
+                             if (character.features.some(f => f.name === 'Fighting Style: Dueling') /*&& isWieldingOneHanded*/) { // Condition check needed
+                                damageBonus += 2;
+                             }
+
+                             const damageDice = weapon.damageDice || '1d4';
+                             const damageBonusString = damageBonus > 0 ? `+${damageBonus}` : (damageBonus < 0 ? `${damageBonus}` : '');
+
+
+                             return (
+                                <div key={`${weapon.name}-${index}`} className="flex items-center justify-between space-x-2 mb-2 p-2 border rounded-md">
+                                    <span className="font-medium flex-1">{weapon.name}</span>
+                                    <div className="flex space-x-1">
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => handleAttackRoll(weapon)}
+                                            className="text-xs px-2 py-1 h-auto"
+                                            title={`Roll To Hit: 1d20${hitBonus >= 0 ? `+${hitBonus}` : hitBonus}`}
+                                        >
+                                             <Dices className="mr-1 h-3 w-3" />
+                                             Hit {hitBonus >= 0 ? `+${hitBonus}` : hitBonus}
+                                        </Button>
+                                         <Button
+                                             variant="outline"
+                                             size="sm"
+                                             onClick={() => handleDamageRoll(weapon)}
+                                             className="text-xs px-2 py-1 h-auto"
+                                             title={`Roll Damage: ${damageDice}${damageBonusString}`}
+                                         >
+                                              <Dices className="mr-1 h-3 w-3" />
+                                              Dmg ({damageDice}{damageBonusString})
+                                          </Button>
+                                    </div>
                                 </div>
-                            </div>
-                        ))}
+                             );
+                        })}
                         <Separator className="my-3" />
                     </div>
                 )}

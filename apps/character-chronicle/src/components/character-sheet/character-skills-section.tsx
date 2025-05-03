@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Checkbox } from '@/components/ui/checkbox'; // Or just display proficiency
 import { Label } from '@/components/ui/label';
-import { useDiceRoller } from '@/components/dice-roll-context';
+import { useDiceRoller } from '@/components/dice-roll-context'; // Corrected path
 import { calculateAbilityModifierAction, calculateSkillModifierAction } from '@/app/actions/rules-actions'; // Use server actions
 import { SKILL_ABILITY_MAP, ALL_SKILLS } from '@/lib/types'; // Import skill mapping
 import { Dices } from 'lucide-react';

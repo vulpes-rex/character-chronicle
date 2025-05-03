@@ -27,7 +27,8 @@ import { useToast } from '@/hooks/use-toast'; // Use alias
 import { Avatar, AvatarFallback, AvatarImage } from './ui/avatar'; // Use alias
 import { Skeleton } from './ui/skeleton'; // Use alias
 import { DiceRollProvider } from './dice-roll-context'; // Use alias
-import { DDDiceRoller } from './dddice-roller'; // Use alias
+import { DDDiceLoader } from './dddice-loader'; // Corrected import path
+import { FloatingDiceRoller } from './floating-dice-roller'; // Import the floating roller
 
 
 export function AppLayout({ children }: { children: ReactNode }) {
@@ -223,7 +224,8 @@ export function AppLayout({ children }: { children: ReactNode }) {
         </Sidebar>
         <SidebarInset>
            {children}
-            <DDDiceRoller /> {/* Keep DDDice Roller */}
+            <DDDiceLoader /> {/* Ensure DDDiceLoader is here */}
+            <FloatingDiceRoller /> {/* Add the floating dice roller */}
         </SidebarInset>
       </SidebarProvider>
     </DiceRollProvider>

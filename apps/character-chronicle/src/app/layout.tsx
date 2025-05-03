@@ -1,3 +1,4 @@
+'use client' // Needed for Geist font variables
 
 import type { Metadata } from 'next';
 import { Geist, Geist_Mono } from 'next/font/google';
@@ -7,7 +8,8 @@ import { Providers } from '@/components/providers'; // Use alias
 import { AuthProvider } from '@/components/auth-provider'; // Use alias
 import React, { Suspense } from 'react'; // Import Suspense
 import { Skeleton } from '@/components/ui/skeleton'; // Use alias
-import { DDDiceLoader } from '@/components/dddice-loader'; // Corrected import path
+import { DDDiceLoader } from '@/components/dddice-loader'; // Use alias
+import { FloatingDiceRoller } from '@/components/floating-dice-roller'; // Use alias
 import { DiceRollProvider } from '@/components/dice-roll-context'; // Use alias
 
 const geistSans = Geist({
@@ -40,6 +42,7 @@ export default function RootLayout({
                  <Suspense fallback={<RootLoadingSkeleton />}>
                      <DDDiceLoader /> {/* Load DDDice assets */}
                     {children}
+                    <FloatingDiceRoller /> {/* Add the floating roller */}
                  </Suspense>
               </DiceRollProvider>
            </AuthProvider>

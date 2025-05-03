@@ -1,4 +1,4 @@
-// @ts-nocheck - Disabling TypeScript checks for rapid prototyping
+{// @ts-nocheck - Disabling TypeScript checks for rapid prototyping
 'use client';
 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -17,7 +17,7 @@ import { Badge } from '@/components/ui/badge';
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation'; // Added useRouter
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { PlusCircle, Trash2, Dices, ShieldCheck, Swords, ChevronUp, ChevronDown, BedDouble, BedSingle, HeartPulse, Edit, CheckSquare, Square, AlertCircle, Loader2, Wand2 } from 'lucide-react'; // Added Wand2
+import { PlusCircle, Trash2, ShieldCheck, Swords, ChevronUp, ChevronDown, BedDouble, BedSingle, HeartPulse, Edit, CheckSquare, Square, AlertCircle, Loader2, Wand2 } from 'lucide-react'; // Added Wand2
 import { useToast } from '@/hooks/use-toast';
 import {
     getAvailableEquipmentItems,
@@ -31,10 +31,10 @@ import { ShortRestDialog } from './short-rest-dialog';
 import { rollDice, SKILL_ABILITY_MAP, calculateSkillModifier, ALL_SKILLS, SPELL_SLOTS_BY_LEVEL } from '@/lib/types'; // Use central utils/types, added SPELL_SLOTS_BY_LEVEL
 import Link from 'next/link'; // For Edit button
 import { applyFeatureRules } from '@/services/feature-service'; // Import feature rule application
-import { FloatingDiceRoller } from './floating-dice-roller'; // Import FloatingDiceRoller
 import { addGameLogEntry } from '@/services/campaign-service'; // Import campaign service
 import { useAuth } from './auth-provider'; // Import useAuth
 import { DDDiceRoller } from './dddice-roller'; // Import dddice roller
+import { useDiceRoller } from './dice-roll-context'; // Import useDiceRoller hook
 
 interface CharacterSheetProps {
     initialCharacter: Character; // Base character data is now passed in
@@ -45,6 +45,7 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
     const router = useRouter();
     const queryClient = useQueryClient();
     const { user, userProfile } = useAuth(); // Get user info for logging
+    const { triggerVisualRoll } = useDiceRoller(); // Use the dice roller context
 
     // --- State Management ---
     // Use react-query to manage character data, refetching when needed
@@ -64,9 +65,6 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
     const [isSaving, setIsSaving] = useState(false);
     const [isAddEquipmentOpen, setIsAddEquipmentOpen] = useState(false);
     const [isShortRestDialogOpen, setIsShortRestDialogOpen] = useState(false);
-    const [diceRollResult, setDiceRollResult] = useState<string | null>(null); // For dddice text
-    const [rollerKey, setRollerKey] = useState(0); // To force re-render of dddice roller
-
 
     // Derived state for feature uses - synchronized with query data
     const [featureUses, setFeatureUses] = useState<Record<string, number>>({});
@@ -192,7 +190,7 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
              baseAC = unarmoredDefenseValue;
              dexModForAC = 0; // Modifier already included in the formula
              console.log("Using Unarmored Defense AC:", baseAC);
-         } else if (!armorEquipped) {
+         } else if (!armorEquipped){
              baseAC = 10; // Default unarmored
              dexModForAC = modifiers.dexterity;
              console.log("Using Default Unarmored AC:", baseAC, "+ DEX");
@@ -448,72 +446,74 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
         updateCharacterData({ equipment: newEquipment }); // Save the change
     }
 
-    // --- Dice Rolling Handler ---
-     const triggerDiceRoll = async (rollString: string, label: string) => {
-        try {
-            const roll = rollDice(rollString);
-            const resultText = `${label}: Rolled ${roll} (${rollString})`;
-            setDiceRollResult(resultText); // Update text for dddice roller
-            setRollerKey(prev => prev + 1); // Trigger dddice roller
+    // --- Dice Rolling Handler (Generic) ---
+    const performRoll = async (rollString: string, label: string) => {
+       try {
+           const roll = rollDice(rollString); // Use the utility function for calculation
+           triggerVisualRoll(rollString, `${label}: ${roll}`); // Trigger the visual dddice roll
 
-            // Log the roll to the game log
-             if (characterData?.campaignId && user) {
-                 await addGameLogEntry({
-                     campaignId: characterData.campaignId,
-                     actorId: user.uid, // Or characterData.id ?
-                     actorName: userProfile?.displayName || characterData.playerName || 'Player',
-                     actionType: 'roll',
-                     details: `${characterData.characterName} rolled ${label}: ${roll} (${rollString})`,
-                     rollDetails: { dice: rollString, result: roll },
-                 });
-             } else {
-                 console.warn("Could not log dice roll: Missing campaignId or user info");
-             }
+           // Log the roll to the game log
+           if (characterData?.campaignId && user) {
+               await addGameLogEntry({
+                   campaignId: characterData.campaignId,
+                   actorId: user.uid, // Or characterData.id ?
+                   actorName: userProfile?.displayName || characterData.playerName || 'Player',
+                   actionType: 'roll',
+                   details: `${characterData.characterName} rolled ${label}: ${roll} (${rollString})`,
+                   rollDetails: { dice: rollString, result: roll },
+               });
+           } else {
+               console.warn("Could not log dice roll: Missing campaignId or user info");
+           }
 
-            toast({
-                title: `${label} Check`,
-                description: `Result: ${roll}`,
-            });
-        } catch (error) {
-            console.error("Error during dice roll:", error);
-             toast({ variant: "destructive", title: "Roll Error", description: "Failed to roll dice." });
-        }
+           toast({
+               title: `${label} Roll`,
+               description: `Result: ${roll}`,
+           });
+           return roll; // Return the numerical result
+       } catch (error) {
+           console.error("Error during dice roll:", error);
+           toast({ variant: "destructive", title: "Roll Error", description: "Failed to roll dice." });
+           return 0; // Return 0 on error
+       }
     };
 
 
     // --- Action Handlers ---
     const handleAttackRoll = (weaponName: string, hitBonus: number) => {
-        triggerDiceRoll(`1d20+${hitBonus}`, `${weaponName} Attack`);
+        performRoll(`1d20+${hitBonus}`, `${weaponName} Attack`);
     };
 
-    const handleDamageRoll = (weaponName: string, damageDice: string | undefined, damageBonus: number) => {
-        if (!damageDice) {
-             toast({ variant: "destructive", title: "Damage Roll Error", description: `No damage dice defined for ${weaponName}.` });
-             return;
-         }
-         // Check for Great Weapon Fighting style reroll
-         let finalRoll = 0;
-         let rollDescription = damageDice;
-         const hasGWF = characterData?.features.some(f => f.name === 'Fighting Style: Great Weapon Fighting');
-         const isTwoHanded = equippedWeapons.find(w => w.name === weaponName)?.properties?.includes('Two-Handed');
+    const handleDamageRoll = async (weaponName: string, damageDice: string | undefined, damageBonus: number) => {
+       if (!damageDice) {
+           toast({ variant: "destructive", title: "Damage Roll Error", description: `No damage dice defined for ${weaponName}.` });
+           return;
+       }
+       // Check for Great Weapon Fighting style reroll
+       let finalRoll = 0;
+       let rollDescription = damageDice;
+       const hasGWF = characterData?.features.some(f => f.name === 'Fighting Style: Great Weapon Fighting');
+       const isTwoHanded = equippedWeapons.find(w => w.name === weaponName)?.properties?.includes('Two-Handed');
 
-         if (hasGWF && isTwoHanded) {
-            // Complex reroll logic needed here based on the damageDice string (e.g., "2d6")
-            // Simplified: just roll normally for now
-             finalRoll = rollDice(damageDice);
-             // TODO: Implement GWF reroll logic properly
-         } else {
-             finalRoll = rollDice(damageDice);
-         }
+       if (hasGWF && isTwoHanded) {
+           // Complex reroll logic needed here based on the damageDice string (e.g., "2d6")
+           // Simplified: just roll normally for now
+           finalRoll = rollDice(damageDice); // Roll the base dice
+           // TODO: Implement GWF reroll logic properly
+       } else {
+           finalRoll = rollDice(damageDice); // Roll the base dice
+       }
 
-        const totalDamage = Math.max(0, finalRoll + damageBonus);
-         triggerDiceRoll(`${finalRoll}+${damageBonus}`, `${weaponName} Damage`); // Use triggerDiceRoll which handles dddice & logging
-         // toast({ title: `${weaponName} Damage`, description: `Rolled ${finalRoll} (${rollDescription}) + ${damageBonus} = ${totalDamage}` }); // Redundant if triggerDiceRoll toasts
+       const totalDamage = Math.max(0, finalRoll + damageBonus);
+       performRoll(`${finalRoll}+${damageBonus}`, `${weaponName} Damage`); // Trigger visual roll and log
+
+       // // Display toast (might be redundant if performRoll shows one)
+       // toast({ title: `${weaponName} Damage`, description: `Rolled ${finalRoll} (${rollDescription}) + ${damageBonus} = ${totalDamage}` });
     };
 
      const handleSkillCheck = (skillName: string) => {
          const modifier = skillModifiers[skillName.toLowerCase()];
-         triggerDiceRoll(`1d20+${modifier}`, `${skillName.charAt(0).toUpperCase() + skillName.slice(1)} Check`);
+         performRoll(`1d20+${modifier}`, `${skillName.charAt(0).toUpperCase() + skillName.slice(1)} Check`);
      };
 
 
@@ -562,12 +562,16 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
               // Special handling for features like Second Wind that affect HP
               let hpUpdates: Partial<Character> = {};
               if (featureName === 'Second Wind') {
-                  const healing = rollDice('1d10') + characterData.level;
+                   // Roll 1d10 for healing
+                  const healingRoll = rollDice('1d10');
+                  const healing = healingRoll + characterData.level;
                   const newHpState = {
                      ...characterData.hitPoints,
                      current: Math.min(characterData.hitPoints.max, characterData.hitPoints.current + healing)
                   }
                   hpUpdates = { hitPoints: newHpState };
+                  // Trigger visual roll for Second Wind healing dice
+                  triggerVisualRoll('1d10', 'Second Wind Healing');
                   toast({ title: 'Second Wind Healing', description: `Regained ${healing} hit points.` });
               }
 
@@ -789,11 +793,8 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
 
   return (
     <>
-        {/* DDDice Roller */}
-        <DDDiceRoller key={rollerKey} resultText={diceRollResult} />
-
-        {/* Floating Manual Dice Roller */}
-        <FloatingDiceRoller onRoll={triggerDiceRoll} />
+        {/* DDDice Roller (Visual) */}
+        <DDDiceRoller />
 
         <ScrollArea className="h-full p-4 md:p-6">
           <div className="max-w-7xl mx-auto space-y-6">
@@ -1042,11 +1043,13 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
                                                  </div>
                                                 <div className="flex gap-2 flex-shrink-0 mt-2 sm:mt-0">
                                                     <Button size="sm" variant="outline" onClick={() => handleAttackRoll(weapon.name, hitBonus)} title={`Roll 1d20 ${hitBonusString}`}>
-                                                        <Dices className="mr-2 h-4 w-4" />
+                                                        {/* <Dices className="mr-2 h-4 w-4" /> Replaced with SVG */}
+                                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2 h-4 w-4"><path d="M17.1 3.1C16.5 2.5 15.5 2 14 2H6C4.9 2 4 2.9 4 4v8c0 1.5 2.5 2.9 3.1 3.5c0.6 0.6 1.5 1 3 1h8c1.1 0 2-0.9 2-2v-8C22 5.5 19.5 3.1 18.9 2.5z"/><path d="M17 11h-2.5c-0.3 0-0.5 0.2-0.5 0.5s0.2 0.5 0.5 0.5H17c0.3 0 0.5-0.2 0.5-0.5S17.3 11 17 11z"/><path d="M14 8h-2.5c-0.3 0-0.5 0.2-0.5 0.5s0.2 0.5 0.5 0.5H14c0.3 0 0.5-0.2 0.5-0.5S14.3 8 14 8z"/><path d="M11 5h-2.5c-0.3 0-0.5 0.2-0.5 0.5s0.2 0.5 0.5 0.5H11c0.3 0 0.5-0.2 0.5-0.5S11.3 5 11 5z"/></svg>
                                                         Hit: {hitBonusString}
                                                     </Button>
                                                     <Button size="sm" variant="outline" onClick={() => handleDamageRoll(weapon.name, weapon.damageDice, damageBonus)} title={`Roll ${weapon.damageDice ?? '?'} ${damageBonusString}`}>
-                                                        <Dices className="mr-2 h-4 w-4" />
+                                                         {/* <Dices className="mr-2 h-4 w-4" /> Replaced with SVG */}
+                                                          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2 h-4 w-4"><path d="M17.1 3.1C16.5 2.5 15.5 2 14 2H6C4.9 2 4 2.9 4 4v8c0 1.5 2.5 2.9 3.1 3.5c0.6 0.6 1.5 1 3 1h8c1.1 0 2-0.9 2-2v-8C22 5.5 19.5 3.1 18.9 2.5z"/><path d="M17 11h-2.5c-0.3 0-0.5 0.2-0.5 0.5s0.2 0.5 0.5 0.5H17c0.3 0 0.5-0.2 0.5-0.5S17.3 11 17 11z"/><path d="M14 8h-2.5c-0.3 0-0.5 0.2-0.5 0.5s0.2 0.5 0.5 0.5H14c0.3 0 0.5-0.2 0.5-0.5S14.3 8 14 8z"/><path d="M11 5h-2.5c-0.3 0-0.5 0.2-0.5 0.5s0.2 0.5 0.5 0.5H11c0.3 0 0.5-0.2 0.5-0.5S11.3 5 11 5z"/></svg>
                                                         Dmg: {weapon.damageDice ?? 'N/A'} {damageBonusString}
                                                     </Button>
                                                 </div>
@@ -1289,7 +1292,7 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
              maxHp={characterData.hitPoints.max}
              currentHp={characterData.hitPoints.current}
              onConfirm={handleShortRest}
-             rollDiceFn={rollDice} // Pass the central rollDice function
+             rollDiceFn={performRoll} // Pass the performRoll function which uses dddice
          />
     </>
   );

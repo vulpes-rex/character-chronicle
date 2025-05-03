@@ -15,13 +15,11 @@ import { saveEncounter } from '@/services/encounter-service'; // Assuming update
 import { addGameLogEntry } from '@/services/campaign-service';
 import type { Encounter, EncounterParticipant, Campaign, Character, Monster, NPC, GameLogEntry } from '@/lib/types'; // Added NPC type and GameLogEntry
 import { rollDice } from '@/lib/types';
-import { Dices, ShieldAlert, HeartPulse, ChevronRight, ChevronLeft, RotateCw, Users, X, PlusCircle, MinusCircle } from 'lucide-react'; // Added MinusCircle
+import { ShieldAlert, HeartPulse, ChevronRight, ChevronLeft, RotateCw, Users, X, PlusCircle, MinusCircle } from 'lucide-react'; // Added MinusCircle
 import { useAuth } from '@/components/auth-provider';
-// Removed import for DDDiceRoller
-// import { DDDiceRoller } from './dddice-roller';
 import { Skeleton } from './ui/skeleton';
 import Link from 'next/link'; // Added Link import
-import { FloatingDiceRoller } from './floating-dice-roller';
+import { useDiceRoller } from './dice-roll-context'; // Import useDiceRoller hook
 
 interface CombatTrackerProps {
     initialEncounter: Encounter;
@@ -49,15 +47,14 @@ export function CombatTracker({ initialEncounter, campaign, characters, monsters
     const { toast } = useToast();
     const queryClient = useQueryClient();
     const { user, userProfile } = useAuth(); // Get DM info
+    const { triggerVisualRoll } = useDiceRoller(); // Use the dice roller context
+
 
     const [encounter, setEncounter] = useState<Encounter>(initialEncounter);
     const [initiativeOrder, setInitiativeOrder] = useState<EncounterParticipant[]>([]);
     const [isRollingInitiative, setIsRollingInitiative] = useState(false);
     const [editingHpId, setEditingHpId] = useState<string | null>(null);
     const [tempHpInput, setTempHpInput] = useState<string>('');
-    // Removed state for diceRollResult and rollerKey
-    // const [diceRollResult, setDiceRollResult] = useState<string | null>(null);
-    // const [rollerKey, setRollerKey] = useState(0);
 
     const isCombatRunning = useMemo(() => encounter.status === 'running', [encounter.status]);
     const currentParticipant = useMemo(() => {
@@ -120,8 +117,11 @@ export function CombatTracker({ initialEncounter, campaign, characters, monsters
                 const npcDef = npcs.find(n => n.instanceId === p.id)?.definition;
                 dexMod = npcDef?.stats?.dexterity ? Math.floor((npcDef.stats.dexterity - 10) / 2) : 0;
             }
-            initiative = rollDice('1d20') + dexMod;
-            logDetails += `${p.name}: ${initiative}, `;
+            const roll = rollDice('1d20'); // Calculate roll
+            initiative = roll + dexMod;
+            logDetails += `${p.name}: ${initiative} (Rolled ${roll}), `;
+            // Trigger visual roll for each participant
+            triggerVisualRoll(`1d20+${dexMod}`, `${p.name} Initiative: ${initiative}`);
             return { ...p, initiative };
         });
 
@@ -257,7 +257,7 @@ export function CombatTracker({ initialEncounter, campaign, characters, monsters
         setTempHpInput(String(currentHp));
     };
 
-    const handleDiceRoll = (rollString: string, result: number) => {
+    const handleManualRoll = (rollString: string, result: number) => {
          addLogEntryMutation.mutate({
             actorId: user?.uid || 'system',
             actorName: userProfile?.displayName || 'DM',
@@ -268,14 +268,19 @@ export function CombatTracker({ initialEncounter, campaign, characters, monsters
                 result: result,
             },
          });
+         // Trigger visual roll via context
+          triggerVisualRoll(rollString, `Manual Roll: ${result}`);
     };
 
 
     // --- Render ---
     return (
         <div className="p-4 md:p-6 space-y-6 h-full flex flex-col">
-             {/* Floating Dice Roller Component */}
-             <FloatingDiceRoller onRoll={handleDiceRoll} />
+             {/* Manual Dice Roller - using the context version */}
+             {/* <FloatingDiceRoller onRoll={handleManualRoll} /> */}
+              {/* Visual DDDice Roller */}
+             <DDDiceRoller />
+
             {/* Header */}
             <Card>
                 <CardHeader>
@@ -299,8 +304,9 @@ export function CombatTracker({ initialEncounter, campaign, characters, monsters
                 <Card>
                     <CardContent className="pt-6 flex justify-center gap-4">
                         <Button onClick={rollAllInitiative} disabled={isRollingInitiative} size="lg">
-                            {isRollingInitiative ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Dices className="mr-2 h-4 w-4" />}
-                            Roll All Initiative
+                             {/* SVG Dice Icon */}
+                             <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2 h-4 w-4"><path d="M17.1 3.1C16.5 2.5 15.5 2 14 2H6C4.9 2 4 2.9 4 4v8c0 1.5 2.5 2.9 3.1 3.5c0.6 0.6 1.5 1 3 1h8c1.1 0 2-0.9 2-2v-8C22 5.5 19.5 3.1 18.9 2.5z"/><path d="M17 11h-2.5c-0.3 0-0.5 0.2-0.5 0.5s0.2 0.5 0.5 0.5H17c0.3 0 0.5-0.2 0.5-0.5S17.3 11 17 11z"/><path d="M14 8h-2.5c-0.3 0-0.5 0.2-0.5 0.5s0.2 0.5 0.5 0.5H14c0.3 0 0.5-0.2 0.5-0.5S14.3 8 14 8z"/><path d="M11 5h-2.5c-0.3 0-0.5 0.2-0.5 0.5s0.2 0.5 0.5 0.5H11c0.3 0 0.5-0.2 0.5-0.5S11.3 5 11 5z"/></svg>
+                            {isRollingInitiative ? 'Rolling...' : 'Roll All Initiative'}
                         </Button>
                          <Button onClick={startCombat} disabled={isRollingInitiative || !encounter.participants.length} size="lg" variant="destructive">
                              Start Combat
@@ -460,4 +466,3 @@ export function CombatTrackerSkeleton() {
         </div>
     );
 }
-

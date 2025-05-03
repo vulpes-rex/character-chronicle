@@ -1,4 +1,3 @@
-
 'use client';
 
 import { useState, useMemo } from 'react';
@@ -16,7 +15,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Slider } from '@/components/ui/slider'; // Using Slider for dice selection
-import { HeartPulse, Dices } from 'lucide-react';
+import { HeartPulse } from 'lucide-react'; // Removed Dices
 import type { HitPoints } from '@/services/dnd-api';
 import { useToast } from '@/hooks/use-toast';
 
@@ -30,7 +29,7 @@ interface ShortRestDialogProps {
   maxHp: number;
   currentHp: number;
   onConfirm: (hitDiceSpent: number, hpRecovered: number) => void;
-  rollDiceFn: (diceString: string) => number; // Function to roll dice
+  rollDiceFn: (diceString: string, label: string) => Promise<number>; // Updated signature to match performRoll
 }
 
 export function ShortRestDialog({
@@ -68,7 +67,7 @@ export function ShortRestDialog({
    };
 
 
-  const handleRollHitDice = () => {
+  const handleRollHitDice = async () => { // Make async
       if (!hitDieType || diceToSpend <= 0) return;
       setIsRolling(true);
 
@@ -76,7 +75,8 @@ export function ShortRestDialog({
       let rollsDescription = '';
 
       for (let i = 0; i < diceToSpend; i++) {
-          const roll = rollDiceFn(hitDieType);
+          // Use the passed rollDiceFn (which now uses dddice and logs)
+          const roll = await rollDiceFn(hitDieType, `Hit Die #${i + 1}`);
           const recoveryThisDie = Math.max(0, roll + constitutionModifier); // Minimum 0 HP recovered per die
           totalRecovered += recoveryThisDie;
           rollsDescription += `${i > 0 ? ', ' : ''}${roll}`;
@@ -86,10 +86,12 @@ export function ShortRestDialog({
       const finalRecovery = Math.min(totalRecovered, maxHp - currentHp);
       setCalculatedRecovery(finalRecovery);
 
-      toast({
-          title: "Hit Dice Rolled",
-          description: `Rolled ${diceToSpend} ${hitDieType}: [${rollsDescription}]. Base recovery: ${totalRecovered} HP. Actual recovery capped at ${finalRecovery} HP.`,
-      });
+       // Toast is likely handled by the performRoll function, but keep a fallback just in case
+      // toast({
+      //     title: "Hit Dice Rolled",
+      //     description: `Rolled ${diceToSpend} ${hitDieType}: [${rollsDescription}]. Base recovery: ${totalRecovered} HP. Actual recovery capped at ${finalRecovery} HP.`,
+      // });
+      setIsRolling(false); // Set rolling to false after completion
   };
 
    const handleConfirmRest = () => {
@@ -135,7 +137,7 @@ export function ShortRestDialog({
                          disabled={diceToSpend <= 0 || isRolling}
                          className="w-full"
                      >
-                         {isRolling ? 'Rolling...' : <><Dices className="mr-2 h-4 w-4" /> Roll Selected Dice</>}
+                          {isRolling ? 'Rolling...' : `Roll ${diceToSpend} ${hitDieType}`}
                      </Button>
 
                      {calculatedRecovery > 0 && (

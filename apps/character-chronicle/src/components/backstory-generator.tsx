@@ -21,8 +21,9 @@ import { ScrollText, Loader2 } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from './ui/alert'; // Use alias (relative)
 import { AlertCircle } from 'lucide-react';
 import type { Character } from '@/lib/types'; // Import Character type
-import { loadCharacterAction } from '@/app/actions/character-actions'; // Use Server Action
+import { loadCharacterAction, updateCharacterAction } from '@/app/actions/character-actions'; // Use Server Action
 import { useQuery, useQueryClient } from '@tanstack/react-query'; // Keep for managing state/cache if desired, or remove if direct action calls are sufficient
+import { useAuth } from './auth-provider'; // Import useAuth
 
 
 // Props to accept character details
@@ -42,13 +43,14 @@ export function BackstoryGenerator({ characterId, characterRace, characterClass,
   const [isLoadingCharacter, setIsLoadingCharacter] = useState(false);
   const { toast } = useToast();
   const queryClient = useQueryClient(); // Keep if using query cache
+  const { user } = useAuth(); // Get user for update action
 
   // Fetch character data when dialog opens if ID is provided and props are missing
   useEffect(() => {
       const fetchCharacter = async () => {
           if (characterId && isOpen && (!characterRace || !characterClass || !characterAlignment)) {
               setIsLoadingCharacter(true);
-              const result = await loadCharacterAction(characterId);
+              const result = await loadCharacterAction(characterId); // Use server action
               if (result.success && result.character) {
                   setCharacterData(result.character);
               } else {
@@ -103,21 +105,22 @@ export function BackstoryGenerator({ characterId, characterRace, characterClass,
       }
   }
 
-  // TODO: Implement applying backstory using updateCharacterAction
   const handleApplyBackstory = async () => {
-    if (!characterId || !generatedBackstory) return;
-     // Optimistic UI update could happen here if needed
+    if (!characterId || !generatedBackstory || !user) return;
+    setIsLoading(true); // Indicate loading state
     try {
         // Call server action to update character
-        // const updateResult = await updateCharacterAction(characterId, { backstory: generatedBackstory }, /* need user ID */);
-        // if (!updateResult.success) throw new Error(updateResult.error);
+        const updateResult = await updateCharacterAction(characterId, { backstory: generatedBackstory }, user.uid); // Pass user ID
+        if (!updateResult.success) throw new Error(updateResult.error);
 
-        toast({ title: "Backstory Applied", description: "Character sheet updated (simulation)." });
+        toast({ title: "Backstory Applied", description: "Character sheet updated." });
          // Optionally invalidate character query to refetch if using react-query
-         // queryClient.invalidateQueries({ queryKey: ['character', characterId] });
+         queryClient.invalidateQueries({ queryKey: ['character', characterId] });
          setIsOpen(false); // Close dialog on apply
     } catch (error) {
          toast({ variant: "destructive", title: "Apply Failed", description: `Could not save backstory. ${error instanceof Error ? error.message : ''}` });
+    } finally {
+        setIsLoading(false);
     }
   };
 
@@ -204,11 +207,9 @@ export function BackstoryGenerator({ characterId, characterRace, characterClass,
              </DialogClose>
               {generatedBackstory && <Button onClick={() => navigator.clipboard.writeText(generatedBackstory)}>Copy Backstory</Button>}
               {/* Apply button logic remains the same */}
-              {characterId && generatedBackstory && <Button onClick={handleApplyBackstory} variant="default" disabled={!characterId /* Add user ID check if needed */}>Apply to Sheet</Button>}
+              {characterId && generatedBackstory && <Button onClick={handleApplyBackstory} variant="default" disabled={isLoading || !user}>Apply to Sheet</Button>}
         </DialogFooter>
       </DialogContent>
     </Dialog>
   );
 }
-
-    

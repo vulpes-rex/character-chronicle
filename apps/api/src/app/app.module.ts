@@ -10,6 +10,7 @@ import { CampaignModule } from '../campaign/campaign.module';
 import { EncounterModule } from '../encounter/encounter.module';
 import { UserModule } from '../user/user.module';
 import { AppContainer } from './app-container'; // Import the container
+import { RepositoriesModule } from '../repositories/repositories.module'; // Import the RepositoriesModule
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { AppContainer } from './app-container'; // Import the container
       cache: true, // Enable caching
     }),
     // Core Application Modules
+    RepositoriesModule, // Import the RepositoriesModule (provides repositories globally)
     LoggingModule,
     RulesModule,
     FeaturesModule,

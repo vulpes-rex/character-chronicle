@@ -20,52 +20,52 @@ const getEncounterService = async (): Promise<EncounterService> => {
 
 export async function saveEncounterAction(encounterData: Omit<Encounter, 'createdAt' | 'updatedAt'> & { id?: string }, dmUserId: string): Promise<{ success: boolean; encounterId?: string; error?: string }> {
   try {
-    logMessage('info', `[Action] Attempting to save encounter: ${encounterData.name || encounterData.id || 'New Encounter'}`, { dmUserId });
+    logMessage('info', `[Action] Attempting to save encounter: ${encounterData.name || encounterData.id || 'New Encounter'}`, undefined, 'EncounterActions', { dmUserId });
     const encounterService = await getEncounterService();
     const encounterId = await encounterService.saveEncounter(encounterData, dmUserId);
-    logMessage('info', `[Action] Encounter saved successfully: ${encounterId}`, { dmUserId, encounterName: encounterData.name });
+    logMessage('info', `[Action] Encounter saved successfully: ${encounterId}`, undefined, 'EncounterActions', { dmUserId, encounterName: encounterData.name });
     return { success: true, encounterId };
   } catch (error) {
-    logError(error, { message: `[Action] Error saving encounter ${encounterData.name || encounterData.id || 'New Encounter'}`, dmUserId });
+    logError(error, { message: `[Action] Error saving encounter ${encounterData.name || encounterData.id || 'New Encounter'}`, dmUserId }, 'EncounterActions');
     return { success: false, error: error instanceof Error ? error.message : 'Failed to save encounter.' };
   }
 }
 
 export async function loadEncounterAction(encounterId: string): Promise<{ success: boolean; encounter?: Encounter | null; error?: string }> {
   try {
-    logMessage('debug', `[Action] Attempting to load encounter: ${encounterId}`);
+    logMessage('debug', `[Action] Attempting to load encounter: ${encounterId}`, undefined, 'EncounterActions');
     const encounterService = await getEncounterService();
     const encounter = await encounterService.loadEncounter(encounterId);
-    logMessage('debug', `[Action] Encounter ${encounterId} ${encounter ? 'loaded' : 'not found'}.`);
+    logMessage('debug', `[Action] Encounter ${encounterId} ${encounter ? 'loaded' : 'not found'}.`, undefined, 'EncounterActions');
     return { success: true, encounter };
   } catch (error) {
-    logError(error, { message: `[Action] Error loading encounter ${encounterId}` });
+    logError(error, { message: `[Action] Error loading encounter ${encounterId}` }, 'EncounterActions');
     return { success: false, error: error instanceof Error ? error.message : 'Failed to load encounter.' };
   }
 }
 
 export async function loadAllEncountersAction(dmUserId: string): Promise<{ success: boolean; encounters: Encounter[]; error?: string }> {
   try {
-    logMessage('debug', `[Action] Attempting to load all encounters for DM: ${dmUserId}`);
+    logMessage('debug', `[Action] Attempting to load all encounters for DM: ${dmUserId}`, undefined, 'EncounterActions');
     const encounterService = await getEncounterService();
     const encounters = await encounterService.loadAllEncounters(dmUserId);
-    logMessage('debug', `[Action] Loaded ${encounters.length} encounters for DM: ${dmUserId}`);
+    logMessage('debug', `[Action] Loaded ${encounters.length} encounters for DM: ${dmUserId}`, undefined, 'EncounterActions');
     return { success: true, encounters };
   } catch (error) {
-    logError(error, { message: `[Action] Error loading encounters for DM ${dmUserId}` });
+    logError(error, { message: `[Action] Error loading encounters for DM ${dmUserId}` }, 'EncounterActions');
     return { success: false, encounters: [], error: error instanceof Error ? error.message : 'Failed to load encounters.' };
   }
 }
 
 export async function deleteEncounterAction(encounterId: string, dmUserId: string): Promise<{ success: boolean; error?: string }> {
   try {
-    logMessage('info', `[Action] Attempting to delete encounter: ${encounterId}`, { dmUserId });
+    logMessage('info', `[Action] Attempting to delete encounter: ${encounterId}`, undefined, 'EncounterActions', { dmUserId });
     const encounterService = await getEncounterService();
     await encounterService.deleteEncounter(encounterId, dmUserId);
-    logMessage('info', `[Action] Encounter deleted successfully: ${encounterId}`, { dmUserId });
+    logMessage('info', `[Action] Encounter deleted successfully: ${encounterId}`, undefined, 'EncounterActions', { dmUserId });
     return { success: true };
   } catch (error) {
-    logError(error, { message: `[Action] Error deleting encounter ${encounterId}`, dmUserId });
+    logError(error, { message: `[Action] Error deleting encounter ${encounterId}`, dmUserId }, 'EncounterActions');
     return { success: false, error: error instanceof Error ? error.message : 'Failed to delete encounter.' };
   }
 }
@@ -76,17 +76,14 @@ export async function updateEncounterStateAction(encounterId: string, updates: P
     // This action would likely call a specific method in EncounterService
     // to update initiative, HP, conditions, turn order, etc.
     try {
-        logMessage('info', `[Action] Updating state for encounter: ${encounterId}`, { dmUserId, updates: Object.keys(updates) });
+        logMessage('info', `[Action] Updating state for encounter: ${encounterId}`, undefined, 'EncounterActions', { dmUserId, updates: Object.keys(updates) });
         const encounterService = await getEncounterService();
-        // Assuming a method like updateEncounterState exists:
-        // await encounterService.updateEncounterState(encounterId, updates, dmUserId);
-        await encounterService.saveEncounter({ ...updates, id: encounterId, campaignId: 'dummy' }, dmUserId); // Simplified update for now
-        logMessage('info', `[Action] Encounter state updated successfully: ${encounterId}`, { dmUserId });
+        // Delegate the update logic to the service layer
+        await encounterService.saveEncounter({ ...updates, id: encounterId }, dmUserId); // Use saveEncounter which handles updates
+        logMessage('info', `[Action] Encounter state updated successfully: ${encounterId}`, undefined, 'EncounterActions', { dmUserId });
         return { success: true };
     } catch (error) {
-        logError(error, { message: `[Action] Error updating encounter state ${encounterId}`, dmUserId });
+        logError(error, { message: `[Action] Error updating encounter state ${encounterId}`, dmUserId }, 'EncounterActions');
         return { success: false, error: error instanceof Error ? error.message : 'Failed to update encounter state.' };
     }
 }
-
-    

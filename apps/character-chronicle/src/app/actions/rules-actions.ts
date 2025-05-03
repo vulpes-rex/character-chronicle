@@ -24,7 +24,7 @@ export async function calculateAbilityModifierAction(score: number | undefined |
     const modifier = await rulesService.calculateAbilityModifier(score);
     return { success: true, modifier };
   } catch (error) {
-    logError(error, { message: '[Action] Error calculating ability modifier', score });
+    logError(error, { message: '[Action] Error calculating ability modifier', score }, 'RulesActions');
     return { success: false, modifier: 0, error: error instanceof Error ? error.message : 'Failed to calculate ability modifier.' };
   }
 }
@@ -41,7 +41,7 @@ export async function calculateSkillModifierAction(
     const modifier = await rulesService.calculateSkillModifier(skillName, stats, proficient, proficiencyBonus, expertiseFeatures);
     return { success: true, modifier };
   } catch (error) {
-    logError(error, { message: '[Action] Error calculating skill modifier', skillName, proficient, proficiencyBonus });
+    logError(error, { message: '[Action] Error calculating skill modifier', skillName, proficient, proficiencyBonus }, 'RulesActions');
     return { success: false, modifier: 0, error: error instanceof Error ? error.message : 'Failed to calculate skill modifier.' };
   }
 }
@@ -52,7 +52,7 @@ export async function calculateArmorClassAction(character: Character): Promise<{
     const ac = await rulesService.calculateArmorClass(character);
     return { success: true, ac };
   } catch (error) {
-    logError(error, { message: '[Action] Error calculating Armor Class', characterId: character.id });
+    logError(error, { message: '[Action] Error calculating Armor Class', characterId: character.id }, 'RulesActions');
     return { success: false, ac: 10, error: error instanceof Error ? error.message : 'Failed to calculate Armor Class.' };
   }
 }
@@ -63,7 +63,7 @@ export async function calculateHitBonusAction(weapon: EquipmentItem, character: 
     const bonus = await rulesService.calculateHitBonus(weapon, character, proficiencyBonus);
     return { success: true, bonus };
   } catch (error) {
-    logError(error, { message: '[Action] Error calculating hit bonus', weaponName: weapon.name, characterId: character.id });
+    logError(error, { message: '[Action] Error calculating hit bonus', weaponName: weapon.name, characterId: character.id }, 'RulesActions');
     return { success: false, bonus: 0, error: error instanceof Error ? error.message : 'Failed to calculate hit bonus.' };
   }
 }
@@ -74,7 +74,7 @@ export async function calculateDamageBonusAction(weapon: EquipmentItem, characte
     const bonus = await rulesService.calculateDamageBonus(weapon, character);
     return { success: true, bonus };
   } catch (error) {
-    logError(error, { message: '[Action] Error calculating damage bonus', weaponName: weapon.name, characterId: character.id });
+    logError(error, { message: '[Action] Error calculating damage bonus', weaponName: weapon.name, characterId: character.id }, 'RulesActions');
     return { success: false, bonus: 0, error: error instanceof Error ? error.message : 'Failed to calculate damage bonus.' };
   }
 }
@@ -85,7 +85,7 @@ export async function calculateSpellSaveDCAction(proficiencyBonus: number, spell
     const dc = await rulesService.calculateSpellSaveDC(proficiencyBonus, spellcastingAbilityScore);
     return { success: true, dc };
   } catch (error) {
-    logError(error, { message: '[Action] Error calculating spell save DC', proficiencyBonus, spellcastingAbilityScore });
+    logError(error, { message: '[Action] Error calculating spell save DC', proficiencyBonus, spellcastingAbilityScore }, 'RulesActions');
     return { success: false, dc: 8, error: error instanceof Error ? error.message : 'Failed to calculate spell save DC.' };
   }
 }
@@ -96,7 +96,7 @@ export async function calculateSpellAttackBonusAction(proficiencyBonus: number, 
     const bonus = await rulesService.calculateSpellAttackBonus(proficiencyBonus, spellcastingAbilityScore);
     return { success: true, bonus };
   } catch (error) {
-    logError(error, { message: '[Action] Error calculating spell attack bonus', proficiencyBonus, spellcastingAbilityScore });
+    logError(error, { message: '[Action] Error calculating spell attack bonus', proficiencyBonus, spellcastingAbilityScore }, 'RulesActions');
     return { success: false, bonus: 0, error: error instanceof Error ? error.message : 'Failed to calculate spell attack bonus.' };
   }
 }
@@ -104,13 +104,10 @@ export async function calculateSpellAttackBonusAction(proficiencyBonus: number, 
 export async function calculateMaxHitPointsAction(level: number, conScore: number, classHitDie: `d${6 | 8 | 10 | 12}` | null): Promise<{ success: boolean; maxHp: number; error?: string }> {
   try {
     const rulesService = await getRulesService();
-    // Pass conScore directly, service will calculate modifier
     const maxHp = await rulesService.calculateMaxHitPoints(level, conScore, classHitDie);
     return { success: true, maxHp };
   } catch (error) {
-    logError(error, { message: '[Action] Error calculating max hit points', level, conScore, classHitDie });
+    logError(error, { message: '[Action] Error calculating max hit points', level, conScore, classHitDie }, 'RulesActions');
     return { success: false, maxHp: 1, error: error instanceof Error ? error.message : 'Failed to calculate max hit points.' };
   }
 }
-
-    

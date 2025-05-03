@@ -24,17 +24,21 @@ const getCampaignService = async (): Promise<CampaignService> => {
 };
 
 // Helper function to get combined content based on campaign or user packs
-// TODO: Determine the correct pack IDs to use based on context (e.g., campaign ID, user settings)
-const getCombinedContent = async (/* context parameters like campaignId or userId */): Promise<SourcePack['content'] | undefined> => {
+const getCombinedContent = async (campaignId?: string): Promise<SourcePack['content'] | undefined> => {
     try {
         const campaignService = await getCampaignService();
-        // Placeholder: Replace with actual logic to get relevant pack IDs
-        const packIds = ['srd']; // Default to SRD for now
+        let packIds = ['srd']; // Default to SRD
+         if (campaignId) {
+            const campaign = await campaignService.loadCampaign(campaignId);
+            if (campaign && campaign.activeSourcePackIds) {
+                 packIds = [...new Set([...campaign.activeSourcePackIds, 'srd'])]; // Ensure SRD is always included
+            }
+         }
+        logMessage('debug', `[Action Helper] Getting combined content for packs: ${packIds.join(', ')}`, undefined, 'FeatureActions');
         const content = await campaignService.getCombinedContentFromPacks(packIds);
         return content;
     } catch (error) {
-        logError(error, { message: '[Action Helper] Error getting combined content' });
-        // Fallback to undefined or SRD content directly if preferred
+        logError(error, { message: '[Action Helper] Error getting combined content', campaignId }, 'FeatureActions');
         return undefined;
     }
 };
@@ -42,76 +46,76 @@ const getCombinedContent = async (/* context parameters like campaignId or userI
 // --- Feature Data Actions ---
 
 /** Fetches the full definition of a feature by its key/name. */
-export async function getFeatureDefinitionAction(featureKey: string): Promise<{ success: boolean; feature: Feature | null; error?: string }> {
+export async function getFeatureDefinitionAction(featureKey: string, campaignId?: string): Promise<{ success: boolean; feature: Feature | null; error?: string }> {
     try {
-        logMessage('debug', `[Action] Attempting to get feature definition: ${featureKey}`);
+        logMessage('debug', `[Action] Attempting to get feature definition: ${featureKey}`, undefined, 'FeatureActions', { campaignId });
         const featuresService = await getFeaturesService();
-        const combinedContent = await getCombinedContent();
+        const combinedContent = await getCombinedContent(campaignId);
         const feature = await featuresService.getFeatureDefinition(featureKey, combinedContent);
-        logMessage('debug', `[Action] Feature definition ${feature ? 'found' : 'not found'} for: ${featureKey}`);
+        logMessage('debug', `[Action] Feature definition ${feature ? 'found' : 'not found'} for: ${featureKey}`, undefined, 'FeatureActions');
         return { success: true, feature };
     } catch (error) {
-        logError(error, { message: `[Action] Error getting feature definition for ${featureKey}` });
+        logError(error, { message: `[Action] Error getting feature definition for ${featureKey}`, campaignId }, 'FeatureActions');
         return { success: false, feature: null, error: error instanceof Error ? error.message : 'Failed to get feature definition.' };
     }
 }
 
 /** Fetches definitions for multiple features. */
-export async function getMultipleFeatureDefinitionsAction(featureKeys: string[]): Promise<{ success: boolean; features: Feature[]; error?: string }> {
+export async function getMultipleFeatureDefinitionsAction(featureKeys: string[], campaignId?: string): Promise<{ success: boolean; features: Feature[]; error?: string }> {
     try {
-        logMessage('debug', `[Action] Attempting to get definitions for multiple features: ${featureKeys.length}`);
+        logMessage('debug', `[Action] Attempting to get definitions for multiple features: ${featureKeys.length}`, undefined, 'FeatureActions', { campaignId });
         const featuresService = await getFeaturesService();
-        const combinedContent = await getCombinedContent();
+        const combinedContent = await getCombinedContent(campaignId);
         const features = await featuresService.getMultipleFeatureDefinitions(featureKeys, combinedContent);
-        logMessage('debug', `[Action] Fetched ${features.length} feature definitions.`);
+        logMessage('debug', `[Action] Fetched ${features.length} feature definitions.`, undefined, 'FeatureActions');
         return { success: true, features };
     } catch (error) {
-        logError(error, { message: `[Action] Error getting multiple feature definitions`, featureKeys });
+        logError(error, { message: `[Action] Error getting multiple feature definitions`, featureKeys, campaignId }, 'FeatureActions');
         return { success: false, features: [], error: error instanceof Error ? error.message : 'Failed to get multiple feature definitions.' };
     }
 }
 
 /** Retrieves features granted by a specific race name. */
-export async function getRaceFeaturesAction(raceName: string): Promise<{ success: boolean; features: Feature[]; error?: string }> {
+export async function getRaceFeaturesAction(raceName: string, campaignId?: string): Promise<{ success: boolean; features: Feature[]; error?: string }> {
     try {
-        logMessage('debug', `[Action] Attempting to get features for race: ${raceName}`);
+        logMessage('debug', `[Action] Attempting to get features for race: ${raceName}`, undefined, 'FeatureActions', { campaignId });
         const featuresService = await getFeaturesService();
-        const combinedContent = await getCombinedContent();
+        const combinedContent = await getCombinedContent(campaignId);
         const features = await featuresService.getRaceFeatures(raceName, combinedContent);
-        logMessage('debug', `[Action] Found ${features.length} features for race: ${raceName}`);
+        logMessage('debug', `[Action] Found ${features.length} features for race: ${raceName}`, undefined, 'FeatureActions');
         return { success: true, features };
     } catch (error) {
-        logError(error, { message: `[Action] Error getting features for race ${raceName}` });
+        logError(error, { message: `[Action] Error getting features for race ${raceName}`, campaignId }, 'FeatureActions');
         return { success: false, features: [], error: error instanceof Error ? error.message : 'Failed to get race features.' };
     }
 }
 
 /** Retrieves cumulative features granted by a specific class up to a given level. */
-export async function getClassFeaturesAction(className: string, level: number): Promise<{ success: boolean; features: Feature[]; error?: string }> {
+export async function getClassFeaturesAction(className: string, level: number, campaignId?: string): Promise<{ success: boolean; features: Feature[]; error?: string }> {
     try {
-        logMessage('debug', `[Action] Attempting to get features for class: ${className} at level ${level}`);
+        logMessage('debug', `[Action] Attempting to get features for class: ${className} at level ${level}`, undefined, 'FeatureActions', { campaignId });
         const featuresService = await getFeaturesService();
-        const combinedContent = await getCombinedContent();
+        const combinedContent = await getCombinedContent(campaignId);
         const features = await featuresService.getClassFeatures(className, level, combinedContent);
-        logMessage('debug', `[Action] Found ${features.length} features for class ${className} at level ${level}.`);
+        logMessage('debug', `[Action] Found ${features.length} features for class ${className} at level ${level}.`, undefined, 'FeatureActions');
         return { success: true, features };
     } catch (error) {
-        logError(error, { message: `[Action] Error getting features for class ${className} at level ${level}` });
+        logError(error, { message: `[Action] Error getting features for class ${className} at level ${level}`, campaignId }, 'FeatureActions');
         return { success: false, features: [], error: error instanceof Error ? error.message : 'Failed to get class features.' };
     }
 }
 
 /** Retrieves features and proficiencies granted by a specific background name. */
-export async function getBackgroundFeaturesAction(backgroundName: string): Promise<{ success: boolean; features: Feature[]; error?: string }> {
+export async function getBackgroundFeaturesAction(backgroundName: string, campaignId?: string): Promise<{ success: boolean; features: Feature[]; error?: string }> {
     try {
-        logMessage('debug', `[Action] Attempting to get features for background: ${backgroundName}`);
+        logMessage('debug', `[Action] Attempting to get features for background: ${backgroundName}`, undefined, 'FeatureActions', { campaignId });
         const featuresService = await getFeaturesService();
-        const combinedContent = await getCombinedContent();
+        const combinedContent = await getCombinedContent(campaignId);
         const features = await featuresService.getBackgroundFeatures(backgroundName, combinedContent);
-        logMessage('debug', `[Action] Found ${features.length} features for background: ${backgroundName}.`);
+        logMessage('debug', `[Action] Found ${features.length} features for background: ${backgroundName}.`, undefined, 'FeatureActions');
         return { success: true, features };
     } catch (error) {
-        logError(error, { message: `[Action] Error getting features for background ${backgroundName}` });
+        logError(error, { message: `[Action] Error getting features for background ${backgroundName}`, campaignId }, 'FeatureActions');
         return { success: false, features: [], error: error instanceof Error ? error.message : 'Failed to get background features.' };
     }
 }
@@ -119,16 +123,14 @@ export async function getBackgroundFeaturesAction(backgroundName: string): Promi
 /** Applies the effects of a character's features to their base state. */
 export async function applyFeatureRulesAction(baseCharacter: Character): Promise<{ success: boolean; character?: Character; error?: string }> {
     try {
-        logMessage('debug', `[Action] Applying feature rules for character: ${baseCharacter.id}`);
+        logMessage('debug', `[Action] Applying feature rules for character: ${baseCharacter.id}`, undefined, 'FeatureActions');
         const featuresService = await getFeaturesService();
         const derivedCharacter = await featuresService.applyFeatureRules(baseCharacter);
-        logMessage('debug', `[Action] Finished applying feature rules for character: ${baseCharacter.id}`);
+        logMessage('debug', `[Action] Finished applying feature rules for character: ${baseCharacter.id}`, undefined, 'FeatureActions');
         return { success: true, character: derivedCharacter };
     } catch (error) {
-        logError(error, { message: `[Action] Error applying feature rules for character ${baseCharacter.id}` });
+        logError(error, { message: `[Action] Error applying feature rules for character ${baseCharacter.id}` }, 'FeatureActions');
         // Return the base character in case of error to allow UI to handle gracefully
         return { success: false, character: baseCharacter, error: error instanceof Error ? error.message : 'Failed to apply feature rules.' };
     }
 }
-
-    

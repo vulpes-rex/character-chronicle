@@ -24,16 +24,22 @@ const getCampaignService = async (): Promise<CampaignService> => {
 };
 
 // Helper function to get combined content based on campaign or user packs
-// TODO: Determine the correct pack IDs to use based on context (e.g., campaign ID, user settings)
-const getCombinedContent = async (/* context parameters like campaignId or userId */): Promise<SourcePack['content'] | undefined> => {
+const getCombinedContent = async (campaignId?: string): Promise<SourcePack['content'] | undefined> => {
     try {
         const campaignService = await getCampaignService();
-        // Placeholder: Replace with actual logic to get relevant pack IDs
-        const packIds = ['srd']; // Default to SRD for now
+        let packIds = ['srd']; // Default to SRD
+        if (campaignId) {
+            const campaign = await campaignService.loadCampaign(campaignId);
+            if (campaign && campaign.activeSourcePackIds) {
+                 packIds = [...new Set([...campaign.activeSourcePackIds, 'srd'])]; // Ensure SRD is always included
+            }
+        }
+        // If no campaignId, we might load based on user preferences or default to SRD
+        logMessage('debug', `[Action Helper] Getting combined content for packs: ${packIds.join(', ')}`, undefined, 'DndApiActions');
         const content = await campaignService.getCombinedContentFromPacks(packIds);
         return content;
     } catch (error) {
-        logError(error, { message: '[Action Helper] Error getting combined content' });
+        logError(error, { message: '[Action Helper] Error getting combined content', campaignId }, 'DndApiActions');
         // Fallback to undefined or SRD content directly if preferred
         return undefined;
     }
@@ -41,103 +47,102 @@ const getCombinedContent = async (/* context parameters like campaignId or userI
 
 // --- D&D Data Actions ---
 
-export async function getCharacterClassesAction(): Promise<{ success: boolean; classes: CharacterClass[]; error?: string }> {
+// Pass optional campaignId to fetch content relevant to a specific campaign
+export async function getCharacterClassesAction(campaignId?: string): Promise<{ success: boolean; classes: CharacterClass[]; error?: string }> {
   try {
-    logMessage('debug', '[Action] Fetching character classes.');
+    logMessage('debug', '[Action] Fetching character classes.', undefined, 'DndApiActions', { campaignId });
     const dndApiService = await getDndApiService();
-    const combinedContent = await getCombinedContent(); // Fetch combined content
+    const combinedContent = await getCombinedContent(campaignId); // Fetch combined content
     const classes = await dndApiService.getCharacterClasses(combinedContent);
-    logMessage('debug', `[Action] Fetched ${classes.length} character classes.`);
+    logMessage('debug', `[Action] Fetched ${classes.length} character classes.`, undefined, 'DndApiActions');
     return { success: true, classes };
   } catch (error) {
-    logError(error, { message: '[Action] Error fetching character classes.' });
+    logError(error, { message: '[Action] Error fetching character classes.', campaignId }, 'DndApiActions');
     return { success: false, classes: [], error: error instanceof Error ? error.message : 'Failed to fetch character classes.' };
   }
 }
 
-export async function getCharacterRacesAction(): Promise<{ success: boolean; races: CharacterRace[]; error?: string }> {
+export async function getCharacterRacesAction(campaignId?: string): Promise<{ success: boolean; races: CharacterRace[]; error?: string }> {
   try {
-    logMessage('debug', '[Action] Fetching character races.');
+    logMessage('debug', '[Action] Fetching character races.', undefined, 'DndApiActions', { campaignId });
     const dndApiService = await getDndApiService();
-    const combinedContent = await getCombinedContent(); // Fetch combined content
+    const combinedContent = await getCombinedContent(campaignId); // Fetch combined content
     const races = await dndApiService.getCharacterRaces(combinedContent);
-    logMessage('debug', `[Action] Fetched ${races.length} character races.`);
+    logMessage('debug', `[Action] Fetched ${races.length} character races.`, undefined, 'DndApiActions');
     return { success: true, races };
   } catch (error) {
-    logError(error, { message: '[Action] Error fetching character races.' });
+    logError(error, { message: '[Action] Error fetching character races.', campaignId }, 'DndApiActions');
     return { success: false, races: [], error: error instanceof Error ? error.message : 'Failed to fetch character races.' };
   }
 }
 
-export async function getLevelUpOptionsAction(className: string, targetLevel: number): Promise<{ success: boolean; levelOptions: CharacterLevel; error?: string }> {
+export async function getLevelUpOptionsAction(className: string, targetLevel: number, campaignId?: string): Promise<{ success: boolean; levelOptions: CharacterLevel; error?: string }> {
   try {
-    logMessage('debug', `[Action] Fetching level up options for ${className} Lvl ${targetLevel}.`);
+    logMessage('debug', `[Action] Fetching level up options for ${className} Lvl ${targetLevel}.`, undefined, 'DndApiActions', { campaignId });
     const dndApiService = await getDndApiService();
-    const combinedContent = await getCombinedContent(); // Fetch combined content
+    const combinedContent = await getCombinedContent(campaignId); // Fetch combined content
     const levelOptions = await dndApiService.getLevelUpOptions(className, targetLevel, combinedContent);
-    logMessage('debug', `[Action] Fetched level up options for ${className} Lvl ${targetLevel}. Features found: ${levelOptions.features.length}`);
+    logMessage('debug', `[Action] Fetched level up options for ${className} Lvl ${targetLevel}. Features found: ${levelOptions.features.length}`, undefined, 'DndApiActions');
     return { success: true, levelOptions };
   } catch (error) {
-    logError(error, { message: `[Action] Error fetching level up options for ${className} Lvl ${targetLevel}.` });
+    logError(error, { message: `[Action] Error fetching level up options for ${className} Lvl ${targetLevel}.`, campaignId }, 'DndApiActions');
      // Return a default structure on error to avoid breaking UI
     return { success: false, levelOptions: { level: targetLevel, features: [], proficiencyBonus: undefined }, error: error instanceof Error ? error.message : 'Failed to fetch level up options.' };
   }
 }
 
-export async function getAvailableEquipmentItemsAction(): Promise<{ success: boolean; items: EquipmentItem[]; error?: string }> {
+export async function getAvailableEquipmentItemsAction(campaignId?: string): Promise<{ success: boolean; items: EquipmentItem[]; error?: string }> {
   try {
-    logMessage('debug', '[Action] Fetching available equipment items.');
+    logMessage('debug', '[Action] Fetching available equipment items.', undefined, 'DndApiActions', { campaignId });
     const dndApiService = await getDndApiService();
-    const combinedContent = await getCombinedContent(); // Fetch combined content
+    const combinedContent = await getCombinedContent(campaignId); // Fetch combined content
     const items = await dndApiService.getAvailableEquipmentItems(combinedContent);
-    logMessage('debug', `[Action] Fetched ${items.length} equipment items.`);
+    logMessage('debug', `[Action] Fetched ${items.length} equipment items.`, undefined, 'DndApiActions');
     return { success: true, items };
   } catch (error) {
-    logError(error, { message: '[Action] Error fetching equipment items.' });
+    logError(error, { message: '[Action] Error fetching equipment items.', campaignId }, 'DndApiActions');
     return { success: false, items: [], error: error instanceof Error ? error.message : 'Failed to fetch equipment items.' };
   }
 }
 
-export async function getAvailableBackgroundsAction(): Promise<{ success: boolean; backgrounds: string[]; error?: string }> {
+export async function getAvailableBackgroundsAction(campaignId?: string): Promise<{ success: boolean; backgrounds: string[]; error?: string }> {
   try {
-    logMessage('debug', '[Action] Fetching available background names.');
+    logMessage('debug', '[Action] Fetching available background names.', undefined, 'DndApiActions', { campaignId });
     const dndApiService = await getDndApiService();
-    const combinedContent = await getCombinedContent(); // Fetch combined content
+    const combinedContent = await getCombinedContent(campaignId); // Fetch combined content
     const backgrounds = await dndApiService.getAvailableBackgrounds(combinedContent);
-    logMessage('debug', `[Action] Fetched ${backgrounds.length} background names.`);
+    logMessage('debug', `[Action] Fetched ${backgrounds.length} background names.`, undefined, 'DndApiActions');
     return { success: true, backgrounds };
   } catch (error) {
-    logError(error, { message: '[Action] Error fetching background names.' });
+    logError(error, { message: '[Action] Error fetching background names.', campaignId }, 'DndApiActions');
     return { success: false, backgrounds: [], error: error instanceof Error ? error.message : 'Failed to fetch background names.' };
   }
 }
 
-export async function getBackgroundDetailsAction(backgroundName: string): Promise<{ success: boolean; details: BackgroundInfo | null; error?: string }> {
+export async function getBackgroundDetailsAction(backgroundName: string, campaignId?: string): Promise<{ success: boolean; details: BackgroundInfo | null; error?: string }> {
   try {
-    logMessage('debug', `[Action] Fetching details for background: ${backgroundName}.`);
+    logMessage('debug', `[Action] Fetching details for background: ${backgroundName}.`, undefined, 'DndApiActions', { campaignId });
     const dndApiService = await getDndApiService();
-    const combinedContent = await getCombinedContent(); // Fetch combined content
+    const combinedContent = await getCombinedContent(campaignId); // Fetch combined content
     const details = await dndApiService.getBackgroundDetails(backgroundName, combinedContent);
-    logMessage('debug', `[Action] Background details ${details ? 'found' : 'not found'} for: ${backgroundName}.`);
+    logMessage('debug', `[Action] Background details ${details ? 'found' : 'not found'} for: ${backgroundName}.`, undefined, 'DndApiActions');
     return { success: true, details };
   } catch (error) {
-    logError(error, { message: `[Action] Error fetching background details for ${backgroundName}.` });
+    logError(error, { message: `[Action] Error fetching background details for ${backgroundName}.`, campaignId }, 'DndApiActions');
     return { success: false, details: null, error: error instanceof Error ? error.message : 'Failed to fetch background details.' };
   }
 }
 
-export async function getSpellsAction(): Promise<{ success: boolean; spells: Spell[]; error?: string }> {
+export async function getSpellsAction(campaignId?: string): Promise<{ success: boolean; spells: Spell[]; error?: string }> {
   try {
-    logMessage('debug', '[Action] Fetching spells.');
+    logMessage('debug', '[Action] Fetching spells.', undefined, 'DndApiActions', { campaignId });
     const dndApiService = await getDndApiService();
-    const combinedContent = await getCombinedContent(); // Fetch combined content
+    const combinedContent = await getCombinedContent(campaignId); // Fetch combined content
     const spells = await dndApiService.getSpells(combinedContent);
-    logMessage('debug', `[Action] Fetched ${spells.length} spells.`);
+    logMessage('debug', `[Action] Fetched ${spells.length} spells.`, undefined, 'DndApiActions');
     return { success: true, spells };
   } catch (error) {
-    logError(error, { message: '[Action] Error fetching spells.' });
+    logError(error, { message: '[Action] Error fetching spells.', campaignId }, 'DndApiActions');
     return { success: false, spells: [], error: error instanceof Error ? error.message : 'Failed to fetch spells.' };
   }
 }
-
-    

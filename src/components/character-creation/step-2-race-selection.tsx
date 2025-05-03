@@ -1,4 +1,3 @@
-
 'use client';
 
 import { useEffect, useState, useMemo } from 'react'; // Keep useMemo for potential future optimization if needed elsewhere
@@ -26,12 +25,12 @@ export function Step2RaceSelection({ data, updateData, setValidity, availableRac
     const [selectedRaceName, setSelectedRaceName] = useState<string | null>(data.race || null);
     const selectedRace = availableRaces.find(r => r.name === selectedRaceName);
 
-    // Fetch trait details using the race name and combinedContent via feature service
-    const { data: traitDetails, isLoading: isLoadingTraits } = useQuery<Feature[], Error>({
+    // Fetch feature details using the race name and combinedContent via feature service
+    const { data: raceFeatures, isLoading: isLoadingTraits } = useQuery<Feature[], Error>({
         queryKey: ['raceFeatures', selectedRaceName, combinedContent], // Include combinedContent in key
-        queryFn: () => selectedRaceName && combinedContent ? getRaceFeatures(selectedRaceName, combinedContent) : Promise.resolve([]), // Use getRaceFeatures
-        enabled: !!selectedRaceName && !!combinedContent, // Enable only when race and content are available
-        staleTime: Infinity, // Trait details are static for a given content set
+        queryFn: () => selectedRaceName ? getRaceFeatures(selectedRaceName, combinedContent) : Promise.resolve([]), // Use getRaceFeatures from feature service
+        enabled: !!selectedRaceName, // Enable only when race is selected
+        staleTime: 5 * 60 * 1000, // Cache for 5 mins
     });
 
 
@@ -105,22 +104,22 @@ export function Step2RaceSelection({ data, updateData, setValidity, availableRac
                              <Skeleton className="h-4 w-5/6" />
                          </div>
                      )}
-                    {selectedRace && traitDetails && traitDetails.length > 0 && (
+                    {selectedRace && raceFeatures && raceFeatures.length > 0 && (
                          <ScrollArea className="h-[400px]">
                              <Accordion type="multiple" className="w-full">
-                                {traitDetails.map((trait, index) => (
-                                     <AccordionItem value={`trait-${index}-${trait.name}`} key={`${index}-${trait.name}`}>
-                                         <AccordionTrigger className="text-sm">{trait.name}</AccordionTrigger>
+                                {raceFeatures.map((feature, index) => (
+                                     <AccordionItem value={`trait-${index}-${feature.name}`} key={`${index}-${feature.name}`}>
+                                         <AccordionTrigger className="text-sm">{feature.name}</AccordionTrigger>
                                          <AccordionContent className="text-xs text-muted-foreground">
-                                             {trait.description}
+                                             {feature.description}
                                          </AccordionContent>
                                      </AccordionItem>
                                  ))}
                              </Accordion>
                          </ScrollArea>
                     )}
-                     {selectedRace && !isLoadingTraits && (!traitDetails || traitDetails.length === 0) && (
-                        <p className='text-sm text-muted-foreground italic'>No detailed traits available for this race.</p>
+                     {selectedRace && !isLoadingTraits && (!raceFeatures || raceFeatures.length === 0) && (
+                        <p className='text-sm text-muted-foreground italic'>No detailed features available for this race.</p>
                      )}
                      {!selectedRace && <p className="text-sm text-muted-foreground italic">Select a race to view its traits.</p>}
                 </CardContent>
@@ -128,5 +127,3 @@ export function Step2RaceSelection({ data, updateData, setValidity, availableRac
         </div>
     );
 }
-
-    

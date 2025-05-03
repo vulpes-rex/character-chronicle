@@ -17,7 +17,7 @@ import {
 } from 'firebase/firestore';
 import type { Character, Feature, FeatureEffectMetadata, EquipmentItem } from '@/lib/types'; // Import new types
 import { logError, logMessage } from './logging-service'; // Import logging service
-import { applyFeatureRules } from './feature-service'; // Import renamed applyFeatureRules
+import { applyFeatureRules } from './feature-service'; // Import applyFeatureRules
 
 const charactersCollection = collection(db, 'characters');
 
@@ -115,10 +115,9 @@ export async function updateCharacter(characterId: string, characterData: Partia
 }
 
 /**
- * Loads a specific character from Firestore.
- * Returns the raw character data including base stats. Derived values are calculated client-side.
+ * Loads a specific character from Firestore and applies feature rules.
  * @param characterId - The ID of the character to load.
- * @returns The raw character data, or null if not found.
+ * @returns The Character object with derived values applied, or null if not found.
  */
 export async function loadCharacter(characterId: string): Promise<Character | null> {
    if (!characterId) {
@@ -131,30 +130,39 @@ export async function loadCharacter(characterId: string): Promise<Character | nu
     const docSnap = await getDoc(characterDoc);
     if (docSnap.exists()) {
         const data = docSnap.data();
-        // Return the base character data as stored in Firestore
+        // Convert Firestore Timestamps to JS Dates
+        const createdAt = data.createdAt instanceof Timestamp ? data.createdAt.toDate() : undefined;
+        const updatedAt = data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : undefined;
+
+        // Construct the base character object from Firestore data
         const baseCharacter: Character = {
             ...data,
             id: docSnap.id,
-            createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : undefined,
-            updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : undefined,
-            stats: data.stats || {}, // Ensure base stats are present
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            // Ensure required fields have defaults if missing in Firestore
+            stats: data.stats || { strength: 10, dexterity: 10, constitution: 10, intelligence: 10, wisdom: 10, charisma: 10 },
             skills: data.skills || {},
             hitPoints: data.hitPoints || { max: 0, current: 0, temporary: 0 },
-            hitDice: data.hitDice || { total: 0, remaining: 0, dieType: null },
+            hitDice: data.hitDice || { total: data.level || 0, remaining: data.level || 0, dieType: null },
             equipment: Array.isArray(data.equipment) ? data.equipment : [],
-            proficiencies: data.proficiencies || { armor: [], weapons: [], tools: [], savingThrows: [] },
+            proficiencies: data.proficiencies || { armor: [], weapons: [], tools: [], savingThrows: [], languages: [] },
             features: Array.isArray(data.features) ? data.features : [],
-            featureChoices: data.featureChoices || {}, // Load feature choices
-        } as Character;
+            featureChoices: data.featureChoices || {},
+            playerName: data.playerName || 'Unknown Player',
+            characterName: data.characterName || 'Unnamed Character',
+            race: data.race || 'Unknown Race',
+            class: data.class || 'Unknown Class',
+            level: data.level || 1,
+            background: data.background || 'Unknown Background',
+            alignment: data.alignment || 'Neutral',
+            backstory: data.backstory || '',
+            appearance: data.appearance || '',
+        } as Character; // Type assertion after filling defaults
 
-        // Apply feature rules after loading to get derived stats for potential use
-        // Note: This returns a new object with derived calculations, it doesn't modify the stored data.
-        // const characterWithDerived = await applyFeatureRules(baseCharacter);
-        // return characterWithDerived;
-
-        // Return only base data for now, calculation happens client-side in CharacterSheet
-        return baseCharacter;
-
+        // Apply feature rules to calculate derived values
+        const characterWithDerived = await applyFeatureRules(baseCharacter);
+        return characterWithDerived;
 
     } else {
       console.log(`No character document found for ID: ${characterId}`);
@@ -172,9 +180,9 @@ export async function loadCharacter(characterId: string): Promise<Character | nu
 }
 
 /**
- * Loads all characters (or potentially characters for a specific player if auth is added).
- * Returns raw character data. Derived values are calculated client-side.
- * @returns An array of raw character data.
+ * Loads all characters (or potentially characters for a specific player if auth is added)
+ * and applies feature rules to each.
+ * @returns An array of Character objects with derived values applied.
  */
 export async function loadAllCharacters(): Promise<Character[]> {
   // TODO: Add filtering by player ID if authentication is implemented
@@ -183,25 +191,42 @@ export async function loadAllCharacters(): Promise<Character[]> {
     const querySnapshot = await getDocs(q);
     const characters: Character[] = [];
 
-    querySnapshot.forEach((docSnap) => {
+    // Use Promise.all to apply rules concurrently after fetching
+    await Promise.all(querySnapshot.docs.map(async (docSnap) => {
        const data = docSnap.data();
-        // Return the base character data as stored in Firestore
+        const createdAt = data.createdAt instanceof Timestamp ? data.createdAt.toDate() : undefined;
+        const updatedAt = data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : undefined;
+
+       // Construct base character
         const baseCharacter: Character = {
             ...data,
             id: docSnap.id,
-            createdAt: data.createdAt instanceof Timestamp ? data.createdAt.toDate() : undefined,
-            updatedAt: data.updatedAt instanceof Timestamp ? data.updatedAt.toDate() : undefined,
-            stats: data.stats || {}, // Ensure base stats are present
+            createdAt: createdAt,
+            updatedAt: updatedAt,
+            // Ensure required fields have defaults if missing in Firestore
+            stats: data.stats || { strength: 10, dexterity: 10, constitution: 10, intelligence: 10, wisdom: 10, charisma: 10 },
             skills: data.skills || {},
             hitPoints: data.hitPoints || { max: 0, current: 0, temporary: 0 },
-            hitDice: data.hitDice || { total: 0, remaining: 0, dieType: null },
+            hitDice: data.hitDice || { total: data.level || 0, remaining: data.level || 0, dieType: null },
             equipment: Array.isArray(data.equipment) ? data.equipment : [],
-            proficiencies: data.proficiencies || { armor: [], weapons: [], tools: [], savingThrows: [] },
+            proficiencies: data.proficiencies || { armor: [], weapons: [], tools: [], savingThrows: [], languages: [] },
             features: Array.isArray(data.features) ? data.features : [],
-            featureChoices: data.featureChoices || {}, // Load feature choices
-        } as Character;
-        characters.push(baseCharacter);
-    });
+            featureChoices: data.featureChoices || {},
+             playerName: data.playerName || 'Unknown Player',
+             characterName: data.characterName || 'Unnamed Character',
+             race: data.race || 'Unknown Race',
+             class: data.class || 'Unknown Class',
+             level: data.level || 1,
+             background: data.background || 'Unknown Background',
+             alignment: data.alignment || 'Neutral',
+             backstory: data.backstory || '',
+             appearance: data.appearance || '',
+        } as Character; // Type assertion after filling defaults
+
+        // Apply rules and add to list
+        const characterWithDerived = await applyFeatureRules(baseCharacter);
+        characters.push(characterWithDerived);
+    }));
 
     return characters;
 
@@ -238,3 +263,5 @@ export async function deleteCharacter(characterId: string): Promise<void> {
     throw new Error('Failed to delete character.');
   }
 }
+
+// Removed erroneous JSX block from here

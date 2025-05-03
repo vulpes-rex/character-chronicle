@@ -1,260 +1,16 @@
-
 'use server';
 
 import type { Feature, FeatureEffectMetadata, SourcePack, CharacterClass, CharacterRace, BackgroundInfo, Character } from '@/lib/types';
 import { logError, logMessage } from './logging-service';
 import { ALL_SKILLS } from '@/lib/types'; // Import ALL_SKILLS
-
-// --- Rule-Based System for Applying Feature Effects ---
-
-// Type for functions that calculate a specific derived property
-type CharacterDerivedPropertyCalculator = (character: Character, baseValue: any) => any;
-
-interface FeatureRule {
-    effectType: FeatureEffectMetadata['effectType'];
-    // Instead of modifying the character directly, rules provide calculation logic
-    // or modify specific derived properties. For stats, we'll calculate bonuses separately.
-    // For proficiencies, we'll accumulate them.
-    // For AC/Advantage/Resistance, they are informational for later calculations.
-}
-
-// --- Base/Placeholder Data (SRD or Core Rules) ---
-// This should contain the *definitions* of features referenced by key in source packs.
-// This is now primarily a FALLBACK or reference. Feature definitions should ideally come from source packs.
-// REMOVED export keyword from here
-const BASE_FEATURE_DEFINITIONS: Record<string, Feature> = {
-    // Race Features
-    "HumanASI": {
-        name: "Ability Score Increase",
-        description: "Your ability scores each increase by 1.",
-        source: "Human",
-        metadata: {
-            effectType: "statBonus",
-            stats: { strength: 1, dexterity: 1, constitution: 1, intelligence: 1, wisdom: 1, charisma: 1 },
-        }
-    },
-    "ExtraLanguage": {
-        name: "Extra Language",
-        description: "You can speak, read, and write one extra language of your choice.",
-        source: "Human",
-        metadata: { // Add metadata for choice
-            effectType: "proficiencyGrant",
-            type: "language",
-            choose: 1,
-            // Options could be dynamically populated or hardcoded for SRD
-            options: ["Common", "Dwarvish", "Elvish", "Giant", "Gnomish", "Goblin", "Halfling", "Orc"],
-            choiceKey: "ExtraLanguage", // Added choiceKey
-        }
-    },
-    "Darkvision": {
-        name: "Darkvision",
-        description: "Accustomed to twilit forests and the night sky, you have superior vision in dark and dim conditions. You can see in dim light within 60 feet of you as if it were bright light, and in darkness as if it were dim light.",
-        source: "Elf/Dwarf",
-    },
-    "FeyAncestry": {
-        name: "Fey Ancestry",
-        description: "You have advantage on saving throws against being charmed, and magic can't put you to sleep.",
-        source: "Elf",
-        metadata: {
-            effectType: "advantage",
-            target: "savingThrow",
-            condition: "against being charmed",
-        }
-    },
-    "Trance": {
-        name: "Trance",
-        description: "Elves don’t need to sleep. Instead, they meditate deeply, remaining semiconscious, for 4 hours a day.",
-        source: "Elf",
-    },
-    "DwarvenResilience": {
-        name: "Dwarven Resilience",
-        description: "You have advantage on saving throws against poison, and you have resistance against poison damage.",
-        source: "Dwarf",
-        metadata: {
-            effectType: "resistance",
-            damageType: "Poison",
-        }
-        // Combined advantage and resistance - advantage rule could be separate if needed
-    },
-    "Stonecunning": {
-        name: "Stonecunning",
-        description: "Whenever you make an Intelligence (History) check related to the origin of stonework, you are considered proficient in the History skill and add double your proficiency bonus to the check, instead of your normal proficiency bonus.",
-        source: "Dwarf",
-        // Note: Expertise/double proficiency bonus needs specific handling, possibly a new metadata type or logic in skill calculation
-    },
-    "Lucky": {
-        name: "Lucky",
-        description: "When you roll a 1 on an attack roll, ability check, or saving throw, you can reroll the die and must use the new roll.",
-        source: "Halfling",
-        isActionable: true, // Or maybe passive reaction?
-        maxUses: null,
-        usesResetOn: null,
-    },
-    "Brave": {
-        name: "Brave",
-        description: "You have advantage on saving throws against being frightened.",
-        source: "Halfling",
-        metadata: {
-            effectType: "advantage",
-            target: "savingThrow",
-            condition: "against being frightened",
-        }
-    },
-    "HalflingNimbleness": {
-        name: "Halfling Nimbleness",
-        description: "You can move through the space of any creature that is of a size larger than yours.",
-        source: "Halfling",
-    },
-
-    // Class Features (Definitions)
-     "FightingStyle": { // Generic Fighting Style feature
-        name: "Fighting Style",
-        description: "You adopt a particular style of fighting as your specialty. Choose one option.",
-        source: "Fighter",
-        metadata: {
-            effectType: "choiceGrant",
-            choose: 1,
-            options: ["Archery", "Defense", "Dueling", "Great Weapon Fighting", "Protection", "Two-Weapon Fighting"], // Example options
-            choiceKey: "Fighting Style", // Key to store the choice in Character.featureChoices
-        }
-    },
-    // Specific styles - these might be implicitly activated based on the choice made for the generic "Fighting Style"
-    "FightingStyleArchery": {
-        name: "Fighting Style: Archery",
-        description: "You gain a +2 bonus to attack rolls you make with ranged weapons.",
-        source: "Fighter",
-        // Note: This bonus needs to be applied during attack roll calculation, not directly to stats. Informational metadata.
-        // Consider adding metadata like: { effectType: 'attackBonus', value: 2, condition: 'ranged weapon' }
-    },
-     "FightingStyleDefense": {
-        name: "Fighting Style: Defense",
-        description: "While you are wearing armor, you gain a +1 bonus to AC.",
-        source: "Fighter",
-        metadata: {
-            effectType: "acBonus",
-            value: 1,
-            condition: "wearing armor",
-        },
-    },
-    // ... other specific fighting style definitions ...
-    "SecondWind": {
-        name: "Second Wind",
-        description: "On your turn, you can use a bonus action to regain hit points equal to 1d10 + your fighter level. Once you use this feature, you must finish a short or long rest before you can use it again.",
-        source: "Fighter",
-        isActionable: true,
-        maxUses: 1,
-        usesResetOn: 'short-rest',
-    },
-    "ActionSurge": {
-        name: "Action Surge",
-        description: "On your turn, you can take one additional action. Once you use this feature, you must finish a short or long rest before you can use it again.",
-        source: "Fighter",
-        isActionable: true,
-        maxUses: 1,
-        usesResetOn: 'short-rest',
-    },
-     "Expertise": {
-        name: "Expertise",
-        description: "Choose two skill proficiencies, or one skill/tool proficiency. Double proficiency bonus for checks using chosen proficiencies.",
-        source: "Rogue",
-         metadata: { // Add metadata for choice
-             effectType: "proficiencyGrant", // Or potentially 'choiceGrant' if not directly granting proficiency?
-             type: 'skill', // Primary type is skill
-             choose: 2, // Choose 2 skills OR 1 skill + 1 tool
-             options: ALL_SKILLS, // Simplified: Allow choosing from all skills/tools (needs proper tool list)
-             choiceKey: "Expertise", // Added choiceKey
-             // Needs a way to handle the 'or 1 tool' case - complex metadata required
-         }
-        // Requires player choice, metadata might indicate this. Expertise effect handled in skill calculation.
-    },
-    "SneakAttack": {
-        name: "Sneak Attack",
-        description: "Once per turn, you can deal extra damage (scales with level) to one creature you hit with an attack under certain conditions.",
-        source: "Rogue",
-         // Damage calculation handled elsewhere.
-    },
-     "ThievesCant": {
-        name: "Thieves' Cant",
-        description: "A secret mix of dialect, jargon, and code allowing hidden messages.",
-        source: "Rogue",
-    },
-     "CunningAction": {
-        name: "Cunning Action",
-        description: "Use a bonus action to take the Dash, Disengage, or Hide action.",
-        source: "Rogue",
-        isActionable: true,
-    },
-    "Spellcasting": { // Example generic spellcasting feature
-        name: "Spellcasting",
-        description: "You have learned to draw on divine magic through meditation and prayer to cast spells as a cleric does.",
-        source: "Wizard" // Source should be specific class
-    },
-    "ArcaneRecovery": {
-        name: "Arcane Recovery",
-        description: "You have learned to regain some of your magical energy by studying your spellbook. Once per day when you finish a short rest, you can choose expended spell slots to recover.",
-        source: "Wizard",
-        isActionable: true, // Action happens during short rest
-        maxUses: 1,
-        usesResetOn: 'long-rest', // Once per day implies long rest reset
-    },
-     "ArcaneTradition": {
-        name: "Arcane Tradition",
-        description: "At 2nd level, you choose an arcane tradition, shaping your practice of magic through one of eight schools.",
-        source: "Wizard",
-        // Metadata might indicate a choice of sub-features/subclass
-         metadata: { // Example metadata for subclass choice
-             effectType: "choiceGrant",
-             choose: 1,
-             options: ["School of Abjuration", "School of Conjuration", "School of Divination", "School of Enchantment", "School of Evocation", "School of Illusion", "School of Necromancy", "School of Transmutation"], // Example SRD schools
-             choiceKey: "Arcane Tradition",
-         }
-    },
-    "UnarmoredDefenseBarbarian": {
-        name: 'Unarmored Defense (Barbarian)',
-        description: 'While you are not wearing any armor, your Armor Class equals 10 + your Dexterity modifier + your Constitution modifier. You can use a shield and still gain this benefit.',
-        source: 'Barbarian',
-        metadata: {
-            effectType: 'acCalculation', // Changed from acBonus, needs specific handling
-            formula: '10 + dexMod + conMod',
-            condition: 'not wearing armor',
-        },
-    },
-    "UnarmoredDefenseMonk": {
-        name: 'Unarmored Defense (Monk)',
-        description: 'Beginning at 1st level, while you are wearing no armor and not wielding a shield, your AC equals 10 + your Dexterity modifier + your Wisdom modifier.',
-        source: 'Monk',
-        metadata: {
-            effectType: 'acCalculation', // Changed from acBonus
-            formula: '10 + dexMod + wisMod',
-            condition: 'not wearing armor and not wielding a shield',
-        },
-    },
-    // Base Background Feature Examples
-    "ShelterOfTheFaithful": {
-        name: "Shelter of the Faithful",
-        description: "As an acolyte, you command the respect of those who share your faith...",
-        source: "Acolyte Background (Base)",
-    },
-     "CitySecrets": {
-        name: "City Secrets",
-        description: "You know the secret patterns and flow of cities...",
-        source: "Urchin Background (Base)",
-    },
-    "MilitaryRank": {
-        name: "Military Rank",
-        description: "You have a military rank from your career as a soldier...",
-        source: "Soldier Background (Base)",
-    },
-    // Add other base features...
-};
-
+import { SRD_SOURCE_PACK } from '@/lib/srd-data'; // Import SRD data
 
 // --- Service Functions ---
 
 /**
  * Fetches the full definition of a feature by its key/name.
  * Prioritizes finding the feature in the provided combinedContent from source packs,
- * then falls back to base definitions (like SRD).
+ * then falls back to SRD definitions.
  *
  * @param featureKey - The unique key/name of the feature.
  * @param combinedContent - Optional combined content from active source packs.
@@ -265,28 +21,36 @@ export async function getFeatureDefinition(
     combinedContent?: SourcePack['content']
 ): Promise<Feature | null> {
     try {
-        // 1. Check combined content first (assuming features are keyed by name/key)
+        // 1. Check combined content first
         if (combinedContent?.features && combinedContent.features[featureKey]) {
              logMessage('debug', `Found feature "${featureKey}" in source pack content.`);
             const featureData = combinedContent.features[featureKey];
-            // Ensure name property exists on the returned object
             return {
                  name: featureKey,
                  description: featureData.description || '',
-                 source: featureData.source || 'Source Pack', // Use pack source or default
+                 source: featureData.source || 'Source Pack',
                  metadata: featureData.metadata,
                  isActionable: featureData.isActionable,
                  maxUses: featureData.maxUses,
                  usesResetOn: featureData.usesResetOn,
-                 currentUses: featureData.currentUses, // Should ideally be managed in Character state
+                 currentUses: featureData.currentUses,
             };
         }
 
-        // 2. Fallback to base definitions
-        if (BASE_FEATURE_DEFINITIONS[featureKey]) {
-             logMessage('debug', `Found feature "${featureKey}" in base definitions.`);
-            // Ensure name property exists when returning from base definitions
-            return { ...BASE_FEATURE_DEFINITIONS[featureKey], name: featureKey };
+        // 2. Fallback to SRD definitions
+        const srdFeatureData = SRD_SOURCE_PACK.content.features?.[featureKey];
+        if (srdFeatureData) {
+             logMessage('debug', `Found feature "${featureKey}" in SRD definitions.`);
+             return {
+                 name: featureKey, // Add name explicitly
+                 description: srdFeatureData.description || '',
+                 source: srdFeatureData.source || 'SRD', // Add source explicitly
+                 metadata: srdFeatureData.metadata,
+                 isActionable: srdFeatureData.isActionable,
+                 maxUses: srdFeatureData.maxUses,
+                 usesResetOn: srdFeatureData.usesResetOn,
+                 currentUses: srdFeatureData.currentUses,
+             };
         }
 
         // Feature not found
@@ -305,7 +69,7 @@ export async function getFeatureDefinition(
 
 
 /**
- * Fetches definitions for multiple features, checking combined content first.
+ * Fetches definitions for multiple features, checking combined content first, then SRD.
  * @param featureKeys - An array of feature keys/names.
  * @param combinedContent - Optional combined content from active source packs.
  * @returns A promise resolving to an array of found Feature objects.
@@ -324,47 +88,41 @@ export async function getMultipleFeatureDefinitions(
 }
 
 /**
- * Retrieves features granted by a specific race name, considering source packs.
- * Assumes race definition in packs might contain feature names/keys.
+ * Retrieves features granted by a specific race name, considering source packs and SRD.
+ * Assumes race definition in packs/SRD might contain feature names/keys.
  * @param raceName - The name of the race.
  * @param combinedContent - Combined content from active source packs.
  * @returns A promise resolving to an array of Feature objects for the race.
  */
 export async function getRaceFeatures(
     raceName: string,
-    combinedContent?: SourcePack['content'] // Make optional for flexibility
+    combinedContent?: SourcePack['content']
 ): Promise<Feature[]> {
     if (!raceName) {
         logMessage('warn', 'getRaceFeatures called without raceName.');
         return [];
     }
 
+    // Prioritize combined content, fallback to SRD
+    const raceData = combinedContent?.races?.[raceName] ?? SRD_SOURCE_PACK.content.races?.[raceName];
     let featureKeys: string[] = [];
-    const raceData = combinedContent?.races?.[raceName];
 
     if (raceData?.traits) {
         featureKeys = raceData.traits;
-         logMessage('debug', `Found race "${raceName}" in source packs, fetching features: ${featureKeys.join(', ')}`);
+         logMessage('debug', `Found race "${raceName}" in combined/SRD, fetching features: ${featureKeys.join(', ')}`);
     } else {
-         // Optional: Fallback to base definitions if race not in custom packs
-         const baseRaceData = BASE_FEATURE_DEFINITIONS[raceName]; // Simple lookup, needs refinement
-         if (baseRaceData && Array.isArray((baseRaceData as any).traits)) { // Needs better type check
-            logMessage('debug', `Race "${raceName}" not in source packs, falling back to base definitions. Traits: ${(baseRaceData as any).traits.join(', ')}`);
-            featureKeys = (baseRaceData as any).traits;
-         } else {
-             logMessage('warn', `Race "${raceName}" not found in source packs or base definitions, or has no traits defined.`);
-             featureKeys = [];
-         }
+        logMessage('warn', `Race "${raceName}" not found or has no traits defined in combined/SRD content.`);
+        featureKeys = [];
     }
 
+    // getMultipleFeatureDefinitions handles fallback logic for each feature key
     return getMultipleFeatureDefinitions(featureKeys, combinedContent);
 }
 
 
 /**
  * Retrieves cumulative features granted by a specific class up to a given level.
- * Prioritizes using `featuresByLevel` from source pack definitions if available,
- * otherwise falls back to base definitions.
+ * Prioritizes using `featuresByLevel` from combined content, then SRD.
  * @param className - The name of the class.
  * @param level - The character's level in that class.
  * @param combinedContent - Optional combined content from active source packs.
@@ -373,30 +131,28 @@ export async function getRaceFeatures(
 export async function getClassFeatures(
     className: string,
     level: number,
-    combinedContent?: SourcePack['content'] // Make optional
+    combinedContent?: SourcePack['content']
 ): Promise<Feature[]> {
      if (!className || level < 1) {
         logMessage('warn', 'getClassFeatures called without className or invalid level.');
         return [];
     }
 
-    let classData: CharacterClass | undefined = combinedContent?.classes?.[className];
-    let usingSource = true;
+    // Prioritize combined content, fallback to SRD
+    const classData: CharacterClass | undefined = combinedContent?.classes?.[className] ?? SRD_SOURCE_PACK.content.classes?.[className];
+    let usingSource = "SRD"; // Default source identifier
 
-    if (!classData) {
-         logMessage('debug', `Class "${className}" not found in source packs, checking base definitions.`);
-         // Fallback to base definitions (if you have them)
-         // classData = BASE_CLASS_DEFINITIONS[className]; // Assuming BASE_CLASS_DEFINITIONS exists
-         usingSource = false;
+    if (combinedContent?.classes?.[className]) {
+        usingSource = "Source Pack";
     }
 
     if (!classData) {
-        logMessage('error', `Class definition not found for "${className}" in source packs or base definitions.`);
+        logMessage('error', `Class definition not found for "${className}" in combined content or SRD.`);
         return [];
     }
 
     let allFeatureKeys: string[] = [];
-    logMessage('debug', `Accumulating features for ${className} up to level ${level} ${usingSource ? 'from source pack' : 'from base definitions'}.`);
+    logMessage('debug', `Accumulating features for ${className} up to level ${level} from ${usingSource}.`);
 
     if (classData.featuresByLevel) {
         for (let i = 1; i <= level; i++) {
@@ -405,7 +161,7 @@ export async function getClassFeatures(
              }
         }
     } else {
-        logMessage('warn', `Class "${className}" lacks 'featuresByLevel' definition.`);
+        logMessage('warn', `Class "${className}" from ${usingSource} lacks 'featuresByLevel' definition.`);
     }
 
      const uniqueFeatureKeys = [...new Set(allFeatureKeys)];
@@ -416,7 +172,7 @@ export async function getClassFeatures(
      }
 
      try {
-        // Pass combinedContent to ensure feature definitions are checked there first
+        // getMultipleFeatureDefinitions handles combined/SRD fallback for definitions
         return await getMultipleFeatureDefinitions(uniqueFeatureKeys, combinedContent);
      } catch (error) {
          const e = error instanceof Error ? error : new Error(String(error));
@@ -426,7 +182,6 @@ export async function getClassFeatures(
             level: level,
             uniqueFeatureKeys: uniqueFeatureKeys,
          });
-        // Consider if throwing is appropriate or returning empty array
         throw new Error(`Failed to fetch features for class ${className}.`);
      }
 }
@@ -434,7 +189,7 @@ export async function getClassFeatures(
 
 /**
  * Retrieves features and proficiencies granted by a specific background name.
- * Prioritizes definitions from combinedContent, falls back to base definitions.
+ * Prioritizes definitions from combinedContent, falls back to SRD definitions.
  * @param backgroundName - The name of the background.
  * @param combinedContent - Optional combined content from active source packs.
  * @returns A promise resolving to an array of Feature objects for the background.
@@ -448,30 +203,31 @@ export async function getBackgroundFeatures(
         return [];
     }
 
-    let backgroundData: BackgroundInfo | null | undefined = combinedContent?.backgrounds?.[backgroundName];
-    let usingSource = true;
+    // Prioritize combined content, fallback to SRD
+    let backgroundData: BackgroundInfo | null | undefined = combinedContent?.backgrounds?.[backgroundName] ?? SRD_SOURCE_PACK.content.backgrounds?.[backgroundName];
+    let usingSource = "SRD";
 
-    if (!backgroundData) {
-         logMessage('debug', `Background "${backgroundName}" not found in source packs, checking base definitions.`);
-         backgroundData = BASE_FEATURE_DEFINITIONS[backgroundName] as BackgroundInfo | undefined; // Adjust if base features are stored differently
-         usingSource = false;
+    if (combinedContent?.backgrounds?.[backgroundName]) {
+        usingSource = "Source Pack";
     }
 
     if (!backgroundData) {
-        logMessage('warn', `Background "${backgroundName}" not found in source packs or base definitions.`);
+        logMessage('warn', `Background "${backgroundName}" not found in combined content or SRD.`);
         return [];
     }
 
-    logMessage('debug', `Found background "${backgroundName}" ${usingSource ? 'in source packs' : 'in base definitions'}.`);
+    logMessage('debug', `Found background "${backgroundName}" in ${usingSource}.`);
     let features: Feature[] = [];
 
     // --- Add Main Background Feature ---
     if (backgroundData.feature?.name) {
+        // getFeatureDefinition handles fallback logic
         const mainFeatureDef = await getFeatureDefinition(backgroundData.feature.name, combinedContent);
         if (mainFeatureDef) {
+            // Ensure the source reflects the background itself, not just where the feature was *defined*
             features.push({ ...mainFeatureDef, source: `${backgroundName} Background` });
         } else {
-            // Fallback to basic info if full definition missing
+            // Fallback to basic info from backgroundData if full definition missing
             features.push({
                 name: backgroundData.feature.name,
                 description: backgroundData.feature.description || 'No description.',
@@ -480,7 +236,7 @@ export async function getBackgroundFeatures(
         }
     }
 
-    // --- Add Proficiency Features ---
+    // --- Add Proficiency Features (from background definition itself) ---
      if (backgroundData.skillProficiencies && backgroundData.skillProficiencies.length > 0) {
         features.push({
             name: `${backgroundName} Skill Proficiencies`,
@@ -507,8 +263,9 @@ export async function getBackgroundFeatures(
                  effectType: "proficiencyGrant",
                  type: "language",
                  choose: backgroundData.languages.choose,
-                 options: backgroundData.languages.options || ["Common", "Dwarvish", "Elvish", "Giant", "Gnomish", "Goblin", "Halfling", "Orc"], // Fallback options
-                 choiceKey: choiceKey, // Assign the key
+                 // Use options from backgroundData or fallback to SRD common languages
+                 options: backgroundData.languages.options || SRD_SOURCE_PACK.content.features?.['ExtraLanguage']?.metadata?.options || [],
+                 choiceKey: choiceKey,
              }
          });
      }
@@ -517,16 +274,11 @@ export async function getBackgroundFeatures(
 }
 
 
-
 /**
  * Applies the effects of a character's features to their base stats and properties.
  * Returns a new character object with derived values, without modifying the original.
  * This function focuses on calculating bonuses and collecting proficiencies.
  * Complex effects like AC, HP, Advantage, Resistance are noted but calculated elsewhere.
- *
- * IMPORTANT: This function should run on the server or in a secure environment
- * if it relies on sensitive logic or extensive data lookups.
- * If run client-side, ensure `combinedContent` is appropriately fetched and passed.
  *
  * @param baseCharacter - The base character object (should have base stats and FULL feature definitions).
  * @returns A new character object containing the derived state after applying features.
@@ -571,7 +323,7 @@ export async function getBackgroundFeatures(
                         });
                         break;
                     case 'proficiencyGrant':
-                        const choiceKeyProf = metadata.choiceKey || feature.name; // Use choiceKey or feature name
+                        const choiceKeyProf = metadata.choiceKey || feature.name;
                         const chosenProficiencies = baseCharacter.featureChoices?.[choiceKeyProf];
 
                         let profsToGrant: string[] = [];
@@ -587,7 +339,7 @@ export async function getBackgroundFeatures(
                                 if (metadata.options?.includes(chosenProficiencies)) {
                                      profsToGrant = [chosenProficiencies];
                                 } else {
-                                     logMessage('warn', `Invalid choice "${chosenProficiencies}" for single proficiency feature "${feature.name}".`);
+                                     logMessage('warn', `Invalid choice "${chosenProficiencies}" for single proficiency feature "${feature.name}". Options: ${metadata.options?.join(',')}`);
                                 }
                             } else {
                                 logMessage('warn', `No valid choices found for proficiency feature "${feature.name}" in character data (choiceKey: ${choiceKeyProf}). Choices data: ${JSON.stringify(baseCharacter.featureChoices)}`);
@@ -597,40 +349,46 @@ export async function getBackgroundFeatures(
                             profsToGrant = metadata.proficiencies || [];
                         }
 
-                        switch (metadata.type) {
-                            case 'armor': finalProficiencies.armor.push(...profsToGrant); break;
-                            case 'weapon': finalProficiencies.weapons.push(...profsToGrant); break;
-                            case 'tool': finalProficiencies.tools.push(...profsToGrant); break;
-                            case 'savingThrow': finalProficiencies.savingThrows.push(...profsToGrant); break;
-                            case 'skill':
-                                profsToGrant.forEach(skill => { finalSkills[skill.toLowerCase()] = true; });
-                                break;
-                            case 'language': finalProficiencies.languages.push(...profsToGrant); break; // Add languages
-                        }
+                        // Add granted proficiencies based on type
+                        const addProficiency = (type: keyof typeof finalProficiencies, profs: string[]) => {
+                            if (Array.isArray(finalProficiencies[type])) {
+                                finalProficiencies[type].push(...profs);
+                            }
+                        };
+
+                         switch (metadata.type) {
+                             case 'armor': addProficiency('armor', profsToGrant); break;
+                             case 'weapon': addProficiency('weapons', profsToGrant); break;
+                             case 'tool': addProficiency('tools', profsToGrant); break;
+                             case 'savingThrow': addProficiency('savingThrows', profsToGrant); break;
+                             case 'language': addProficiency('languages', profsToGrant); break;
+                             case 'skill':
+                                 profsToGrant.forEach(skill => {
+                                     if (ALL_SKILLS.includes(skill.toLowerCase())) {
+                                         finalSkills[skill.toLowerCase()] = true;
+                                     } else {
+                                         logMessage('warn', `Granted proficiency for unknown skill '${skill}' by feature '${feature.name}'`);
+                                     }
+                                 });
+                                 break;
+                         }
                         break;
                      case 'choiceGrant':
-                         // If the choice itself grants a specific feature (like a Fighting Style),
-                         // that specific feature should have its own metadata applied.
-                         // This 'choiceGrant' itself doesn't directly apply stats/proficiencies here,
-                         // it just flags that a choice was made (handled during character save).
-                         logMessage('debug', `ChoiceGrant feature processed: ${feature.name}`);
+                         logMessage('debug', `ChoiceGrant feature processed (informational): ${feature.name}`);
                          break;
-                    // Cases for 'acBonus', 'advantage', 'resistance' are informational
-                    // Their effects are calculated contextually (e.g., in CharacterSheet, CombatTracker)
                     case 'acBonus':
-                         logMessage('debug', `Informational AC Bonus detected: ${feature.name}`);
+                         logMessage('debug', `Informational AC Bonus detected (applied elsewhere): ${feature.name}`);
                          break;
-                     case 'acCalculation': // Informational tag for special AC calculation
-                          logMessage('debug', `Informational AC Calculation detected: ${feature.name}`);
+                     case 'acCalculation':
+                          logMessage('debug', `Informational AC Calculation detected (applied elsewhere): ${feature.name}`);
                           break;
                     case 'advantage':
-                         logMessage('debug', `Informational Advantage detected: ${feature.name}`);
+                         logMessage('debug', `Informational Advantage detected (applied elsewhere): ${feature.name}`);
                          break;
                      case 'resistance':
-                         logMessage('debug', `Informational Resistance detected: ${feature.name}`);
+                         logMessage('debug', `Informational Resistance detected (applied elsewhere): ${feature.name}`);
                          break;
                     default:
-                        // Use a type assertion to help TypeScript, but be cautious
                         const unknownEffectType = (metadata as any).effectType;
                         logMessage('warn', `Unknown or unhandled feature metadata effectType: ${unknownEffectType} for feature ${feature.name}`);
                 }
@@ -640,7 +398,7 @@ export async function getBackgroundFeatures(
                     function: 'applyFeatureRules.loop',
                     characterId: baseCharacter.id,
                     featureName: feature.name,
-                    effectType: feature.metadata?.effectType, // Access safely
+                    effectType: feature.metadata?.effectType,
                  });
              }
         }
@@ -657,7 +415,6 @@ export async function getBackgroundFeatures(
         languages: [...new Set(finalProficiencies.languages)], // Add languages
     };
     derivedCharacter.skills = finalSkills; // Store final skill proficiency map
-    // Feature choices are already part of the baseCharacter and thus derivedCharacter
 
     // Ensure features array in derived character includes currentUses from base if available
     derivedCharacter.features = baseCharacter.features.map(baseFeature => ({
@@ -665,11 +422,8 @@ export async function getBackgroundFeatures(
         currentUses: baseFeature.currentUses, // Carry over current uses
     }));
 
-
-    // Note: HP, AC, Initiative, Speed, etc., are calculated dynamically based on the
-    // final stats, features, and equipment in the component displaying the character (e.g., CharacterSheet).
-    // We don't store these derived combat values directly in the Character object via this function.
-
     logMessage('debug', `Finished applying feature rules for character ${baseCharacter.id}.`);
     return derivedCharacter;
 }
+
+    

@@ -1,8 +1,7 @@
-'use server';
 
-import type { Feature, FeatureEffectMetadata, SourcePack, CharacterClass, CharacterRace, BackgroundInfo, Character } from '@/lib/types';
+import type { Feature, FeatureEffectMetadata, SourcePack, CharacterClass, CharacterRace, BackgroundInfo, Character, SpellcastingGrantMetadata, NPC, Monster } from '@/lib/types';
 import { logError, logMessage } from './logging-service';
-import { ALL_SKILLS } from '@/lib/types'; // Import ALL_SKILLS
+import { ALL_SKILLS, SKILL_ABILITY_MAP, SPELL_SLOTS_BY_LEVEL } from '@/lib/types'; // Import constants
 import { SRD_SOURCE_PACK } from '@/lib/srd-data'; // Import SRD data
 
 // --- Service Functions ---
@@ -58,7 +57,7 @@ export async function getFeatureDefinition(
         return null;
     } catch (error) {
         const e = error instanceof Error ? error : new Error(String(error));
-        logError(e, {
+        await logError(e, {
             function: 'getFeatureDefinition',
             featureKey: featureKey,
             hasCombinedContent: !!combinedContent,
@@ -176,7 +175,7 @@ export async function getClassFeatures(
         return await getMultipleFeatureDefinitions(uniqueFeatureKeys, combinedContent);
      } catch (error) {
          const e = error instanceof Error ? error : new Error(String(error));
-         logError(e, {
+         await logError(e, {
             function: 'getClassFeatures',
             className: className,
             level: level,
@@ -275,15 +274,72 @@ export async function getBackgroundFeatures(
 
 
 /**
+ * Calculates the modifier for a given skill.
+ * Considers base ability score, proficiency bonus if applicable, and potential expertises (not yet fully implemented).
+ *
+ * @param skillName - The name of the skill (e.g., "athletics").
+ * @param stats - The character's ability scores (STR, DEX, etc.).
+ * @param proficient - Whether the character is proficient in the skill.
+ * @param proficiencyBonus - The character's proficiency bonus.
+ * @param expertiseFeatures - Optional array of features to check for Expertise.
+ * @returns The calculated skill modifier.
+ */
+export function calculateSkillModifier(
+    skillName: string,
+    stats: Character['stats'] | NPC['stats'] | Monster['stats'] | undefined,
+    proficient: boolean,
+    proficiencyBonus: number,
+    expertiseFeatures?: Feature[] // Optional: Pass features that grant expertise
+): number {
+    const skillLower = skillName.toLowerCase();
+    const ability = SKILL_ABILITY_MAP[skillLower];
+
+    if (!stats) {
+        logMessage('warn', `Stats object is missing for skill calculation: ${skillName}.`);
+        return 0;
+    }
+
+    // Handle direct skill modifiers from monsters/NPCs if available (these override calculation)
+    if ('skills' in stats && stats.skills && typeof stats.skills[skillLower] === 'number') {
+        return stats.skills[skillLower] as number;
+    }
+
+    // Calculate based on ability score if skill override not present
+    if (!ability || typeof stats[ability] !== 'number') {
+        if (!ability) {
+            logMessage('warn', `Could not find ability mapping for skill: ${skillName}.`);
+        }
+        return 0;
+    }
+
+    const abilityModifier = Math.floor((stats[ability]! - 10) / 2);
+    let proficiencyValue = proficient ? proficiencyBonus : 0;
+
+    // Check for Expertise (Simple check, needs robust choice tracking)
+    // if (proficient && expertiseFeatures) {
+    //     expertiseFeatures.forEach(feature => {
+    //         if (feature.name === 'Expertise' && feature.metadata?.effectType === 'proficiencyGrant' && feature.metadata.type === 'skill') {
+    //              // TODO: Check if *this specific skill* was chosen for Expertise
+    //              // This requires accessing Character.featureChoices based on feature.metadata.choiceKey
+    //              // For now, assume expertise applies if the feature exists and character is proficient
+    //              // proficiencyValue = proficiencyBonus * 2;
+    //              console.log(`Note: Expertise potentially applies to ${skillName}, but choice checking is not fully implemented.`);
+    //         }
+    //     });
+    // }
+
+    return abilityModifier + proficiencyValue;
+};
+
+/**
  * Applies the effects of a character's features to their base stats and properties.
  * Returns a new character object with derived values, without modifying the original.
- * This function focuses on calculating bonuses and collecting proficiencies.
- * Complex effects like AC, HP, Advantage, Resistance are noted but calculated elsewhere.
+ * This function calculates bonuses, proficiencies, AC, HP, and spellcasting details.
  *
  * @param baseCharacter - The base character object (should have base stats and FULL feature definitions).
  * @returns A new character object containing the derived state after applying features.
  */
- export async function applyFeatureRules(baseCharacter: Character): Promise<Character> {
+export async function applyFeatureRules(baseCharacter: Character): Promise<Character> {
     logMessage('debug', `Applying feature rules for character ${baseCharacter.id}`);
     if (!baseCharacter.features || baseCharacter.features.length === 0) {
         logMessage('debug', `No features found for character ${baseCharacter.id}. Returning base character.`);
@@ -300,130 +356,259 @@ export async function getBackgroundFeatures(
         weapons: [...(baseCharacter.proficiencies?.weapons ?? [])],
         tools: [...(baseCharacter.proficiencies?.tools ?? [])],
         savingThrows: [...(baseCharacter.proficiencies?.savingThrows ?? [])],
-        languages: [...(baseCharacter.proficiencies?.languages ?? [])], // Initialize languages
+        languages: [...(baseCharacter.proficiencies?.languages ?? [])],
     };
     const finalSkills = { ...(baseCharacter.skills || {}) }; // Start with base skill selections
+
+    // Spellcasting details initialization
+    let spellcastingAbility: keyof Character['stats'] | null = null;
+    let spellProgression: CharacterClass['spellProgression'] = 'none';
+    let knownSpellsFromFeatures: string[] = [];
 
     // Iterate through features and apply effects based on metadata
     for (const feature of baseCharacter.features) {
         if (feature.metadata) {
-             try {
-                 const metadata = feature.metadata as FeatureEffectMetadata; // Type assertion
+            try {
+                const metadata = feature.metadata as FeatureEffectMetadata;
 
-                 // TODO: Add condition checking based on `metadata.condition` before applying effects
-
-                 switch (metadata.effectType) {
+                switch (metadata.effectType) {
                     case 'statBonus':
                         Object.entries(metadata.stats).forEach(([stat, bonus]) => {
                             if (finalStats[stat as keyof typeof finalStats] !== undefined) {
                                 finalStats[stat as keyof typeof finalStats] += bonus;
                             } else {
-                                 logMessage('warn', `Attempted to apply stat bonus to non-existent stat '${stat}' for feature '${feature.name}'`);
+                                logMessage('warn', `Attempted to apply stat bonus to non-existent stat '${stat}' for feature '${feature.name}'`);
                             }
                         });
                         break;
                     case 'proficiencyGrant':
                         const choiceKeyProf = metadata.choiceKey || feature.name;
                         const chosenProficiencies = baseCharacter.featureChoices?.[choiceKeyProf];
-
                         let profsToGrant: string[] = [];
+
                         if (metadata.choose && metadata.options) {
-                            // Grant only the chosen proficiencies
                             if (chosenProficiencies && Array.isArray(chosenProficiencies)) {
                                 profsToGrant = chosenProficiencies.filter(choice => metadata.options?.includes(choice));
-                                if (profsToGrant.length !== metadata.choose) {
-                                    logMessage('warn', `Incorrect number of choices made for proficiency feature "${feature.name}". Expected ${metadata.choose}, got ${profsToGrant.length}. Choices: ${chosenProficiencies.join(', ')}`);
-                                }
                             } else if (chosenProficiencies && typeof chosenProficiencies === 'string' && metadata.choose === 1) {
-                                // Handle single choice stored as string
-                                if (metadata.options?.includes(chosenProficiencies)) {
-                                     profsToGrant = [chosenProficiencies];
-                                } else {
-                                     logMessage('warn', `Invalid choice "${chosenProficiencies}" for single proficiency feature "${feature.name}". Options: ${metadata.options?.join(',')}`);
-                                }
+                                if (metadata.options?.includes(chosenProficiencies)) profsToGrant = [chosenProficiencies];
                             } else {
-                                logMessage('warn', `No valid choices found for proficiency feature "${feature.name}" in character data (choiceKey: ${choiceKeyProf}). Choices data: ${JSON.stringify(baseCharacter.featureChoices)}`);
+                                logMessage('warn', `No/Invalid choices for feature "${feature.name}" (key: ${choiceKeyProf}). Choices: ${JSON.stringify(baseCharacter.featureChoices)}`);
                             }
                         } else {
-                            // Grant all listed proficiencies if no choice is needed
                             profsToGrant = metadata.proficiencies || [];
                         }
 
-                        // Add granted proficiencies based on type
                         const addProficiency = (type: keyof typeof finalProficiencies, profs: string[]) => {
-                            if (Array.isArray(finalProficiencies[type])) {
-                                finalProficiencies[type].push(...profs);
-                            }
+                             if (Array.isArray(finalProficiencies[type])) { finalProficiencies[type].push(...profs); }
                         };
 
-                         switch (metadata.type) {
-                             case 'armor': addProficiency('armor', profsToGrant); break;
-                             case 'weapon': addProficiency('weapons', profsToGrant); break;
-                             case 'tool': addProficiency('tools', profsToGrant); break;
-                             case 'savingThrow': addProficiency('savingThrows', profsToGrant); break;
-                             case 'language': addProficiency('languages', profsToGrant); break;
-                             case 'skill':
-                                 profsToGrant.forEach(skill => {
-                                     if (ALL_SKILLS.includes(skill.toLowerCase())) {
-                                         finalSkills[skill.toLowerCase()] = true;
-                                     } else {
-                                         logMessage('warn', `Granted proficiency for unknown skill '${skill}' by feature '${feature.name}'`);
-                                     }
-                                 });
-                                 break;
-                         }
+                        switch (metadata.type) {
+                            case 'armor': addProficiency('armor', profsToGrant); break;
+                            case 'weapon': addProficiency('weapons', profsToGrant); break;
+                            case 'tool': addProficiency('tools', profsToGrant); break;
+                            case 'savingThrow': addProficiency('savingThrows', profsToGrant); break;
+                            case 'language': addProficiency('languages', profsToGrant); break;
+                            case 'skill':
+                                profsToGrant.forEach(skill => {
+                                    if (ALL_SKILLS.includes(skill.toLowerCase())) {
+                                        finalSkills[skill.toLowerCase()] = true;
+                                    } else { logMessage('warn', `Granted proficiency for unknown skill '${skill}' by feature '${feature.name}'`); }
+                                });
+                                break;
+                        }
                         break;
-                     case 'choiceGrant':
-                         logMessage('debug', `ChoiceGrant feature processed (informational): ${feature.name}`);
+                    case 'spellcastingGrant':
+                         // Prioritize class spellcasting ability if multiple features grant it
+                         if (!spellcastingAbility || feature.source.includes('Class')) { // Simple check for class source
+                            spellcastingAbility = (metadata as SpellcastingGrantMetadata).ability;
+                            const classData = SRD_SOURCE_PACK.content.classes?.[baseCharacter.class]; // Look up class progression
+                            spellProgression = (metadata as SpellcastingGrantMetadata).preparationType === 'known'
+                                ? 'known' // Assume known if specified, else check class
+                                : (metadata as SpellcastingGrantMetadata).preparationType === 'prepared'
+                                    ? 'prepared'
+                                    : classData?.spellProgression || 'none';
+                         }
                          break;
+                     case 'spellsKnownGrant':
+                        if (metadata.spells) {
+                            knownSpellsFromFeatures.push(...metadata.spells);
+                        }
+                        break;
+                    // Informational types handled elsewhere (AC, Advantage, Resistance, ChoiceGrant)
                     case 'acBonus':
-                         logMessage('debug', `Informational AC Bonus detected (applied elsewhere): ${feature.name}`);
-                         break;
-                     case 'acCalculation':
-                          logMessage('debug', `Informational AC Calculation detected (applied elsewhere): ${feature.name}`);
-                          break;
+                    case 'acCalculation':
                     case 'advantage':
-                         logMessage('debug', `Informational Advantage detected (applied elsewhere): ${feature.name}`);
-                         break;
-                     case 'resistance':
-                         logMessage('debug', `Informational Resistance detected (applied elsewhere): ${feature.name}`);
-                         break;
+                    case 'resistance':
+                    case 'choiceGrant':
+                         logMessage('debug', `Informational feature processed (applied elsewhere): ${feature.name} (${metadata.effectType})`);
+                        break;
                     default:
                         const unknownEffectType = (metadata as any).effectType;
                         logMessage('warn', `Unknown or unhandled feature metadata effectType: ${unknownEffectType} for feature ${feature.name}`);
                 }
-             } catch (error) {
-                 const e = error instanceof Error ? error : new Error(String(error));
-                 logError(e, {
-                    function: 'applyFeatureRules.loop',
-                    characterId: baseCharacter.id,
-                    featureName: feature.name,
-                    effectType: feature.metadata?.effectType,
-                 });
-             }
+            } catch (error) {
+                const e = error instanceof Error ? error : new Error(String(error));
+                await logError(e, { function: 'applyFeatureRules.loop', characterId: baseCharacter.id, featureName: feature.name, effectType: feature.metadata?.effectType });
+            }
         }
     }
 
-    // --- Final Object Construction ---
-    // Combine the base character with the *final calculated* properties
-    derivedCharacter.stats = finalStats; // Store the FINAL stats after bonuses
-    derivedCharacter.proficiencies = { // Store the final list of proficiencies
+    // --- Final Calculations (Post-Feature Application) ---
+
+    // Ensure unique proficiencies
+    derivedCharacter.proficiencies = {
         armor: [...new Set(finalProficiencies.armor)],
         weapons: [...new Set(finalProficiencies.weapons)],
         tools: [...new Set(finalProficiencies.tools)],
         savingThrows: [...new Set(finalProficiencies.savingThrows)],
-        languages: [...new Set(finalProficiencies.languages)], // Add languages
+        languages: [...new Set(finalProficiencies.languages)],
     };
     derivedCharacter.skills = finalSkills; // Store final skill proficiency map
+
+    // Apply final stats (affected by features)
+    derivedCharacter.stats = finalStats;
+    const finalModifiers = {
+        strength: Math.floor((finalStats.strength - 10) / 2),
+        dexterity: Math.floor((finalStats.dexterity - 10) / 2),
+        constitution: Math.floor((finalStats.constitution - 10) / 2),
+        intelligence: Math.floor((finalStats.intelligence - 10) / 2),
+        wisdom: Math.floor((finalStats.wisdom - 10) / 2),
+        charisma: Math.floor((finalStats.charisma - 10) / 2),
+    };
+
+    // Calculate Final AC
+    let calculatedAC = 10;
+    let armorDexMod = finalModifiers.dexterity;
+    let maxDex: number | null = null;
+    let hasShield = false;
+    let armorEquipped = false;
+    let unarmoredDefenseValue: number | null = null;
+
+    derivedCharacter.equipment
+        .filter(item => item.isEquipped && item.type === 'Armor')
+        .forEach(item => {
+            if (item.armorCategory === 'Shield') { hasShield = true; }
+            else if (!armorEquipped && item.baseAC !== undefined) {
+                calculatedAC = item.baseAC;
+                if (item.addDexModifier === false) armorDexMod = 0;
+                maxDex = item.maxDexBonus ?? null;
+                armorEquipped = true;
+            }
+        });
+
+    derivedCharacter.features.forEach(f => {
+        const metadata = f.metadata as FeatureEffectMetadata | undefined;
+        if (metadata?.effectType === 'acCalculation') {
+             const conditionMet =
+                (metadata.condition === 'not wearing armor' && !armorEquipped) ||
+                (metadata.condition === 'not wearing armor and not wielding a shield' && !armorEquipped && !hasShield) ||
+                 !metadata.condition;
+
+             if (conditionMet && unarmoredDefenseValue === null) {
+                 if (metadata.formula === '10 + dexMod + conMod') { unarmoredDefenseValue = 10 + finalModifiers.dexterity + finalModifiers.constitution; }
+                 else if (metadata.formula === '10 + dexMod + wisMod') { unarmoredDefenseValue = 10 + finalModifiers.dexterity + finalModifiers.wisdom; }
+            }
+        }
+    });
+
+    if (unarmoredDefenseValue !== null) {
+        calculatedAC = unarmoredDefenseValue;
+        armorDexMod = 0;
+    } else if (!armorEquipped) {
+        calculatedAC = 10; // Default unarmored
+        armorDexMod = finalModifiers.dexterity;
+    }
+
+    if (maxDex !== null) armorDexMod = Math.min(armorDexMod, maxDex);
+    calculatedAC += armorDexMod;
+    if (hasShield) calculatedAC += 2;
+
+    derivedCharacter.features.forEach(f => {
+        const metadata = f.metadata as FeatureEffectMetadata | undefined;
+        if (metadata?.effectType === 'acBonus') {
+             const conditionMet = metadata.condition === 'wearing armor' ? armorEquipped : true;
+             if (conditionMet && metadata.value) calculatedAC += metadata.value;
+        }
+    });
+    // Note: Storing calculatedAC is not standard, it's usually calculated on the fly.
+    // We don't add it to the Character object.
+
+    // Calculate Max HP based on final CON modifier
+    // (Simplified: assumes average roll for levels after 1st, needs class hit die)
+     const conMod = finalModifiers.constitution;
+     const classData = SRD_SOURCE_PACK.content.classes?.[baseCharacter.class]; // Fetch class data again for hit die
+     let maxHp = 0;
+     if (classData) {
+         const hitDieSides = parseInt(classData.hitDie.substring(1), 10);
+         maxHp = hitDieSides + conMod; // Level 1 HP
+         if (baseCharacter.level > 1) {
+             maxHp += (baseCharacter.level - 1) * (Math.ceil((hitDieSides + 1) / 2) + conMod); // Average for subsequent levels
+         }
+         maxHp = Math.max(1, maxHp); // Minimum 1 HP
+     } else {
+         logMessage('warn', `Could not calculate max HP for ${baseCharacter.id}: Class data not found.`);
+         maxHp = baseCharacter.hitPoints.max; // Fallback to existing max HP
+     }
+     // Update hit points, preserving current/temp unless max decreased below current
+     derivedCharacter.hitPoints = {
+         max: maxHp,
+         current: Math.min(baseCharacter.hitPoints.current, maxHp),
+         temporary: baseCharacter.hitPoints.temporary,
+     };
+
+    // Set Hit Dice details
+    derivedCharacter.hitDice = {
+        total: baseCharacter.level,
+        remaining: Math.min(baseCharacter.hitDice.remaining, baseCharacter.level), // Cap remaining at total
+        dieType: classData?.hitDie || null,
+    };
+
+    // Apply Spellcasting Details
+    if (spellcastingAbility) {
+        const spellAbilityMod = finalModifiers[spellcastingAbility] ?? 0;
+        const profBonus = baseCharacter.level >= 17 ? 6 : baseCharacter.level >= 13 ? 5 : baseCharacter.level >= 9 ? 4 : baseCharacter.level >= 5 ? 3 : 2;
+
+        derivedCharacter.spellcasting = {
+            ability: spellcastingAbility,
+            spellSaveDC: 8 + profBonus + spellAbilityMod,
+            spellAttackBonus: profBonus + spellAbilityMod,
+            slots: {}, // Initialize slots
+        };
+
+        // Determine spell slots based on progression type and level
+        const progressionKey = spellProgression === 'known' || spellProgression === 'prepared' ? 'full' : spellProgression; // Map known/prepared to full for slots table for now
+        const slotsTable = SPELL_SLOTS_BY_LEVEL[progressionKey || 'none'];
+        if (slotsTable && baseCharacter.level > 0 && baseCharacter.level <= slotsTable.length) {
+             const levelSlots = slotsTable[baseCharacter.level - 1];
+             levelSlots.forEach((maxSlots, index) => {
+                 const spellLevel = index + 1;
+                 if (maxSlots > 0) {
+                    derivedCharacter.spellcasting!.slots[String(spellLevel)] = {
+                         max: maxSlots,
+                         // Preserve remaining slots if they exist from baseCharacter, otherwise default to max
+                         remaining: baseCharacter.spellcasting?.slots?.[String(spellLevel)]?.remaining ?? maxSlots,
+                     };
+                 }
+             });
+         } else if (spellProgression !== 'none') {
+             logMessage('warn', `Could not determine spell slots for level ${baseCharacter.level} and progression '${progressionKey}'`);
+         }
+         // Combine explicitly known/prepared spells with those granted by features
+         derivedCharacter.spellsKnown = [...new Set([...(baseCharacter.spellsKnown || []), ...knownSpellsFromFeatures])];
+         derivedCharacter.spellsPrepared = [...new Set(baseCharacter.spellsPrepared || [])]; // Keep only explicitly prepared
+
+     } else {
+         derivedCharacter.spellcasting = undefined; // Remove if no spellcasting ability found
+     }
 
     // Ensure features array in derived character includes currentUses from base if available
     derivedCharacter.features = baseCharacter.features.map(baseFeature => ({
         ...baseFeature,
-        currentUses: baseFeature.currentUses, // Carry over current uses
+        // If currentUses was provided in baseCharacter (e.g., loaded from DB), use it.
+        // Otherwise, default to maxUses if applicable.
+        currentUses: baseFeature.currentUses ?? baseFeature.maxUses ?? undefined,
     }));
 
     logMessage('debug', `Finished applying feature rules for character ${baseCharacter.id}.`);
     return derivedCharacter;
 }
-
-    

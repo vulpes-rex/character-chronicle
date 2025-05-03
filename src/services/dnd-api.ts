@@ -7,6 +7,26 @@ import { SRD_SOURCE_PACK } from '@/lib/srd-data'; // Import the SRD data definit
 // Re-export types from lib/types to ensure consistency
 export type { CharacterClass, CharacterRace, Feature, CharacterLevel, EquipmentItem, HitPoints, BackgroundInfo, Spell };
 
+// Placeholder rollDice function - REMOVE/REPLACE when dddice is integrated
+export const rollDice = (diceString: string): number => {
+    console.warn(`Placeholder rollDice used for: ${diceString}. Implement dddice.`);
+    // Basic random roll for placeholder functionality
+    try {
+        const match = diceString.match(/(\d+)?d(\d+)([+-]\d+)?/i);
+        if (!match) return 10; // Default result if parse fails
+        const numDice = parseInt(match[1] || '1', 10);
+        const numSides = parseInt(match[2], 10);
+        const modifier = parseInt(match[3] || '0', 10);
+        let total = 0;
+        for (let i = 0; i < numDice; i++) {
+            total += Math.floor(Math.random() * numSides) + 1;
+        }
+        return total + modifier;
+    } catch {
+        return 10; // Default on error
+    }
+};
+
 
 /**
  * Fetches available character classes, combining SRD and source pack content.
@@ -116,7 +136,7 @@ export async function getLevelUpOptions(
 
 
 /**
- * Fetches detailed descriptions for a list of race trait names, using combined/SRD content.
+ * Fetches detailed definitions for a list of race trait names, using combined/SRD content.
  * @param traitNames - An array of trait keys/names to fetch details for.
  * @param combinedContent - Combined content from active source packs.
  * @returns A promise that resolves to an array of Feature objects representing the traits.

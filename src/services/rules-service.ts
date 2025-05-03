@@ -53,7 +53,7 @@ export async function calculateSkillModifier(
         return 0;
     }
 
-    const abilityModifier = calculateAbilityModifier(stats[ability]);
+    const abilityModifier = await calculateAbilityModifier(stats[ability]!);
     let proficiencyValue = proficient ? proficiencyBonus : 0;
 
     // TODO: Add check for expertise (would double proficiencyValue)
@@ -70,7 +70,7 @@ export async function calculateSkillModifier(
  * @returns The calculated Armor Class.
  */
 export async function calculateArmorClass(character: Character): Promise<number> {
-    const dexMod = calculateAbilityModifier(character.stats.dexterity);
+    const dexMod = await calculateAbilityModifier(character.stats.dexterity);
     let baseAC = 10; // Default unarmored AC
     let calculatedAC = 0;
     let armorDexMod = dexMod; // Assume full Dex bonus initially
@@ -85,9 +85,9 @@ export async function calculateArmorClass(character: Character): Promise<number>
         if (metadata?.effectType === 'acCalculation') {
             // Conditions are checked later based on equipped items
             if (metadata.formula === '10 + dexMod + conMod') {
-                unarmoredDefenseValue = 10 + dexMod + calculateAbilityModifier(character.stats.constitution);
+                unarmoredDefenseValue = 10 + dexMod + (calculateAbilityModifier(character.stats.constitution));
             } else if (metadata.formula === '10 + dexMod + wisMod') {
-                unarmoredDefenseValue = 10 + dexMod + calculateAbilityModifier(character.stats.wisdom);
+                unarmoredDefenseValue = 10 + dexMod + (calculateAbilityModifier(character.stats.wisdom));
             }
         }
     });
@@ -126,14 +126,14 @@ export async function calculateArmorClass(character: Character): Promise<number>
         calculatedAC = baseAC; // Use baseAC from equipped armor or default 10 if none
     }
 
-    // Apply Dexterity modifier (potentially capped)
+    // 4. Apply Dexterity modifier (potentially capped)
     if (maxDex !== null) armorDexMod = Math.min(armorDexMod, maxDex);
     calculatedAC += armorDexMod;
 
-    // Add shield bonus
+    // 5. Add shield bonus
     if (hasShield) calculatedAC += 2; // Standard shield bonus
 
-    // 4. Add other AC bonuses from features (like Defense Fighting Style)
+    // 6. Add other AC bonuses from features (like Defense Fighting Style)
     character.features.forEach(feature => {
         const metadata = feature.metadata as FeatureEffectMetadata | undefined;
         if (metadata?.effectType === 'acBonus') {
@@ -167,8 +167,8 @@ export async function calculateHitBonus(weapon: EquipmentItem, character: Charac
                          character.proficiencies?.weapons?.includes(weapon.name); // Check specific weapon or category
 
     let abilityMod = 0;
-    const strMod = calculateAbilityModifier(character.stats.strength);
-    const dexMod = calculateAbilityModifier(character.stats.dexterity);
+    const strMod = await calculateAbilityModifier(character.stats.strength);
+    const dexMod = await calculateAbilityModifier(character.stats.dexterity);
 
     // Determine which ability modifier to use
     if (weapon.properties?.includes('Finesse')) {
@@ -208,8 +208,8 @@ export async function calculateHitBonus(weapon: EquipmentItem, character: Charac
  */
 export async function calculateDamageBonus(weapon: EquipmentItem, character: Character): Promise<number> {
     let abilityMod = 0;
-    const strMod = calculateAbilityModifier(character.stats.strength);
-    const dexMod = calculateAbilityModifier(character.stats.dexterity);
+    const strMod = await calculateAbilityModifier(character.stats.strength);
+    const dexMod = await calculateAbilityModifier(character.stats.dexterity);
 
     // Determine which ability modifier to use for damage
     if (weapon.properties?.includes('Finesse')) {
@@ -248,7 +248,7 @@ export async function calculateDamageBonus(weapon: EquipmentItem, character: Cha
  * @returns The calculated Spell Save DC.
  */
 export async function calculateSpellSaveDC(proficiencyBonus: number, spellcastingAbilityScore: number): Promise<number> {
-    const abilityModifier = calculateAbilityModifier(spellcastingAbilityScore);
+    const abilityModifier = await calculateAbilityModifier(spellcastingAbilityScore);
     return 8 + proficiencyBonus + abilityModifier;
 }
 
@@ -261,7 +261,7 @@ export async function calculateSpellSaveDC(proficiencyBonus: number, spellcastin
  * @returns The calculated Spell Attack Bonus.
  */
 export async function calculateSpellAttackBonus(proficiencyBonus: number, spellcastingAbilityScore: number): Promise<number> {
-    const abilityModifier = calculateAbilityModifier(spellcastingAbilityScore);
+    const abilityModifier = await calculateAbilityModifier(spellcastingAbilityScore);
     return proficiencyBonus + abilityModifier;
 }
 

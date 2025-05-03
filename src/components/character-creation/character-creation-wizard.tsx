@@ -435,18 +435,19 @@ export function CharacterCreationWizard({ initialData, editMode = false }: Chara
 
     if (isFetchingInitialData) {
         return (
-            
-                
-                    
-                        
-                            
-                                
-                                
-                            
-                        
-                    
-                
-            
+           <div className="p-4 md:p-6 space-y-6">
+               <Skeleton className="h-10 w-1/3" />
+               <Skeleton className="h-8 w-full" />
+               <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <Skeleton className="h-64 w-full" />
+                  <Skeleton className="h-96 w-full" />
+                  <Skeleton className="h-80 w-full" />
+               </div>
+               <div className="flex justify-between">
+                  <Skeleton className="h-10 w-24" />
+                  <Skeleton className="h-10 w-24" />
+               </div>
+            </div>
         );
     }
 
@@ -455,36 +456,48 @@ export function CharacterCreationWizard({ initialData, editMode = false }: Chara
 
 
     return (
-        
-            
-                
-            
-            
-                
-                    
-                    
-                
-            
+        <div className="p-4 md:p-6 space-y-6">
+            {/* Progress Bar */}
+             <Progress value={(currentStep / effectiveTotalSteps) * 100} className="w-full" />
+            <h2 className="text-xl font-semibold text-center">
+                 Step {currentStep} of {effectiveTotalSteps}: {
+                    [
+                        "Basic Info", "Race Selection", "Class Selection",
+                        "Ability Scores", "Background", "Feature Choices",
+                        "Equipment", isSpellcaster && !editMode ? "Spells" : "Review"
+                    ][currentStep - 1] || 'Review'
+                }
+            </h2>
 
-            
+             {apiError && (
+                <Alert variant="destructive">
+                    <AlertCircle className="h-4 w-4" />
+                    <AlertTitle>Error</AlertTitle>
+                    <AlertDescription>{apiError}</AlertDescription>
+                </Alert>
+             )}
+
+            {/* Render Current Step Component */}
+            <div className="min-h-[400px]">
                 {renderStep()}
-            
+            </div>
 
-            
-                
+            {/* Navigation Buttons */}
+            <div className="flex justify-between items-center pt-4 border-t">
+                <Button variant="outline" onClick={handlePrevious} disabled={currentStep === 1 || isLoading}>
                     Previous
-                
-                {currentStep  effectiveTotalSteps ? (
-                    
+                </Button>
+                {currentStep < effectiveTotalSteps ? (
+                    <Button onClick={handleNext} disabled={!isValid || isLoading}>
                         Next
-                    
+                    </Button>
                 ) : (
-                    
+                    <Button onClick={handleFinalSubmit} disabled={!isValid || isLoading}>
                         {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                         {editMode ? 'Save Changes' : 'Finish & Create Character'}
-                    
+                    </Button>
                 )}
-            
-        
+            </div>
+        </div>
     );
 }

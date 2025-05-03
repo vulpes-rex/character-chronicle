@@ -15,7 +15,8 @@
     "skipDefaultLibCheck": true,
     "baseUrl": ".",
     "paths": {
-      "@/*": ["apps/character-chronicle/src/*"],
+      // Remove old "@/*" path that pointed to the deleted src folder
+      "@/*": ["apps/character-chronicle/src/*"], // Point to the correct app's src
       "@character-chronicle/shared/data": ["libs/shared/data/src/index.ts"],
       "@character-chronicle/shared/firebase": [
         "libs/shared/firebase/src/index.ts"
@@ -33,3 +34,4 @@
   },
   "exclude": ["node_modules", "tmp"]
 }
+

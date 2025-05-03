@@ -19,8 +19,9 @@
     "strictNullChecks": false,
     // Ensure paths from tsconfig.base.json are resolved correctly
     "paths": {
-      "@/*": ["./src/*"],
-      // Paths inherited from base config
+      // Remove old "@/*" path that pointed to the deleted src folder
+      "@/*": ["./apps/character-chronicle/src/*"],
+      // Paths inherited from base config remain
       "@character-chronicle/shared/data": ["../../libs/shared/data/src/index.ts"],
       "@character-chronicle/shared/firebase": ["../../libs/shared/firebase/src/index.ts"],
       "@character-chronicle/shared/types": ["../../libs/shared/types/src/index.ts"],

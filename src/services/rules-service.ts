@@ -9,14 +9,14 @@ import { logMessage } from './logging-service';
  * @param score - The ability score value.
  * @returns The calculated modifier.
  */
-export function calculateAbilityModifier(score: number | undefined | null): number {
+export async function calculateAbilityModifier(score: number | undefined | null): Promise<number> {
     if (score === null || score === undefined) return 0;
     return Math.floor((score - 10) / 2);
 }
 
 /**
  * Calculates the modifier for a given skill.
- * Considers base ability score, proficiency bonus if applicable, and potential expertises (not yet fully implemented).
+ * Considers base ability score, proficiency bonus if applicable, and potential expertises (not yet implemented).
  *
  * @param skillName - The name of the skill (e.g., "athletics").
  * @param stats - The character's final derived ability scores (STR, DEX, etc.).
@@ -25,13 +25,13 @@ export function calculateAbilityModifier(score: number | undefined | null): numb
  * @param expertiseFeatures - Optional array of features to check for Expertise.
  * @returns The calculated skill modifier.
  */
-export function calculateSkillModifier(
+export async function calculateSkillModifier(
     skillName: string,
-    stats: Character['stats'] | NPC['stats'] | Monster['stats'] | undefined,
+    stats: Character['stats'] | NPC['stats'] | Monster['stats'] | undefined, // Use base stats
     proficient: boolean,
     proficiencyBonus: number,
     expertiseFeatures?: Feature[] // Optional: Pass features that grant expertise
-): number {
+): Promise<number> {
     const skillLower = skillName.toLowerCase();
     const ability = SKILL_ABILITY_MAP[skillLower];
 
@@ -56,11 +56,11 @@ export function calculateSkillModifier(
     const abilityModifier = calculateAbilityModifier(stats[ability]);
     let proficiencyValue = proficient ? proficiencyBonus : 0;
 
-    // TODO: Implement Expertise check based on featureChoices if needed.
+    // TODO: Add check for expertise (would double proficiencyValue)
     // if (proficient && expertiseFeatures) { ... }
 
     return abilityModifier + proficiencyValue;
-};
+}
 
 /**
  * Calculates a character's Armor Class (AC).
@@ -69,7 +69,7 @@ export function calculateSkillModifier(
  * @param character - The character object, containing final stats, equipment, and features.
  * @returns The calculated Armor Class.
  */
-export function calculateArmorClass(character: Character): number {
+export async function calculateArmorClass(character: Character): Promise<number> {
     const dexMod = calculateAbilityModifier(character.stats.dexterity);
     let baseAC = 10; // Default unarmored AC
     let calculatedAC = 0;
@@ -109,17 +109,17 @@ export function calculateArmorClass(character: Character): number {
     // 3. Determine Base AC and Applicable Dex Mod based on Armor/Unarmored Defense
     if (unarmoredDefenseValue !== null) {
         // Apply Unarmored Defense ONLY if no armor is worn (Shields are allowed by Barbarian, not Monk)
-         const canUseUnarmored =
-             (character.features.some(f => f.name === 'Unarmored Defense (Barbarian)') && !armorEquipped) || // Barbarian: No armor, Shield OK
-             (character.features.some(f => f.name === 'Unarmored Defense (Monk)') && !armorEquipped && !hasShield); // Monk: No armor, No shield
+        const canUseUnarmored =
+            (character.features.some(f => f.name === 'Unarmored Defense (Barbarian)') && !armorEquipped) || // Barbarian: No armor, Shield OK
+            (character.features.some(f => f.name === 'Unarmored Defense (Monk)') && !armorEquipped && !hasShield); // Monk: No armor, No shield
 
         if (canUseUnarmored) {
             calculatedAC = unarmoredDefenseValue;
             armorDexMod = 0; // Dex/Con/Wis already included in the formula
         } else {
-             // Unarmored Defense feature exists but conditions not met (armor worn/shield for Monk)
-             // Fall back to normal calculation based on armor (or lack thereof)
-             calculatedAC = baseAC; // Use baseAC from equipped armor or default 10 if none
+            // Unarmored Defense feature exists but conditions not met (armor worn/shield for Monk)
+            // Fall back to normal calculation based on armor (or lack thereof)
+            calculatedAC = baseAC; // Use baseAC from equipped armor or default 10 if none
         }
     } else {
         // No Unarmored Defense feature
@@ -162,7 +162,7 @@ export function calculateArmorClass(character: Character): number {
  * @param proficiencyBonus - The character's proficiency bonus.
  * @returns The calculated "to hit" bonus.
  */
-export function calculateHitBonus(weapon: EquipmentItem, character: Character, proficiencyBonus: number): number {
+export async function calculateHitBonus(weapon: EquipmentItem, character: Character, proficiencyBonus: number): Promise<number> {
     const isProficient = character.proficiencies?.weapons?.includes(weapon.weaponCategory || '') ||
                          character.proficiencies?.weapons?.includes(weapon.name); // Check specific weapon or category
 
@@ -185,14 +185,14 @@ export function calculateHitBonus(weapon: EquipmentItem, character: Character, p
     }
 
     // Add other potential bonuses (e.g., from Fighting Style: Archery)
-     character.features.forEach(feature => {
-         const metadata = feature.metadata as FeatureEffectMetadata | undefined;
-         // Example: Archery Fighting Style
-          if (feature.name === 'Fighting Style: Archery' && metadata?.effectType === 'attackBonus' && weapon.weaponCategory?.toLowerCase().includes('ranged')) {
-             bonus += metadata.value || 0;
-         }
-         // Add checks for other relevant features
-     });
+    character.features.forEach(feature => {
+        const metadata = feature.metadata as FeatureEffectMetadata | undefined;
+        // Example: Archery Fighting Style
+        if (feature.name === 'Fighting Style: Archery' && metadata?.effectType === 'attackBonus' && weapon.weaponCategory?.toLowerCase().includes('ranged')) {
+            bonus += metadata.value || 0;
+        }
+        // Add checks for other relevant features
+    });
 
 
     return bonus;
@@ -206,7 +206,7 @@ export function calculateHitBonus(weapon: EquipmentItem, character: Character, p
  * @param character - The character making the attack.
  * @returns The calculated damage bonus.
  */
-export function calculateDamageBonus(weapon: EquipmentItem, character: Character): number {
+export async function calculateDamageBonus(weapon: EquipmentItem, character: Character): Promise<number> {
     let abilityMod = 0;
     const strMod = calculateAbilityModifier(character.stats.strength);
     const dexMod = calculateAbilityModifier(character.stats.dexterity);
@@ -221,20 +221,20 @@ export function calculateDamageBonus(weapon: EquipmentItem, character: Character
     }
 
     // Add other potential bonuses (e.g., from Fighting Style: Dueling)
-     character.features.forEach(feature => {
-         const metadata = feature.metadata as FeatureEffectMetadata | undefined;
-         // Example: Dueling Fighting Style (needs condition check)
-         if (feature.name === 'Fighting Style: Dueling' && metadata?.effectType === 'damageBonus') {
+    for (const feature of character.features) {
+        const metadata = feature.metadata as FeatureEffectMetadata | undefined;
+        // Example: Dueling Fighting Style (needs condition check)
+        if (feature.name === 'Fighting Style: Dueling' && metadata?.effectType === 'damageBonus') {
             // Simple check: assumes condition met. Real check needs info on off-hand.
             // const isWieldingOneHanded = !character.equipment.some(i => i.isEquipped && i.type === 'Weapon' && i.name !== weapon.name); // Basic check
             // if (isWieldingOneHanded) {
             //     bonus += metadata.value || 0;
             // }
             // Simplified for now: Add logic to check off-hand weapon later
-             abilityMod += metadata.value || 0; // Placeholder addition
-         }
-         // Add checks for other relevant features like Rage damage
-     });
+            abilityMod += metadata.value || 0; // Placeholder addition
+        }
+        // Add checks for other relevant features like Rage damage
+    }
 
     return abilityMod;
 }

@@ -435,15 +435,18 @@ export function CharacterCreationWizard({ initialData, editMode = false }: Chara
 
     if (isFetchingInitialData) {
         return (
-          
-             
-             
-             
-             
+            
                 
+                    
+                        
+                            
+                                
+                                
+                            
+                        
+                    
                 
-             
-          
+            
         );
     }
 
@@ -485,4 +488,3 @@ export function CharacterCreationWizard({ initialData, editMode = false }: Chara
         
     );
 }
-

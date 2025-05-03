@@ -22,6 +22,7 @@ import {
 } from 'firebase/firestore';
 import type { Campaign, GameLogEntry, SourcePack, UserRole, Monster, NPC } from '@/lib/types'; // Added NPC type
 import { logError, logMessage } from './logging-service'; // Import logging service
+import { SRD_SOURCE_PACK } from '@/lib/srd-data'; // Import SRD
 
 const campaignsCollection = collection(db, 'campaigns');
 const gameLogsCollection = collection(db, 'gameLogs');
@@ -32,11 +33,11 @@ const sourcePacksCollection = collection(db, 'sourcePacks');
 
 /**
  * Creates a new campaign.
- * @param campaignData - Basic campaign info (name, description).
+ * @param campaignData - Basic campaign info (name, description, activeSourcePackIds).
  * @param dmId - The User ID of the Dungeon Master creating the campaign.
  * @returns The ID of the newly created campaign.
  */
-export async function createCampaign(campaignData: Pick, dmId: string): Promise {
+export async function createCampaign(campaignData: Pick<Campaign, 'name' | 'description' | 'activeSourcePackIds'>, dmId: string): Promise<string> {
   if (!dmId) {
     const errorMsg = "Attempted to create campaign without a DM ID.";
     console.error("createCampaign:", errorMsg);
@@ -75,7 +76,7 @@ export async function createCampaign(campaignData: Pick, dmId: string): Promise 
  * @param campaignId - The ID of the campaign to load.
  * @returns The campaign data, or null if not found.
  */
-export async function loadCampaign(campaignId: string): Promise {
+export async function loadCampaign(campaignId: string): Promise<Campaign | null> {
   if (!campaignId) {
     console.warn("loadCampaign: Attempted to load campaign with empty ID.");
     return null;
@@ -115,7 +116,7 @@ export async function loadCampaign(campaignId: string): Promise {
  * @param userRole - The role of the user ('dm' or 'player'). Optional, helps optimize query.
  * @returns An array of campaign data.
  */
-export async function loadAllCampaigns(userId?: string, userRole?: UserRole): Promise {
+export async function loadAllCampaigns(userId?: string, userRole?: UserRole): Promise<Campaign[]> {
     if (!userId) {
         console.warn("loadAllCampaigns: Called without userId.");
         return [];
@@ -160,10 +161,10 @@ export async function loadAllCampaigns(userId?: string, userRole?: UserRole): Pr
 /**
  * Updates specific fields of a campaign. Only the DM should be able to do this.
  * @param campaignId - The ID of the campaign to update.
- * @param campaignData - An object containing the fields to update (e.g., name, description).
+ * @param campaignData - An object containing the fields to update (e.g., name, description, activeSourcePackIds).
  * @param currentUserId - The ID of the user attempting the update (for permission check).
  */
-export async function updateCampaign(campaignId: string, campaignData: Partial>> , currentUserId: string): Promise {
+export async function updateCampaign(campaignId: string, campaignData: Partial<Omit<Campaign, 'id' | 'createdAt' | 'updatedAt'>>, currentUserId: string): Promise<void> {
   if (!campaignId || !currentUserId) {
      const errorMsg = "Missing campaignId or currentUserId.";
      console.error("updateCampaign:", errorMsg);
@@ -187,7 +188,7 @@ export async function updateCampaign(campaignId: string, campaignData: Partial>>
           throw new Error('Permission denied: Only the DM can update the campaign.');
       }
 
-      const dataToUpdate: Record = {
+      const dataToUpdate: Record<string, any> = {
         ...campaignData,
         updatedAt: serverTimestamp(),
       };
@@ -219,7 +220,7 @@ export async function updateCampaign(campaignId: string, campaignData: Partial>>
  * @param campaignId - The ID of the campaign to delete.
  * @param currentUserId - The ID of the user attempting the delete (for permission check).
  */
-export async function deleteCampaign(campaignId: string, currentUserId: string): Promise {
+export async function deleteCampaign(campaignId: string, currentUserId: string): Promise<void> {
     if (!campaignId || !currentUserId) {
        const errorMsg = "Missing campaignId or currentUserId.";
        console.error("deleteCampaign:", errorMsg);
@@ -269,7 +270,7 @@ export async function deleteCampaign(campaignId: string, currentUserId: string):
  * @param playerId - The ID of the player user to add.
  * @param currentUserId - The ID of the user performing the action (should be DM).
  */
-export async function addPlayerToCampaign(campaignId: string, playerId: string, currentUserId: string): Promise {
+export async function addPlayerToCampaign(campaignId: string, playerId: string, currentUserId: string): Promise<void> {
     if (!campaignId || !playerId || !currentUserId) {
        const errorMsg = "Missing campaignId, playerId, or currentUserId.";
        console.error("addPlayerToCampaign:", errorMsg);
@@ -327,7 +328,7 @@ export async function addPlayerToCampaign(campaignId: string, playerId: string, 
  * @param playerId - The ID of the player user to remove.
  * @param currentUserId - The ID of the user performing the action (should be DM).
  */
-export async function removePlayerFromCampaign(campaignId: string, playerId: string, currentUserId: string): Promise {
+export async function removePlayerFromCampaign(campaignId: string, playerId: string, currentUserId: string): Promise<void> {
      if (!campaignId || !playerId || !currentUserId) {
        const errorMsg = "Missing campaignId, playerId, or currentUserId.";
        console.error("removePlayerFromCampaign:", errorMsg);
@@ -387,7 +388,7 @@ export async function removePlayerFromCampaign(campaignId: string, playerId: str
  * @param logEntryData - The data for the log entry (excluding ID and timestamp).
  * @returns The ID of the newly created log entry.
  */
-export async function addGameLogEntry(logEntryData: Omit, 'id' | 'timestamp'>): Promise {
+export async function addGameLogEntry(logEntryData: Omit<GameLogEntry, 'id' | 'timestamp'>): Promise<string> {
    if (!logEntryData || !logEntryData.campaignId) {
        const errorMsg = "Invalid log entry data provided (missing campaignId?).";
        console.error("addGameLogEntry:", errorMsg);
@@ -423,7 +424,7 @@ export async function addGameLogEntry(logEntryData: Omit, 'id' | 'timestamp'>): 
  * @param limitCount - Optional number of latest entries to retrieve.
  * @returns An array of game log entries.
  */
-export async function loadGameLogEntries(campaignId: string, limitCount?: number): Promise {
+export async function loadGameLogEntries(campaignId: string, limitCount?: number): Promise<GameLogEntry[]> {
   if (!campaignId) {
      console.warn("loadGameLogEntries: Attempted to load logs with empty campaignId.");
      return [];
@@ -468,7 +469,7 @@ export async function loadGameLogEntries(campaignId: string, limitCount?: number
  * @param currentUserId - The ID of the DM performing the action.
  * @returns The ID of the created/updated source pack.
  */
-export async function saveSourcePack(sourcePackData: Omit> & { id?: string }, currentUserId: string): Promise {
+export async function saveSourcePack(sourcePackData: Omit<SourcePack, 'createdAt' | 'updatedAt'> & { id?: string }, currentUserId: string): Promise<string> {
     if (!currentUserId) {
         const errorMsg = "User ID is required to save a source pack.";
         console.error("saveSourcePack:", errorMsg);
@@ -541,7 +542,7 @@ export async function saveSourcePack(sourcePackData: Omit> & { id?: string }, cu
  * @param sourcePackId - The ID of the source pack to load.
  * @returns The source pack data, or null if not found.
  */
-export async function loadSourcePack(sourcePackId: string): Promise {
+export async function loadSourcePack(sourcePackId: string): Promise<SourcePack | null> {
     if (!sourcePackId) {
         console.warn("loadSourcePack: Attempted to load pack with empty ID.");
         return null;
@@ -582,7 +583,7 @@ export async function loadSourcePack(sourcePackId: string): Promise {
  * @param creatorId - The ID of the DM or 'system'.
  * @returns An array of source pack data.
  */
-export async function loadSourcePacksByCreator(creatorId: string): Promise {
+export async function loadSourcePacksByCreator(creatorId: string): Promise<SourcePack[]> {
      if (!creatorId) {
         console.warn("loadSourcePacksByCreator: Attempted to load packs with empty creatorId.");
         return [];
@@ -620,7 +621,7 @@ export async function loadSourcePacksByCreator(creatorId: string): Promise {
  * @param sourcePackId - The ID of the source pack to delete.
  * @param currentUserId - The ID of the user attempting the delete.
  */
-export async function deleteSourcePack(sourcePackId: string, currentUserId: string): Promise {
+export async function deleteSourcePack(sourcePackId: string, currentUserId: string): Promise<void> {
     if (!sourcePackId || !currentUserId) {
        const errorMsg = "Missing sourcePackId or currentUserId.";
        console.error("deleteSourcePack:", errorMsg);
@@ -671,7 +672,7 @@ export async function deleteSourcePack(sourcePackId: string, currentUserId: stri
 }
 
 // --- Helper to combine content from multiple source packs ---
-export async function getCombinedContentFromPacks(packIds: string[]): Promise>> {
+export async function getCombinedContentFromPacks(packIds: string[]): Promise<SourcePack['content']> {
     const combinedContent: SourcePack['content'] = {
         races: {},
         classes: {},
@@ -683,17 +684,20 @@ export async function getCombinedContentFromPacks(packIds: string[]): Promise>> 
         spells: {}, // Added spells
     };
 
-    if (!packIds || packIds.length === 0) {
-        console.log("getCombinedContentFromPacks: No pack IDs provided, defaulting to 'srd'.");
-        packIds = ['srd'];
-    }
+    // Ensure SRD is always included if not explicitly provided
+    const packIdsToLoad = packIds?.length > 0 ? [...new Set([...packIds, 'srd'])] : ['srd'];
+    console.log("getCombinedContentFromPacks: Loading packs:", packIdsToLoad);
 
-    const packIdsToLoad = [...new Set([...packIds, 'srd'])];
 
     const packPromises = packIdsToLoad.map(async (id) => {
          try {
             const pack = await loadSourcePack(id);
              if (!pack) {
+                 // Try loading from local SRD if Firestore load failed for 'srd'
+                 if (id === 'srd') {
+                     console.warn(`getCombinedContentFromPacks: Failed to load 'srd' from Firestore, using local SRD_SOURCE_PACK.`);
+                     return SRD_SOURCE_PACK;
+                 }
                  console.warn(`getCombinedContentFromPacks: Failed to load source pack ${id} (returned null).`);
              }
             return pack;
@@ -705,14 +709,17 @@ export async function getCombinedContentFromPacks(packIds: string[]): Promise>> 
 
     const packs = (await Promise.all(packPromises)).filter((pack): pack is SourcePack => pack !== null);
 
-    const srdPack = packs.find(p => p.id === 'srd');
+    const srdPackIndex = packs.findIndex(p => p.id === 'srd');
     const otherPacks = packs.filter(p => p.id !== 'srd');
     // Apply SRD first, then others override/add
-    const sortedPacks = srdPack ? [srdPack, ...otherPacks] : otherPacks;
+    const sortedPacks = srdPackIndex > -1 ? [packs[srdPackIndex], ...otherPacks] : otherPacks;
+
+    console.log(`Merging content from ${sortedPacks.length} packs...`);
 
     for (const pack of sortedPacks) {
         if (pack?.content) {
              try {
+                 console.log(`Merging content from pack: ${pack.id} (${pack.name})`);
                  combinedContent.races = { ...combinedContent.races, ...pack.content.races };
                  combinedContent.classes = { ...combinedContent.classes, ...pack.content.classes };
                  combinedContent.items = { ...combinedContent.items, ...pack.content.items };
@@ -735,6 +742,17 @@ export async function getCombinedContentFromPacks(packIds: string[]): Promise>> 
              }
         }
     }
+
+    console.log(`Combined content final counts: 
+       Races: ${Object.keys(combinedContent.races || {}).length}, 
+       Classes: ${Object.keys(combinedContent.classes || {}).length}, 
+       Items: ${Object.keys(combinedContent.items || {}).length}, 
+       Monsters: ${Object.keys(combinedContent.monsters || {}).length},
+       NPCs: ${Object.keys(combinedContent.npcs || {}).length},
+       Backgrounds: ${Object.keys(combinedContent.backgrounds || {}).length},
+       Features: ${Object.keys(combinedContent.features || {}).length},
+       Spells: ${Object.keys(combinedContent.spells || {}).length}
+    `);
 
     return combinedContent;
 }

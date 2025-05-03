@@ -1,4 +1,3 @@
-
 'use server'; // Indicate this module can contain server-only logic (like direct DB access)
 
 import { db } from '@/lib/firebase';
@@ -23,9 +22,10 @@ const charactersCollection = collection(db, 'characters');
 
 /**
  * Saves a new character to Firestore.
- * Stores only BASE data (base stats, chosen proficiencies, etc.).
- * Derived values are calculated on load/display.
- * @param characterData - The character data to save (without ID).
+ * Stores only BASE data (base stats, chosen proficiencies, equipment, featureChoices, etc.).
+ * Derived values (final stats, AC, modifiers) are calculated on load.
+ *
+ * @param characterData - The character data to save (without ID, createdAt, updatedAt). It should contain base values.
  * @returns The ID of the newly created character.
  */
 export async function saveCharacter(characterData: Omit<Character, 'id' | 'createdAt' | 'updatedAt'>): Promise<string> {
@@ -36,19 +36,46 @@ export async function saveCharacter(characterData: Omit<Character, 'id' | 'creat
       throw new Error("Missing required character data (e.g., character name, player name).");
   }
   try {
-    logMessage('debug', 'Saving character data:', characterData); // Log the data being saved
-    // Save the base data as provided by the creation wizard.
-    const docRef = await addDoc(charactersCollection, {
-      ...characterData,
-      // Ensure only base stats are saved
-      stats: characterData.stats || { strength: 10, dexterity: 10, constitution: 10, intelligence: 10, wisdom: 10, charisma: 10 },
-      // Ensure featureChoices is saved
-      featureChoices: characterData.featureChoices || {},
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
+    logMessage('debug', 'Saving character data (base values):', characterData); // Log the data being saved
+
+    // Prepare data for saving: ensure only base fields are included
+    const dataToSave = {
+        playerName: characterData.playerName,
+        characterName: characterData.characterName,
+        race: characterData.race,
+        class: characterData.class,
+        level: characterData.level,
+        background: characterData.background,
+        alignment: characterData.alignment,
+        stats: characterData.stats || { strength: 10, dexterity: 10, constitution: 10, intelligence: 10, wisdom: 10, charisma: 10 },
+        // Base skill PROFICIENCY selections (boolean map)
+        skills: characterData.skills || {},
+        // Base HP/HD values (current/remaining will be set)
+        hitPoints: characterData.hitPoints || { max: 0, current: 0, temporary: 0 }, // Max will be calculated, but save initial state
+        hitDice: characterData.hitDice || { total: characterData.level || 0, remaining: characterData.level || 0, dieType: null },
+        equipment: characterData.equipment || [],
+        // Base proficiencies (might be initially empty, derived later)
+        proficiencies: characterData.proficiencies || { armor: [], weapons: [], tools: [], savingThrows: [], languages: [] },
+        // Base features (definitions)
+        features: characterData.features || [],
+        featureChoices: characterData.featureChoices || {},
+        // Spell selections
+        spellsKnown: characterData.spellsKnown || [],
+        spellsPrepared: characterData.spellsPrepared || [],
+        // Descriptive fields
+        backstory: characterData.backstory || '',
+        appearance: characterData.appearance || '',
+        campaignId: characterData.campaignId,
+        // Timestamps
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+    };
+
+    // Perform the Firestore operation
+    const docRef = await addDoc(charactersCollection, dataToSave);
     console.log('Character saved with ID: ', docRef.id);
     return docRef.id;
+
   } catch (e) {
     const error = e instanceof Error ? e : new Error(String(e));
     console.error(`Error in saveCharacter for ${characterData.characterName}: Firestore operation failed.`, error);
@@ -64,40 +91,82 @@ export async function saveCharacter(characterData: Omit<Character, 'id' | 'creat
 }
 
 /**
- * Updates an existing character in Firestore.
- * Only saves base data fields.
+ * Updates specific fields of an existing character in Firestore.
+ * Only saves base data fields. Derived values should not be updated directly.
+ *
  * @param characterId - The ID of the character to update.
- * @param characterData - The character data fields to update.
+ * @param characterUpdates - An object containing only the base character fields to update.
  */
-export async function updateCharacter(characterId: string, characterData: Partial<Omit<Character, 'id' | 'createdAt'>>): Promise<void> {
+export async function updateCharacter(characterId: string, characterUpdates: Partial<Omit<Character, 'id' | 'createdAt'>>): Promise<void> {
   if (!characterId) {
       const errorMsg = "Attempted to update character with missing ID.";
       console.error("updateCharacter:", errorMsg);
        await logError(new Error(errorMsg), { function: 'updateCharacter' });
       throw new Error("Character ID is required for update.");
   }
-   if (!characterData || Object.keys(characterData).length === 0) {
+   if (!characterUpdates || Object.keys(characterUpdates).length === 0) {
       console.warn(`updateCharacter: Attempted to update character ${characterId} with empty data.`);
       return; // No changes to apply
   }
   const characterDoc = doc(db, 'characters', characterId);
 
-  // Ensure we only try to update fields that should be persisted (base stats, etc.)
-  const dataToUpdate: Record<string, any> = { ...characterData };
-  // Explicitly remove any derived fields if they accidentally got included
-  // delete dataToUpdate.derivedStats; // Example if derivedStats existed
-  // Base stats should only be updated if they are explicitly passed in characterData
-  if (!characterData.stats) {
-      delete dataToUpdate.stats;
+  // Prepare data for update, ensuring only allowed fields are included
+  const dataToUpdate: Record<string, any> = { ...characterUpdates };
+
+  // Explicitly disallow updating derived fields - remove them if present
+  // Example: delete dataToUpdate.derivedStats;
+  // Only allow updating base stats if explicitly provided
+  if (!characterUpdates.stats) delete dataToUpdate.stats;
+  if (!characterUpdates.proficiencies) delete dataToUpdate.proficiencies;
+  // Ensure featureChoices is an object if provided
+  if ('featureChoices' in dataToUpdate) {
+      dataToUpdate.featureChoices = dataToUpdate.featureChoices || {};
   }
+  // Ensure spells are arrays if provided
+   if ('spellsKnown' in dataToUpdate && !Array.isArray(dataToUpdate.spellsKnown)) {
+      dataToUpdate.spellsKnown = [];
+   }
+   if ('spellsPrepared' in dataToUpdate && !Array.isArray(dataToUpdate.spellsPrepared)) {
+      dataToUpdate.spellsPrepared = [];
+   }
+   // Current/Temp HP and Remaining HD are exceptions - they represent current state
+   // Ensure `hitPoints` and `hitDice` objects are not accidentally replaced entirely if only current/remaining change
+    if (characterUpdates.hitPoints && (!('max' in characterUpdates.hitPoints))) {
+        // Only updating current/temp, fetch existing max
+        const existingChar = await loadCharacter(characterId, false); // Load base data only
+        if (existingChar?.hitPoints?.max !== undefined) {
+            dataToUpdate.hitPoints = {
+                max: existingChar.hitPoints.max,
+                current: characterUpdates.hitPoints.current ?? existingChar.hitPoints.current,
+                temporary: characterUpdates.hitPoints.temporary ?? existingChar.hitPoints.temporary,
+            };
+        } else {
+            // Fallback or handle error if maxHP couldn't be retrieved
+            delete dataToUpdate.hitPoints;
+            console.warn(`updateCharacter: Could not verify max HP for ${characterId} when updating current/temp HP.`);
+        }
+    }
+     if (characterUpdates.hitDice && (!('total' in characterUpdates.hitDice) || !('dieType' in characterUpdates.hitDice))) {
+        // Only updating remaining, fetch existing total/dieType
+        const existingChar = await loadCharacter(characterId, false); // Load base data only
+        if (existingChar?.hitDice?.total !== undefined && existingChar?.hitDice?.dieType !== undefined) {
+            dataToUpdate.hitDice = {
+                total: existingChar.hitDice.total,
+                remaining: characterUpdates.hitDice.remaining ?? existingChar.hitDice.remaining,
+                dieType: existingChar.hitDice.dieType,
+            };
+        } else {
+            // Fallback or handle error if total/dieType couldn't be retrieved
+             delete dataToUpdate.hitDice;
+             console.warn(`updateCharacter: Could not verify total/dieType for ${characterId} when updating remaining HD.`);
+        }
+    }
 
-  // Ensure featureChoices is included if provided
-  if ('featureChoices' in characterData) {
-    dataToUpdate.featureChoices = characterData.featureChoices || {};
-  }
 
-
+  // Always add the update timestamp
   dataToUpdate.updatedAt = serverTimestamp();
+
+  logMessage('debug', `Updating character ${characterId} with data:`, dataToUpdate);
 
   try {
     await updateDoc(characterDoc, dataToUpdate);
@@ -108,18 +177,21 @@ export async function updateCharacter(characterId: string, characterData: Partia
      await logError(error, {
          function: 'updateCharacter',
          characterId: characterId,
-         updateDataKeys: Object.keys(characterData),
+         updateDataKeys: Object.keys(characterUpdates),
      });
     throw new Error('Failed to update character.');
   }
 }
 
 /**
- * Loads a specific character from Firestore and applies feature rules.
+ * Loads a specific character from Firestore.
+ * Optionally applies feature rules to calculate derived values.
+ *
  * @param characterId - The ID of the character to load.
- * @returns The Character object with derived values applied, or null if not found.
+ * @param applyRules - Whether to apply feature rules and calculate derived stats (default: true).
+ * @returns The Character object (either base or with derived values), or null if not found.
  */
-export async function loadCharacter(characterId: string): Promise<Character | null> {
+export async function loadCharacter(characterId: string, applyRules: boolean = true): Promise<Character | null> {
    if (!characterId) {
        const errorMsg = "Attempted to load character with empty ID.";
        console.warn("loadCharacter:", errorMsg);
@@ -158,10 +230,19 @@ export async function loadCharacter(characterId: string): Promise<Character | nu
             alignment: data.alignment || 'Neutral',
             backstory: data.backstory || '',
             appearance: data.appearance || '',
+             spellcasting: data.spellcasting, // Keep raw spellcasting data if exists
+             spellsKnown: data.spellsKnown || [],
+             spellsPrepared: data.spellsPrepared || [],
         } as Character; // Type assertion after filling defaults
+
+        if (!applyRules) {
+             logMessage('debug', `Loaded base character ${characterId} without applying rules.`);
+             return baseCharacter;
+        }
 
         // Apply feature rules to calculate derived values
         const characterWithDerived = await applyFeatureRules(baseCharacter);
+        logMessage('debug', `Loaded character ${characterId} and applied feature rules.`);
         return characterWithDerived;
 
     } else {
@@ -180,8 +261,7 @@ export async function loadCharacter(characterId: string): Promise<Character | nu
 }
 
 /**
- * Loads all characters (or potentially characters for a specific player if auth is added)
- * and applies feature rules to each.
+ * Loads all characters and applies feature rules to each.
  * @returns An array of Character objects with derived values applied.
  */
 export async function loadAllCharacters(): Promise<Character[]> {
@@ -221,12 +301,18 @@ export async function loadAllCharacters(): Promise<Character[]> {
              alignment: data.alignment || 'Neutral',
              backstory: data.backstory || '',
              appearance: data.appearance || '',
+              spellcasting: data.spellcasting,
+              spellsKnown: data.spellsKnown || [],
+              spellsPrepared: data.spellsPrepared || [],
         } as Character; // Type assertion after filling defaults
 
         // Apply rules and add to list
         const characterWithDerived = await applyFeatureRules(baseCharacter);
         characters.push(characterWithDerived);
     }));
+
+    // Sort characters by update timestamp (descending)
+    characters.sort((a, b) => (b.updatedAt?.getTime() || 0) - (a.updatedAt?.getTime() || 0));
 
     return characters;
 
@@ -263,5 +349,3 @@ export async function deleteCharacter(characterId: string): Promise<void> {
     throw new Error('Failed to delete character.');
   }
 }
-
-// Removed erroneous JSX block from here

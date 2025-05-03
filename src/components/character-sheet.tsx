@@ -1,7 +1,6 @@
 // @ts-nocheck - Disabling TypeScript checks for rapid prototyping
 'use client';
 
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Button } from '@/components/ui/button';
@@ -10,19 +9,19 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useRouter } from 'next/navigation'; // Added useRouter
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Edit, BedDouble, BedSingle, AlertCircle, Loader2, HeartPulse } from 'lucide-react';
+import { Edit, AlertCircle, Loader2 } from 'lucide-react'; // Removed Bed icons
 import { useToast } from '@/hooks/use-toast';
-import { getAvailableEquipmentItems, getSpells, getLevelUpOptions } from '@/services/dnd-api'; // Moved calculations to dnd-api
+import { getAvailableEquipmentItems, getSpells } from '@/services/dnd-api'; // Keep definition getters
 import type { Character, EquipmentItem, Feature, HitPointsState, HitDiceState, Spell } from '@/lib/types'; // Import Spell
 import { updateCharacter, loadCharacter } from '@/services/character-service';
 import { AddEquipmentDialog } from './add-equipment-dialog';
 import { ShortRestDialog } from './short-rest-dialog';
-import { rollDice, SKILL_ABILITY_MAP, ALL_SKILLS } from '@/lib/types'; // Use central utils/types
-import Link from 'next/link'; // For Edit button
+import { rollDice } from '@/lib/types'; // Keep base rollDice for now
 import { addGameLogEntry } from '@/services/campaign-service'; // Import campaign service
 import { useAuth } from './auth-provider'; // Import useAuth
-import { DDDiceRoller } from './dddice-roller';
 import { useDiceRoller } from './dice-roll-context'; // Import useDiceRoller hook
+import { calculateAbilityModifier, calculateArmorClass, calculateHitBonus, calculateDamageBonus, calculateSpellSaveDC, calculateSpellAttackBonus } from '@/services/rules-service'; // Import calculation functions
+import { getCombinedContentFromPacks } from '@/services/campaign-service'; // Needed for content context
 
 // Import sub-components
 import { CharacterHeader } from './character-sheet/character-header';
@@ -34,7 +33,8 @@ import { CharacterActions } from './character-sheet/character-actions';
 import { CharacterSpellcasting } from './character-sheet/character-spellcasting';
 import { CharacterInventory } from './character-sheet/character-inventory';
 import { CharacterPersonality } from './character-sheet/character-personality';
-import { calculateArmorClass } from '@/services/dnd-api'; // Import AC calculation
+import { DDDiceRoller } from './dddice-roller'; // Import DDDice Roller
+
 
 interface CharacterSheetProps {
     initialCharacter: Character;
@@ -48,10 +48,11 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
     const { triggerVisualRoll } = useDiceRoller();
 
     // --- State Management ---
+    // Use initialCharacter directly, refetch on updates/focus
     const { data: characterData, isLoading: isLoadingCharacter, error: characterError, refetch } = useQuery<Character | null, Error>({
         queryKey: ['character', initialCharacter.id],
-        queryFn: () => loadCharacter(initialCharacter.id),
-        initialData: initialCharacter,
+        queryFn: () => loadCharacter(initialCharacter.id), // loadCharacter applies rules
+        initialData: initialCharacter, // Use the server-fetched data initially
         staleTime: 1 * 60 * 1000, // Data is stale after 1 minute
         refetchOnWindowFocus: true,
     });
@@ -59,82 +60,75 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
     const [isSaving, setIsSaving] = useState(false);
     const [isAddEquipmentOpen, setIsAddEquipmentOpen] = useState(false);
     const [isShortRestDialogOpen, setIsShortRestDialogOpen] = useState(false);
-    const [featureUses, setFeatureUses] = useState<Record<string, number>>({});
-    const [spellSlotsRemaining, setSpellSlotsRemaining] = useState<Record<string, number>>({});
+    // Remove local featureUses and spellSlotsRemaining state, rely on characterData
 
-    // Effect to sync local state (uses, slots) with fetched character data
-    useEffect(() => {
-        if (characterData?.features) {
-            const initialUses: Record<string, number> = {};
-            characterData.features.forEach(feature => {
-                if (feature.maxUses !== null && feature.maxUses !== undefined) {
-                    initialUses[feature.name] = feature.currentUses ?? feature.maxUses;
-                }
-            });
-            setFeatureUses(initialUses);
-        }
-        if (characterData?.spellcasting?.slots) {
-            const initialSlots: Record<string, number> = {};
-            Object.entries(characterData.spellcasting.slots).forEach(([level, slotInfo]) => {
-                initialSlots[level] = slotInfo.remaining;
-            });
-            setSpellSlotsRemaining(initialSlots);
-        }
-    }, [characterData?.features, characterData?.spellcasting?.slots]);
+    // --- Data Fetching for Definitions ---
+    // Fetch combined content based on campaign (if available) or fallback to SRD
+    const { data: combinedContent, isLoading: isLoadingContent } = useQuery({
+        queryKey: ['combinedContent', characterData?.campaignId || 'srd-only'],
+        queryFn: () => getCombinedContentFromPacks(characterData?.campaignId ? [characterData.campaignId] : ['srd']),
+        enabled: !!characterData, // Only fetch when character data is available
+        staleTime: 5 * 60 * 1000, // Cache content for 5 mins
+    });
 
-    // --- Data Fetching for Definitions (Dropdowns, Item Details, Spells) ---
      const { data: availableEquipment = [], isLoading: isLoadingEquipment } = useQuery<EquipmentItem[], Error>({
-         queryKey: ['availableEquipment', characterData?.campaignId], // Maybe include campaign ID if items are campaign specific?
-         // Assume getAvailableEquipmentItems can potentially take campaign context if needed
-         queryFn: () => getAvailableEquipmentItems(characterData?.campaignId ? [characterData.campaignId] : undefined),
-         enabled: !!characterData,
+         queryKey: ['availableEquipment', combinedContent], // Depend on combined content
+         queryFn: () => getAvailableEquipmentItems(combinedContent),
+         enabled: !!combinedContent, // Fetch only when content is loaded
          staleTime: 60 * 60 * 1000,
      });
 
      const { data: availableSpells = [], isLoading: isLoadingSpells } = useQuery<Spell[], Error>({
-         queryKey: ['availableSpells', characterData?.campaignId], // Spells might depend on campaign sources
-         // Assume getSpells can potentially take campaign context if needed
-         queryFn: () => getSpells(characterData?.campaignId ? [characterData.campaignId] : undefined),
-         enabled: !!characterData,
+         queryKey: ['availableSpells', combinedContent], // Depend on combined content
+         queryFn: () => getSpells(combinedContent),
+         enabled: !!combinedContent, // Fetch only when content is loaded
          staleTime: Infinity, // Spells are often static per source pack
      });
 
 
-    // --- Derived Values (Using dnd-api for calculations) ---
-    const derivedStats = useMemo(() => characterData?.stats || initialCharacter.stats, [characterData, initialCharacter.stats]);
+    // --- Derived Values (Using rules-service) ---
+    const finalStats = useMemo(() => characterData?.stats || initialCharacter.stats, [characterData, initialCharacter.stats]);
 
     const modifiers = useMemo(() => ({
-        strength: Math.floor((derivedStats.strength - 10) / 2),
-        dexterity: Math.floor((derivedStats.dexterity - 10) / 2),
-        constitution: Math.floor((derivedStats.constitution - 10) / 2),
-        intelligence: Math.floor((derivedStats.intelligence - 10) / 2),
-        wisdom: Math.floor((derivedStats.wisdom - 10) / 2),
-        charisma: Math.floor((derivedStats.charisma - 10) / 2),
-    }), [derivedStats]);
+        strength: calculateAbilityModifier(finalStats.strength),
+        dexterity: calculateAbilityModifier(finalStats.dexterity),
+        constitution: calculateAbilityModifier(finalStats.constitution),
+        intelligence: calculateAbilityModifier(finalStats.intelligence),
+        wisdom: calculateAbilityModifier(finalStats.wisdom),
+        charisma: calculateAbilityModifier(finalStats.charisma),
+    }), [finalStats]);
 
-    const { data: levelData } = useQuery({
-        queryKey: ['levelData', characterData?.class, characterData?.level],
-        queryFn: () => getLevelUpOptions(characterData!.class, characterData!.level), // Use dnd-api
-        enabled: !!characterData?.class && (characterData?.level ?? 0) > 0,
-        staleTime: Infinity,
-    });
-    const proficiencyBonus = useMemo(() => levelData?.proficiencyBonus ?? 0, [levelData]);
+    const proficiencyBonus = useMemo(() => {
+        const level = characterData?.level ?? 1;
+        if (level >= 17) return 6;
+        if (level >= 13) return 5;
+        if (level >= 9) return 4;
+        if (level >= 5) return 3;
+        return 2;
+    }, [characterData?.level]);
 
-    const spellSaveDC = useMemo(() => characterData?.spellcasting?.spellSaveDC ?? 0, [characterData?.spellcasting]);
-    const spellAttackBonus = useMemo(() => characterData?.spellcasting?.spellAttackBonus ?? 0, [characterData?.spellcasting]);
-
+    // AC requires the full character object with features and equipment
     const armorClass = useMemo(() => characterData ? calculateArmorClass(characterData) : 10, [characterData]);
+
+    const spellSaveDC = useMemo(() => {
+        if (!characterData?.spellcasting?.ability) return 0;
+        const abilityScore = characterData.stats[characterData.spellcasting.ability] ?? 10;
+        return calculateSpellSaveDC(proficiencyBonus, abilityScore);
+    }, [characterData?.spellcasting?.ability, characterData?.stats, proficiencyBonus]);
+
+    const spellAttackBonus = useMemo(() => {
+        if (!characterData?.spellcasting?.ability) return 0;
+        const abilityScore = characterData.stats[characterData.spellcasting.ability] ?? 10;
+        return calculateSpellAttackBonus(proficiencyBonus, abilityScore);
+    }, [characterData?.spellcasting?.ability, characterData?.stats, proficiencyBonus]);
+
 
     const allFeaturesAndTraits = useMemo(() => characterData?.features ?? [], [characterData?.features]);
     const equippedWeapons = useMemo(() => characterData?.equipment.filter(item => item.isEquipped && item.type === 'Weapon') ?? [], [characterData?.equipment]);
+    // Actionable features now read currentUses directly from characterData
     const actionableFeatures = useMemo(() =>
-        allFeaturesAndTraits
-            .filter(f => f.isActionable)
-            .map(f => ({
-                ...f,
-                currentUses: featureUses[f.name] ?? f.maxUses ?? undefined
-            })),
-        [allFeaturesAndTraits, featureUses]
+        allFeaturesAndTraits.filter(f => f.isActionable),
+        [allFeaturesAndTraits]
     );
 
     const knownOrPreparedSpells = useMemo(() => {
@@ -152,66 +146,60 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
         return spells;
     }, [characterData, availableSpells]);
 
-    // --- Update Functions ---
-    const updateCharacterData = useCallback(async (updates: Partial<Character>) => {
+    // --- Update Functions (Simplified - delegate complex logic) ---
+    const updateCharacterState = useCallback(async (updates: Partial<Character>) => {
         if (!characterData) return;
         setIsSaving(true);
-        const dataToSave: Partial<Omit<Character, 'id' | 'createdAt' | 'updatedAt'>> = {};
-
-        // Only include fields that are directly updatable from the sheet
-        if ('hitPoints' in updates) dataToSave.hitPoints = updates.hitPoints;
-        if ('hitDice' in updates) dataToSave.hitDice = updates.hitDice;
-        if ('equipment' in updates) dataToSave.equipment = updates.equipment;
-        if ('spellcasting' in updates && updates.spellcasting?.slots && characterData.spellcasting?.slots) {
-            const updatedSlots = Object.entries(characterData.spellcasting.slots).reduce((acc, [level, slotInfo]) => {
-                acc[level] = {
-                    max: slotInfo.max,
-                    remaining: updates.spellcasting!.slots![level]?.remaining ?? slotInfo.remaining,
-                };
-                return acc;
-            }, {} as Record<string, { max: number; remaining: number }>);
-            dataToSave.spellcasting = { ...characterData.spellcasting, slots: updatedSlots };
-        }
-        if ('features' in updates && updates.features) {
-             dataToSave.features = baseCharacter.features.map(baseFeature => {
-                 const updatedFeature = updates.features!.find(f => f.name === baseFeature.name);
-                 return { ...baseFeature, currentUses: updatedFeature?.currentUses ?? baseFeature.currentUses };
-             });
-        }
 
         try {
-            if (Object.keys(dataToSave).length > 0) {
-                 // Fetch the *base* character data before applying updates
-                 // This ensures we don't accidentally overwrite non-updatable fields
-                 const baseDataForUpdate = await loadCharacter(characterData.id, false); // false = don't apply rules
-                 if (!baseDataForUpdate) throw new Error("Failed to load base character data before update.");
+            // Only pass editable fields to updateCharacter
+            const editableUpdates: Partial<Omit<Character, 'id' | 'createdAt'>> = {};
+            if ('hitPoints' in updates) editableUpdates.hitPoints = updates.hitPoints;
+            if ('hitDice' in updates) editableUpdates.hitDice = updates.hitDice;
+            if ('equipment' in updates) editableUpdates.equipment = updates.equipment;
+            if ('spellcasting' in updates && updates.spellcasting?.slots) {
+                // We only update the 'remaining' slots part of spellcasting
+                 const existingSlots = characterData.spellcasting?.slots || {};
+                 const updatedSlots = { ...existingSlots };
+                 Object.keys(updates.spellcasting.slots).forEach(level => {
+                     if (updatedSlots[level]) {
+                         updatedSlots[level] = {
+                             ...updatedSlots[level],
+                             remaining: updates.spellcasting!.slots![level].remaining,
+                         };
+                     }
+                 });
+                  editableUpdates.spellcasting = { ...characterData.spellcasting, slots: updatedSlots } as any; // Type assertion needed here
+            }
+             if ('features' in updates && updates.features) {
+                 // Only update currentUses on the features
+                 editableUpdates.features = characterData.features.map(baseFeature => {
+                     const updatedFeature = updates.features!.find(f => f.name === baseFeature.name);
+                     return updatedFeature ? { ...baseFeature, currentUses: updatedFeature.currentUses } : baseFeature;
+                 });
+             }
 
-                 // Merge the intended updates onto the base data
-                 const finalDataToSave = {
-                    ...baseDataForUpdate, // Start with fetched base data
-                    ...dataToSave,       // Apply the specific updates
-                    // Don't spread characterData here as it contains derived values
-                 };
-
-                 // Remove derived fields just in case
-                 delete finalDataToSave.spellcasting?.spellSaveDC;
-                 delete finalDataToSave.spellcasting?.spellAttackBonus;
-
-                await updateCharacter(characterData.id, finalDataToSave);
+            if (Object.keys(editableUpdates).length > 0) {
+                await updateCharacter(characterData.id, editableUpdates);
                 queryClient.invalidateQueries({ queryKey: ['character', characterData.id] });
+                // Let the query refetch handle the UI update
                 toast({ title: "Character Updated" });
+            } else {
+                toast({ title: "No changes detected", variant: "default" }); // Inform user if no actual update needed
             }
         } catch (error) {
             console.error("Failed to update character:", error);
             toast({ variant: "destructive", title: "Update Failed", description: "Could not save changes." });
+            // Optionally refetch to rollback optimistic updates if implemented
+            // queryClient.invalidateQueries({ queryKey: ['character', characterData.id] });
         } finally {
             setIsSaving(false);
         }
-    }, [characterData, queryClient, toast]); // Added baseCharacter dependency? careful
+    }, [characterData, queryClient, toast]);
 
-    // --- Event Handlers ---
+    // --- Event Handlers (Simplified - call updateCharacterState) ---
     const handleHitPointChange = (type: 'current' | 'temporary', value: string) => {
-        if (!characterData) return;
+        if (!characterData?.hitPoints) return;
         const numValue = parseInt(value, 10);
         const maxHp = characterData.hitPoints.max;
         let newHpState: HitPointsState | null = null;
@@ -220,11 +208,14 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
             newHpState = { ...characterData.hitPoints };
             if (type === 'current') newHpState.current = Math.max(0, Math.min(numValue, maxHp));
             else newHpState.temporary = Math.max(0, numValue);
-        } else if (value === '') {
+        } else if (value === '') { // Handle empty input (treat as 0)
             newHpState = { ...characterData.hitPoints };
             newHpState[type] = 0;
         }
-        if (newHpState) updateCharacterData({ hitPoints: newHpState });
+
+        if (newHpState && (newHpState.current !== characterData.hitPoints.current || newHpState.temporary !== characterData.hitPoints.temporary)) {
+            updateCharacterState({ hitPoints: newHpState });
+        }
     };
 
     const handleToggleEquip = (itemName: string) => {
@@ -232,7 +223,7 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
         const newEquipment = characterData.equipment.map(item =>
             item.name === itemName ? { ...item, isEquipped: !item.isEquipped } : item
         );
-        updateCharacterData({ equipment: newEquipment });
+        updateCharacterState({ equipment: newEquipment });
     };
 
     const handleAddEquipment = (itemToAdd: EquipmentItem) => {
@@ -246,67 +237,84 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
         } else {
             newEquipment = [...characterData.equipment, { ...itemToAdd, quantity: itemToAdd.quantity || 1, isEquipped: false }];
         }
-        updateCharacterData({ equipment: newEquipment });
+        updateCharacterState({ equipment: newEquipment });
     };
 
     const handleRemoveEquipment = (itemName: string) => {
         if (!characterData) return;
         const newEquipment = characterData.equipment.filter(item => item.name !== itemName);
-        updateCharacterData({ equipment: newEquipment });
+        updateCharacterState({ equipment: newEquipment });
     };
 
     const handleUpdateEquipmentQuantity = (itemName: string, quantity: number) => {
         if (!characterData) return;
         const newQuantity = Math.max(0, quantity);
+        if (isNaN(newQuantity)) return; // Ignore invalid input
+
         const newEquipment = characterData.equipment
             .map(item => item.name === itemName ? { ...item, quantity: newQuantity } : item)
-            .filter(item => item.quantity > 0);
-        updateCharacterData({ equipment: newEquipment });
+            .filter(item => item.quantity > 0); // Remove items with 0 quantity
+        updateCharacterState({ equipment: newEquipment });
     }
 
     const performRoll = useCallback(async (diceString: string, label: string) => {
+        // Simple dice parsing (needs improvement for complex strings)
+        const match = diceString.match(/(\d+)?d(\d+)([+-]\d+)?/i);
+        let baseRollString = diceString;
+        let modifier = 0;
+        if (match) {
+            baseRollString = `${match[1] || '1'}d${match[2]}`;
+            modifier = parseInt(match[3] || '0', 10);
+        }
+
         try {
-            const rollResult = rollDice(diceString); // Use imported basic roll for now
-            triggerVisualRoll(diceString, `${label}: ${rollResult}`);
+            // Trigger visual roll first
+            triggerVisualRoll(baseRollString, `${label}`);
+
+            // Simulate waiting for roll result (replace with actual dddice result handling)
+            const basicRollResult = rollDice(baseRollString); // Use basic roll for now
+            const finalResult = basicRollResult + modifier;
+
             if (characterData?.campaignId && user) {
                 await addGameLogEntry({
                     campaignId: characterData.campaignId,
                     actorId: user.uid,
                     actorName: userProfile?.displayName || characterData.playerName || 'Player',
                     actionType: 'roll',
-                    details: `${characterData.characterName} rolled ${label}: ${rollResult} (${diceString})`,
-                    rollDetails: { dice: diceString, result: rollResult },
+                    details: `${characterData.characterName} rolled ${label}: ${finalResult} (${diceString})`,
+                    rollDetails: { dice: diceString, result: finalResult },
                 });
             }
-            toast({ title: `${label} Roll`, description: `Result: ${rollResult}` });
-            return rollResult;
+            toast({ title: `${label} Roll`, description: `Result: ${finalResult}` });
+            return finalResult; // Return the calculated result
         } catch (error) {
             console.error("Error during dice roll:", error);
             toast({ variant: "destructive", title: "Roll Error" });
-            return 0;
+            return 0; // Return 0 on error
         }
     }, [characterData, user, userProfile, triggerVisualRoll, toast]);
 
     const handleUseFeature = useCallback(async (featureName: string) => {
         if (!characterData) return;
-        const feature = characterData.features.find(f => f.name === featureName);
-        if (!feature) return;
+        const featureIndex = characterData.features.findIndex(f => f.name === featureName);
+        if (featureIndex === -1) return;
 
-        const currentUses = featureUses[featureName];
+        const feature = characterData.features[featureIndex];
+        const currentUses = feature.currentUses;
+
         if (feature.maxUses === null || feature.maxUses === undefined || currentUses === undefined || currentUses === null) {
+            // Feature has unlimited uses or doesn't track uses
             toast({ title: `Used ${featureName}` });
-            if (characterData?.campaignId && user) { await addGameLogEntry({ campaignId: characterData.campaignId, actorId: user.uid, actorName: userProfile?.displayName || characterData.playerName, actionType: 'featureUse', details: `${characterData.characterName} used ${featureName}.` }); }
+            if (characterData?.campaignId && user) {
+                await addGameLogEntry({ campaignId: characterData.campaignId, actorId: user.uid, actorName: userProfile?.displayName || characterData.playerName || 'Player', actionType: 'featureUse', details: `${characterData.characterName} used ${featureName}.` });
+            }
             return;
         }
 
         if (currentUses > 0) {
             const newUses = currentUses - 1;
-            setFeatureUses(prev => ({ ...prev, [featureName]: newUses })); // Optimistic UI update
-            toast({ title: `Used ${featureName}`, description: `${newUses} uses remaining.` });
-
-            const updatedFeaturesForSave = characterData.features.map(f =>
-                f.name === featureName ? { ...f, currentUses: newUses } : f
-            );
+            const updatedFeatures = [...characterData.features];
+            updatedFeatures[featureIndex] = { ...feature, currentUses: newUses };
 
              // Handle special feature effects like Second Wind
              let hpUpdates: Partial<Character> = {};
@@ -318,69 +326,116 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
                  toast({ title: 'Second Wind Healing', description: `Regained ${healing} hit points.` });
              }
 
-            await updateCharacterData({ ...hpUpdates, features: updatedFeaturesForSave });
-            if (characterData?.campaignId && user) { await addGameLogEntry({ campaignId: characterData.campaignId, actorId: user.uid, actorName: userProfile?.displayName || characterData.playerName, actionType: 'featureUse', details: `${characterData.characterName} used ${featureName} (${newUses}/${feature.maxUses} remaining).${hpUpdates.hitPoints ? ` Healed for ${hpUpdates.hitPoints.current - characterData.hitPoints.current} HP.` : ''}` }); }
+            // Pass only the changed features and HP updates to the state updater
+            await updateCharacterState({ ...hpUpdates, features: updatedFeatures });
+             if (characterData?.campaignId && user) {
+                 await addGameLogEntry({ campaignId: characterData.campaignId, actorId: user.uid, actorName: userProfile?.displayName || characterData.playerName || 'Player', actionType: 'featureUse', details: `${characterData.characterName} used ${featureName} (${newUses}/${feature.maxUses} remaining).${hpUpdates.hitPoints ? ` Healed for ${hpUpdates.hitPoints.current - characterData.hitPoints.current} HP.` : ''}` });
+             }
+            // Toast is handled by updateCharacterState on success
         } else {
-            toast({ variant: "destructive", title: `Cannot Use ${featureName}` });
+            toast({ variant: "destructive", title: `Cannot Use ${featureName}`, description: "No uses remaining." });
         }
-    }, [characterData, featureUses, toast, user, userProfile, updateCharacterData, performRoll]);
+    }, [characterData, toast, user, userProfile, updateCharacterState, performRoll]);
+
 
     const handleCastSpell = useCallback(async (spellName: string, level: number) => {
-        if (!characterData?.spellcasting || !characterData?.spellcasting?.slots[level]) return;
-        const currentSlots = spellSlotsRemaining[level] ?? characterData.spellcasting.slots[level].remaining;
+        if (!characterData?.spellcasting?.slots?.[level]) return;
+
+        const slotInfo = characterData.spellcasting.slots[level];
+        const currentSlots = slotInfo.remaining;
 
         if (currentSlots > 0) {
             const newRemaining = currentSlots - 1;
-            setSpellSlotsRemaining(prev => ({ ...prev, [level]: newRemaining }));
             const updatedSlots = { ...characterData.spellcasting.slots };
-            updatedSlots[level] = { ...updatedSlots[level], remaining: newRemaining };
-            await updateCharacterData({ spellcasting: { ...characterData.spellcasting, slots: updatedSlots } });
+            updatedSlots[level] = { ...slotInfo, remaining: newRemaining };
 
-            if (characterData?.campaignId && user) { await addGameLogEntry({ campaignId: characterData.campaignId, actorId: user.uid, actorName: userProfile?.displayName || characterData.playerName, actionType: 'spellCast', details: `${characterData.characterName} cast ${spellName} (Level ${level}). Slots remaining: ${newRemaining}/${updatedSlots[level].max}` }); }
-            toast({ title: `Cast ${spellName}` });
+            // Only update the spellcasting part of the character
+            await updateCharacterState({ spellcasting: { ...characterData.spellcasting, slots: updatedSlots } });
+
+            if (characterData?.campaignId && user) {
+                 await addGameLogEntry({ campaignId: characterData.campaignId, actorId: user.uid, actorName: userProfile?.displayName || characterData.playerName || 'Player', actionType: 'spellCast', details: `${characterData.characterName} cast ${spellName} (Level ${level}). Slots remaining: ${newRemaining}/${slotInfo.max}` });
+             }
+            // Toast is handled by updateCharacterState on success
         } else {
-            toast({ variant: "destructive", title: `Cannot Cast ${spellName}` });
+            toast({ variant: "destructive", title: `Cannot Cast ${spellName}`, description: `No level ${level} spell slots remaining.` });
         }
-    }, [characterData, spellSlotsRemaining, toast, user, userProfile, updateCharacterData]);
+    }, [characterData, toast, user, userProfile, updateCharacterState]);
+
 
     const handleShortRest = useCallback(async (hitDiceSpent: number, hpRecovered: number) => {
         if (!characterData) return;
+
+        // Calculate new HP and HD state
         const newHp: HitPointsState = { ...characterData.hitPoints, current: Math.min(characterData.hitPoints.max, characterData.hitPoints.current + hpRecovered) };
         const newHitDice: HitDiceState = { ...characterData.hitDice, remaining: Math.max(0, characterData.hitDice.remaining - hitDiceSpent) };
-        const usesReset: Record<string, number> = {};
-        characterData.features.forEach(feature => {
-            if (feature.usesResetOn === 'short-rest' && feature.maxUses !== null && feature.maxUses !== undefined) {
-                usesReset[feature.name] = feature.maxUses;
-            }
-        });
-        const newFeatureUsesMap = { ...featureUses, ...usesReset };
-        const updatedFeaturesWithUses = characterData.features.map(f => ({ ...f, currentUses: newFeatureUsesMap[f.name] ?? f.currentUses }));
-        setFeatureUses(newFeatureUsesMap);
-        await updateCharacterData({ hitPoints: newHp, hitDice: newHitDice, features: updatedFeaturesWithUses });
-        if (characterData?.campaignId && user) { await addGameLogEntry({ campaignId: characterData.campaignId, actorId: user.uid, actorName: userProfile?.displayName || characterData.playerName, actionType: 'statusChange', details: `${characterData.characterName} took a Short Rest.` }); }
-    }, [characterData, featureUses, toast, user, userProfile, updateCharacterData]);
 
-    const handleLongRest = useCallback(async () => {
+        // Calculate feature uses to reset
+        const updatedFeatures = characterData.features.map(feature => {
+            if (feature.usesResetOn === 'short-rest' && feature.maxUses !== null && feature.maxUses !== undefined) {
+                return { ...feature, currentUses: feature.maxUses };
+            }
+            return feature;
+        });
+
+        // Prepare the update payload
+        const updates: Partial<Character> = {
+             hitPoints: newHp,
+             hitDice: newHitDice,
+             features: updatedFeatures
+        };
+
+        // Apply updates
+        await updateCharacterState(updates);
+        if (characterData?.campaignId && user) {
+             await addGameLogEntry({ campaignId: characterData.campaignId, actorId: user.uid, actorName: userProfile?.displayName || characterData.playerName || 'Player', actionType: 'statusChange', details: `${characterData.characterName} took a Short Rest. Recovered ${hpRecovered} HP using ${hitDiceSpent} Hit Dice.` });
+         }
+        // Toast is handled by updateCharacterState
+    }, [characterData, user, userProfile, updateCharacterState]);
+
+     const handleLongRest = useCallback(async () => {
         if (!characterData) return;
+
+        // Calculate HD recovery
         const hitDiceToRegain = Math.max(1, Math.floor(characterData.hitDice.total / 2));
         const newCurrentHitDice = Math.min(characterData.hitDice.total, characterData.hitDice.remaining + hitDiceToRegain);
+
+        // Reset HP and HD state
         const newHp: HitPointsState = { ...characterData.hitPoints, current: characterData.hitPoints.max, temporary: 0 };
         const newHitDice: HitDiceState = { ...characterData.hitDice, remaining: newCurrentHitDice };
-        const usesReset: Record<string, number> = {};
-        const slotsReset: Record<string, { max: number; remaining: number }> = {};
-        characterData.features.forEach(feature => {
-            if (feature.maxUses !== null && feature.maxUses !== undefined) usesReset[feature.name] = feature.maxUses;
+
+        // Reset feature uses
+        const updatedFeatures = characterData.features.map(feature => {
+            if (feature.maxUses !== null && feature.maxUses !== undefined) {
+                 return { ...feature, currentUses: feature.maxUses };
+            }
+            return feature;
         });
-        if (characterData.spellcasting?.slots) {
-            Object.entries(characterData.spellcasting.slots).forEach(([level, slotInfo]) => slotsReset[level] = { ...slotInfo, remaining: slotInfo.max });
+
+        // Reset spell slots
+        let updatedSpellcasting = characterData.spellcasting;
+        if (updatedSpellcasting?.slots) {
+            const resetSlots = { ...updatedSpellcasting.slots };
+            Object.keys(resetSlots).forEach(level => {
+                resetSlots[level] = { ...resetSlots[level], remaining: resetSlots[level].max };
+            });
+            updatedSpellcasting = { ...updatedSpellcasting, slots: resetSlots };
         }
-        const updatedFeaturesWithUses = characterData.features.map(f => ({ ...f, currentUses: usesReset[f.name] ?? f.currentUses }));
-        const updatedSpellcasting = characterData.spellcasting ? { ...characterData.spellcasting, slots: slotsReset } : undefined;
-        setFeatureUses(usesReset);
-        setSpellSlotsRemaining(Object.fromEntries(Object.entries(slotsReset).map(([lvl, info]) => [lvl, info.remaining])));
-        await updateCharacterData({ hitPoints: newHp, hitDice: newHitDice, features: updatedFeaturesWithUses, spellcasting: updatedSpellcasting });
-        if (characterData?.campaignId && user) { await addGameLogEntry({ campaignId: characterData.campaignId, actorId: user.uid, actorName: userProfile?.displayName || characterData.playerName, actionType: 'statusChange', details: `${characterData.characterName} took a Long Rest.` }); }
-    }, [characterData, toast, user, userProfile, updateCharacterData]);
+
+        // Prepare the update payload
+        const updates: Partial<Character> = {
+             hitPoints: newHp,
+             hitDice: newHitDice,
+             features: updatedFeatures,
+             ...(updatedSpellcasting && { spellcasting: updatedSpellcasting }), // Only include spellcasting if it exists
+        };
+
+        // Apply updates
+        await updateCharacterState(updates);
+        if (characterData?.campaignId && user) {
+             await addGameLogEntry({ campaignId: characterData.campaignId, actorId: user.uid, actorName: userProfile?.displayName || characterData.playerName || 'Player', actionType: 'statusChange', details: `${characterData.characterName} took a Long Rest.` });
+         }
+        // Toast handled by updateCharacterState
+    }, [characterData, user, userProfile, updateCharacterState]);
 
 
     // --- Render Logic ---
@@ -396,12 +451,12 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
         return <NotFoundDisplay />;
     }
 
-    // Base character data needed for some displays (like original base stats)
-    const baseCharacter = initialCharacter;
+    // Base character data needed for displays comparing base vs derived
+    const baseCharacter = initialCharacter; // Or could fetch base data separately if needed
 
     return (
         <>
-            <DDDiceRoller />
+            <DDDiceRoller /> {/* Render DDDice visual component */}
             <ScrollArea className="h-full p-4 md:p-6">
                 <div className="max-w-7xl mx-auto space-y-6">
                     <CharacterHeader
@@ -422,9 +477,10 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
 
                         <TabsContent value="core">
                             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                                <CharacterStats stats={derivedStats} baseStats={baseCharacter.stats} modifiers={modifiers} />
+                                <CharacterStats stats={finalStats} baseStats={baseCharacter.stats} modifiers={modifiers} />
                                 <CharacterSkills character={characterData} proficiencyBonus={proficiencyBonus} onRoll={performRoll} />
-                                <CharacterFeatures features={allFeaturesAndTraits} uses={featureUses} />
+                                {/* Pass characterData.features which includes currentUses */}
+                                <CharacterFeatures features={allFeaturesAndTraits} uses={Object.fromEntries(characterData.features.map(f => [f.name, f.currentUses]))} />
                             </div>
                         </TabsContent>
 
@@ -442,7 +498,7 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
                                 <div className="md:col-span-2">
                                     <CharacterActions
                                         weapons={equippedWeapons}
-                                        features={actionableFeatures}
+                                        features={actionableFeatures} // Pass features with currentUses from characterData
                                         character={characterData}
                                         proficiencyBonus={proficiencyBonus}
                                         onRoll={performRoll}
@@ -454,16 +510,17 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
                         </TabsContent>
 
                         <TabsContent value="spells">
-                            <CharacterSpellcasting
-                                spellcasting={characterData.spellcasting}
-                                spellSaveDC={spellSaveDC}
-                                spellAttackBonus={spellAttackBonus}
-                                spellsByLevel={knownOrPreparedSpells}
-                                spellSlotsRemaining={spellSlotsRemaining}
-                                onCastSpell={handleCastSpell}
-                                isSaving={isSaving}
-                                isLoadingSpells={isLoadingSpells}
-                            />
+                             <CharacterSpellcasting
+                                 spellcasting={characterData.spellcasting}
+                                 spellSaveDC={spellSaveDC}
+                                 spellAttackBonus={spellAttackBonus}
+                                 spellsByLevel={knownOrPreparedSpells}
+                                 // Pass remaining slots directly from characterData
+                                 spellSlotsRemaining={Object.fromEntries(Object.entries(characterData.spellcasting?.slots || {}).map(([lvl, info]) => [lvl, info.remaining]))}
+                                 onCastSpell={handleCastSpell}
+                                 isSaving={isSaving}
+                                 isLoadingSpells={isLoadingSpells}
+                             />
                         </TabsContent>
 
                         <TabsContent value="inventory">
@@ -496,18 +553,18 @@ export function CharacterSheet({ initialCharacter }: CharacterSheetProps) {
                 isLoadingItems={isLoadingEquipment}
             />
 
-            <ShortRestDialog
-                isOpen={isShortRestDialogOpen}
-                onOpenChange={setIsShortRestDialogOpen}
-                maxHitDice={characterData.hitDice.total}
-                currentHitDice={characterData.hitDice.remaining}
-                hitDieType={characterData.hitDice.dieType}
-                constitutionModifier={modifiers.constitution}
-                maxHp={characterData.hitPoints.max}
-                currentHp={characterData.hitPoints.current}
-                onConfirm={handleShortRest}
-                rollDiceFn={performRoll}
-            />
+             <ShortRestDialog
+                 isOpen={isShortRestDialogOpen}
+                 onOpenChange={setIsShortRestDialogOpen}
+                 maxHitDice={characterData.hitDice.total}
+                 currentHitDice={characterData.hitDice.remaining}
+                 hitDieType={characterData.hitDice.dieType}
+                 constitutionModifier={modifiers.constitution}
+                 maxHp={characterData.hitPoints.max}
+                 currentHp={characterData.hitPoints.current}
+                 onConfirm={handleShortRest}
+                 rollDiceFn={performRoll} // Pass the roll function
+             />
         </>
     );
 }

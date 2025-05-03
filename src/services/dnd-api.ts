@@ -1,32 +1,13 @@
+// src/services/dnd-api.ts
+'use server';
 
-import type { CharacterClass as CharacterClassType, CharacterRace, Feature, CharacterLevel, EquipmentItem, HitPoints, BackgroundInfo, SourcePack, Spell } from '@/lib/types'; // Added Spell
-import { logError, logMessage } from './logging-service'; // Import logging service
-import { getMultipleFeatureDefinitions } from './feature-service'; // Import feature service
+import type { CharacterClass as CharacterClassType, CharacterRace, Feature, CharacterLevel, EquipmentItem, HitPoints, BackgroundInfo, SourcePack, Spell } from '@/lib/types';
+import { logError, logMessage } from './logging-service';
+import { getMultipleFeatureDefinitions } from './feature-service'; // Use feature service for definitions
 import { SRD_SOURCE_PACK } from '@/lib/srd-data'; // Import the SRD data definition
 
 // Re-export types from lib/types to ensure consistency
 export type { CharacterClass, CharacterRace, Feature, CharacterLevel, EquipmentItem, HitPoints, BackgroundInfo, Spell };
-
-// Placeholder rollDice function - REMOVE/REPLACE when dddice is integrated
-export const rollDice = (diceString: string): number => {
-    console.warn(`Placeholder rollDice used for: ${diceString}. Implement dddice.`);
-    // Basic random roll for placeholder functionality
-    try {
-        const match = diceString.match(/(\d+)?d(\d+)([+-]\d+)?/i);
-        if (!match) return 10; // Default result if parse fails
-        const numDice = parseInt(match[1] || '1', 10);
-        const numSides = parseInt(match[2], 10);
-        const modifier = parseInt(match[3] || '0', 10);
-        let total = 0;
-        for (let i = 0; i < numDice; i++) {
-            total += Math.floor(Math.random() * numSides) + 1;
-        }
-        return total + modifier;
-    } catch {
-        return 10; // Default on error
-    }
-};
-
 
 /**
  * Fetches available character classes, combining SRD and source pack content.
@@ -72,14 +53,14 @@ export async function getCharacterRaces(combinedContent?: SourcePack['content'])
 
 
 /**
- * Fetches level up options for a specific character class and level.
- * This function now primarily focuses on identifying features gained AT the target level.
- * It relies on the class definition (potentially from source packs or SRD) having a 'featuresByLevel' map.
+ * Fetches level up options (features, proficiency bonus) for a specific character class and level.
+ * This function now primarily focuses on identifying features gained AT the target level
+ * from the class definition in combined/SRD content.
  *
  * @param className The name of the character class.
  * @param targetLevel The level the character is advancing TO.
  * @param combinedContent Optional combined content for looking up class/feature definitions.
- * @returns A promise that resolves to the details (features, proficiency bonus) for the target level.
+ * @returns A promise that resolves to the details for the target level.
  */
 export async function getLevelUpOptions(
     className: string,
@@ -98,8 +79,7 @@ export async function getLevelUpOptions(
     else if (targetLevel >= 13 && targetLevel <= 16) proficiencyBonus = 5;
     else if (targetLevel >= 17 && targetLevel <= 20) proficiencyBonus = 6;
 
-    // 2. Find features gained AT this specific level
-    // Prioritize combined content, fallback to SRD
+    // 2. Find feature keys gained AT this specific level
     const classData = combinedContent?.classes?.[className] ?? SRD_SOURCE_PACK.content.classes?.[className];
     let featureKeysAtLevel: string[] = [];
 
@@ -133,86 +113,6 @@ export async function getLevelUpOptions(
         proficiencyBonus: proficiencyBonus,
     };
 }
-
-
-/**
- * Fetches detailed definitions for a list of race trait names, using combined/SRD content.
- * @param traitNames - An array of trait keys/names to fetch details for.
- * @param combinedContent - Combined content from active source packs.
- * @returns A promise that resolves to an array of Feature objects representing the traits.
- */
-export async function getRaceTraitsDetails(
-    traitNames: string[],
-    combinedContent?: SourcePack['content']
-): Promise<Feature[]> {
-    logMessage('debug', `getRaceTraitsDetails: Fetching details for traits: ${traitNames.join(', ')}`);
-    if (!traitNames || traitNames.length === 0) {
-        return [];
-    }
-    // Use getMultipleFeatureDefinitions which already handles combinedContent/SRD fallback
-    return getMultipleFeatureDefinitions(traitNames, combinedContent);
-}
-
-
-/**
- * Fetches all cumulative class features up to a certain level, combining SRD and source packs.
- * @param className The name of the character class.
- * @param maxLevel The maximum level to fetch features for.
- * @param combinedContent Optional combined content from active source packs.
- * @returns A promise that resolves to an array of all features gained up to maxLevel.
- */
-export async function getCumulativeClassFeatures(
-    className: string,
-    maxLevel: number,
-    combinedContent?: SourcePack['content']
-): Promise<Feature[]> {
-    if (!className || maxLevel < 1) {
-        logMessage('warn', "getCumulativeClassFeatures: Invalid class name or level.");
-        return [];
-    }
-
-    logMessage('debug', `getCumulativeClassFeatures: Fetching cumulative features for ${className} up to level ${maxLevel}.`);
-    // Prioritize combined content, fallback to SRD
-    const classData = combinedContent?.classes?.[className] ?? SRD_SOURCE_PACK.content.classes?.[className];
-    let allFeatureKeys: string[] = [];
-
-    if (!classData) {
-         logMessage('error', `Class definition not found for "${className}" in combined content or SRD.`);
-         return [];
-    }
-
-    if (classData.featuresByLevel) {
-        for (let level = 1; level <= maxLevel; level++) {
-            if (classData.featuresByLevel[level]) {
-                allFeatureKeys.push(...classData.featuresByLevel[level]);
-            }
-        }
-        logMessage('debug', `Accumulated feature keys for ${className} up to level ${maxLevel}: ${allFeatureKeys.join(', ')}`);
-    } else {
-        logMessage('warn', `Class "${className}" lacks featuresByLevel definition.`);
-    }
-
-    // Fetch full definitions for all unique collected keys
-    const uniqueFeatureKeys = [...new Set(allFeatureKeys)];
-    if (uniqueFeatureKeys.length === 0) {
-        logMessage('debug', `No unique feature keys found for ${className} up to level ${maxLevel}.`);
-        return [];
-    }
-    try {
-        // getMultipleFeatureDefinitions handles combined/SRD fallback for feature definitions
-        return await getMultipleFeatureDefinitions(uniqueFeatureKeys, combinedContent);
-    } catch (error) {
-         const e = error instanceof Error ? error : new Error(String(error));
-         logError(e, {
-            function: 'getCumulativeClassFeatures',
-            className: className,
-            maxLevel: maxLevel,
-            uniqueFeatureKeys: uniqueFeatureKeys,
-         });
-        throw new Error(`Failed to fetch cumulative features for ${className}.`);
-    }
-}
-
 
 /**
  * Fetches a list of available equipment items, combining SRD and source pack content.

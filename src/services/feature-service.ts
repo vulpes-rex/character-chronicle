@@ -1,4 +1,3 @@
-
 'use server';
 
 import type { Feature, FeatureEffectMetadata, SourcePack, CharacterClass, CharacterRace, BackgroundInfo, Character } from '@/lib/types';
@@ -542,4 +541,13 @@ export async function getBackgroundFeatures(
     logMessage('debug', `Finished applying feature rules for character ${baseCharacter.id}.`);
     return derivedCharacter;
 }
-```
+
+// Old function name - keeping for backward compatibility temporarily if needed
+// but should be removed once all calls are updated to applyFeatureRules.
+/**
+ * @deprecated Use applyFeatureRules instead.
+ */
+export async function applyFeatureEffects(baseCharacter: Character): Promise<Character> {
+    logMessage('warn', 'Deprecated function applyFeatureEffects called. Use applyFeatureRules instead.');
+    return applyFeatureRules(baseCharacter);
+}

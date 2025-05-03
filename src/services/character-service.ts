@@ -1,3 +1,4 @@
+
 'use server'; // Indicate this module can contain server-only logic (like direct DB access)
 
 import { db } from '@/lib/firebase';
@@ -41,6 +42,8 @@ export async function saveCharacter(characterData: Omit<Character, 'id' | 'creat
       ...characterData,
       // Ensure only base stats are saved
       stats: characterData.stats || { strength: 10, dexterity: 10, constitution: 10, intelligence: 10, wisdom: 10, charisma: 10 },
+      // Ensure featureChoices is saved
+      featureChoices: characterData.featureChoices || {},
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
@@ -86,6 +89,11 @@ export async function updateCharacter(characterId: string, characterData: Partia
   // Base stats should only be updated if they are explicitly passed in characterData
   if (!characterData.stats) {
       delete dataToUpdate.stats;
+  }
+
+  // Ensure featureChoices is included if provided
+  if ('featureChoices' in characterData) {
+    dataToUpdate.featureChoices = characterData.featureChoices || {};
   }
 
 
@@ -136,6 +144,7 @@ export async function loadCharacter(characterId: string): Promise<Character | nu
             equipment: Array.isArray(data.equipment) ? data.equipment : [],
             proficiencies: data.proficiencies || { armor: [], weapons: [], tools: [], savingThrows: [] },
             features: Array.isArray(data.features) ? data.features : [],
+            featureChoices: data.featureChoices || {}, // Load feature choices
         } as Character;
 
         // Apply feature rules after loading to get derived stats for potential use
@@ -189,6 +198,7 @@ export async function loadAllCharacters(): Promise<Character[]> {
             equipment: Array.isArray(data.equipment) ? data.equipment : [],
             proficiencies: data.proficiencies || { armor: [], weapons: [], tools: [], savingThrows: [] },
             features: Array.isArray(data.features) ? data.features : [],
+            featureChoices: data.featureChoices || {}, // Load feature choices
         } as Character;
         characters.push(baseCharacter);
     });

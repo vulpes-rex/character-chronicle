@@ -1,3 +1,4 @@
+
 'use server';
 
 import type { Feature, FeatureEffectMetadata, SourcePack, CharacterClass, CharacterRace, BackgroundInfo, Character } from '@/lib/types';
@@ -33,7 +34,13 @@ const BASE_FEATURE_DEFINITIONS: Record<string, Feature> = {
         name: "Extra Language",
         description: "You can speak, read, and write one extra language of your choice.",
         source: "Human Race (Base)",
-        // Metadata could potentially indicate a choice needs to be made
+        metadata: { // Add metadata for choice
+            effectType: "proficiencyGrant",
+            type: "language",
+            choose: 1,
+            // Options could be dynamically populated or hardcoded for SRD
+            options: ["Common", "Dwarvish", "Elvish", "Giant", "Gnomish", "Goblin", "Halfling", "Orc"],
+        }
     },
     "Darkvision": {
         name: "Darkvision",
@@ -96,13 +103,25 @@ const BASE_FEATURE_DEFINITIONS: Record<string, Feature> = {
     },
 
     // Class Features (Definitions)
+     "FightingStyle": { // Generic Fighting Style feature
+        name: "Fighting Style",
+        description: "You adopt a particular style of fighting as your specialty. Choose one option.",
+        source: "Fighter Class (Base)",
+        metadata: {
+            effectType: "choiceGrant",
+            choose: 1,
+            options: ["Archery", "Defense", "Dueling", "Great Weapon Fighting", "Protection", "Two-Weapon Fighting"], // Example options
+            choiceKey: "Fighting Style", // Key to store the choice in Character.featureChoices
+        }
+    },
+    // Specific styles - these might be implicitly activated based on the choice made for the generic "Fighting Style"
     "FightingStyleArchery": {
         name: "Fighting Style: Archery",
         description: "You gain a +2 bonus to attack rolls you make with ranged weapons.",
         source: "Fighter Class (Base)",
         // Note: This bonus needs to be applied during attack roll calculation, not directly to stats. Informational metadata.
     },
-     "FightingStyleDefense": { // Added definition for Defense style
+     "FightingStyleDefense": {
         name: "Fighting Style: Defense",
         description: "While you are wearing armor, you gain a +1 bonus to AC.",
         source: "Fighter Class (Base)",
@@ -112,6 +131,7 @@ const BASE_FEATURE_DEFINITIONS: Record<string, Feature> = {
             condition: "wearing armor",
         },
     },
+    // ... other specific fighting style definitions ...
     "SecondWind": {
         name: "Second Wind",
         description: "On your turn, you can use a bonus action to regain hit points equal to 1d10 + your fighter level. Once you use this feature, you must finish a short or long rest before you can use it again.",
@@ -132,6 +152,13 @@ const BASE_FEATURE_DEFINITIONS: Record<string, Feature> = {
         name: "Expertise",
         description: "Choose two skill proficiencies, or one skill/tool proficiency. Double proficiency bonus for checks using chosen proficiencies.",
         source: "Rogue Class (Base)",
+         metadata: { // Add metadata for choice
+             effectType: "proficiencyGrant", // Or potentially 'choiceGrant' if not directly granting proficiency?
+             type: 'skill', // Primary type is skill
+             choose: 2, // Choose 2 skills OR 1 skill + 1 tool
+             options: ALL_SKILLS, // Simplified: Allow choosing from all skills/tools (needs proper tool list)
+             // Needs a way to handle the 'or 1 tool' case - complex metadata required
+         }
         // Requires player choice, metadata might indicate this. Expertise effect handled in skill calculation.
     },
     "SneakAttack": {
@@ -387,7 +414,7 @@ export async function getBackgroundFeatures(
 
     if (backgroundData) {
         logMessage('debug', `Found background "${backgroundName}" in source packs.`);
-        if (backgroundData.feature) {
+        if (backgroundData.feature?.name) { // Check if feature name exists
              // Attempt to get the full definition, use stored info as fallback
              const mainFeatureDef = await getFeatureDefinition(backgroundData.feature.name, combinedContent);
              if (mainFeatureDef) {
@@ -395,7 +422,7 @@ export async function getBackgroundFeatures(
              } else {
                  features.push({ // Fallback if full definition not found
                     name: backgroundData.feature.name,
-                    description: backgroundData.feature.description,
+                    description: backgroundData.feature.description || 'No description.',
                     source: `${backgroundName} Background`,
                  });
              }
@@ -421,6 +448,12 @@ export async function getBackgroundFeatures(
                 name: `${backgroundName} Languages`,
                 description: `Choose ${backgroundData.languages.choose} extra language(s)${backgroundData.languages.options ? ` from: ${backgroundData.languages.options.join(', ')}` : ''}.`,
                 source: `${backgroundName} Background`,
+                 metadata: { // Add metadata for choice
+                     effectType: "proficiencyGrant",
+                     type: "language",
+                     choose: backgroundData.languages.choose,
+                     options: backgroundData.languages.options || ["Common", "Dwarvish", "Elvish", "Giant", "Gnomish", "Goblin", "Halfling", "Orc"], // Fallback options
+                 }
              });
          }
     } else {
@@ -442,7 +475,7 @@ export async function getBackgroundFeatures(
  * If run client-side, ensure `combinedContent` is appropriately fetched and passed.
  *
  * @param baseCharacter - The base character object (should have base stats and FULL feature definitions).
- * @returns A promise resolving to a new character object containing the derived state after applying features.
+ * @returns A new character object containing the derived state after applying features.
  */
  export async function applyFeatureRules(baseCharacter: Character): Promise<Character> {
     logMessage('debug', `Applying feature rules for character ${baseCharacter.id}`);
@@ -461,6 +494,7 @@ export async function getBackgroundFeatures(
         weapons: [...(baseCharacter.proficiencies?.weapons ?? [])],
         tools: [...(baseCharacter.proficiencies?.tools ?? [])],
         savingThrows: [...(baseCharacter.proficiencies?.savingThrows ?? [])],
+        languages: [...(baseCharacter.proficiencies?.languages ?? [])], // Initialize languages
     };
     const finalSkills = { ...(baseCharacter.skills || {}) }; // Start with base skill selections
 
@@ -483,17 +517,44 @@ export async function getBackgroundFeatures(
                         });
                         break;
                     case 'proficiencyGrant':
-                        // TODO: Handle choices if metadata.choose is present
+                        // Check if this grant depends on a choice
+                        const choiceKeyProf = feature.name; // Assume feature name is key for proficiency choice
+                        const chosenProficiencies = baseCharacter.featureChoices?.[choiceKeyProf];
+
+                        let profsToGrant: string[] = [];
+                        if (metadata.choose && metadata.options) {
+                            // Grant only the chosen proficiencies
+                            if (chosenProficiencies && Array.isArray(chosenProficiencies)) {
+                                profsToGrant = chosenProficiencies.filter(choice => metadata.options?.includes(choice));
+                                if (profsToGrant.length !== metadata.choose) {
+                                    logMessage('warn', `Incorrect number of choices made for proficiency feature "${feature.name}". Expected ${metadata.choose}, got ${profsToGrant.length}.`);
+                                }
+                            } else {
+                                logMessage('warn', `No valid choices found for proficiency feature "${feature.name}" in character data.`);
+                            }
+                        } else {
+                            // Grant all listed proficiencies if no choice is needed
+                            profsToGrant = metadata.proficiencies || [];
+                        }
+
                         switch (metadata.type) {
-                            case 'armor': finalProficiencies.armor.push(...metadata.proficiencies); break;
-                            case 'weapon': finalProficiencies.weapons.push(...metadata.proficiencies); break;
-                            case 'tool': finalProficiencies.tools.push(...metadata.proficiencies); break;
-                            case 'savingThrow': finalProficiencies.savingThrows.push(...metadata.proficiencies); break;
+                            case 'armor': finalProficiencies.armor.push(...profsToGrant); break;
+                            case 'weapon': finalProficiencies.weapons.push(...profsToGrant); break;
+                            case 'tool': finalProficiencies.tools.push(...profsToGrant); break;
+                            case 'savingThrow': finalProficiencies.savingThrows.push(...profsToGrant); break;
                             case 'skill':
-                                metadata.proficiencies.forEach(skill => { finalSkills[skill.toLowerCase()] = true; });
+                                profsToGrant.forEach(skill => { finalSkills[skill.toLowerCase()] = true; });
                                 break;
+                            case 'language': finalProficiencies.languages.push(...profsToGrant); break; // Add languages
                         }
                         break;
+                     case 'choiceGrant':
+                         // If the choice itself grants a specific feature (like a Fighting Style),
+                         // that specific feature should have its own metadata applied.
+                         // This 'choiceGrant' itself doesn't directly apply stats/proficiencies here,
+                         // it just flags that a choice was made (handled during character save).
+                         logMessage('debug', `ChoiceGrant feature processed: ${feature.name}`);
+                         break;
                     // Cases for 'acBonus', 'advantage', 'resistance' are informational
                     // Their effects are calculated contextually (e.g., in CharacterSheet, CombatTracker)
                     case 'acBonus':
@@ -509,7 +570,9 @@ export async function getBackgroundFeatures(
                          logMessage('debug', `Informational Resistance detected: ${feature.name}`);
                          break;
                     default:
-                        logMessage('warn', `Unknown or unhandled feature metadata effectType: ${(metadata as any).effectType} for feature ${feature.name}`);
+                        // Use a type assertion to help TypeScript, but be cautious
+                        const unknownEffectType = (metadata as any).effectType;
+                        logMessage('warn', `Unknown or unhandled feature metadata effectType: ${unknownEffectType} for feature ${feature.name}`);
                 }
              } catch (error) {
                  const e = error instanceof Error ? error : new Error(String(error));
@@ -517,7 +580,7 @@ export async function getBackgroundFeatures(
                     function: 'applyFeatureRules.loop',
                     characterId: baseCharacter.id,
                     featureName: feature.name,
-                    effectType: feature.metadata.effectType,
+                    effectType: feature.metadata?.effectType, // Access safely
                  });
              }
         }
@@ -531,8 +594,10 @@ export async function getBackgroundFeatures(
         weapons: [...new Set(finalProficiencies.weapons)],
         tools: [...new Set(finalProficiencies.tools)],
         savingThrows: [...new Set(finalProficiencies.savingThrows)],
+        languages: [...new Set(finalProficiencies.languages)], // Add languages
     };
     derivedCharacter.skills = finalSkills; // Store final skill proficiency map
+    // Feature choices are already part of the baseCharacter and thus derivedCharacter
 
     // Note: HP, AC, Initiative, Speed, etc., are calculated dynamically based on the
     // final stats, features, and equipment in the component displaying the character (e.g., CharacterSheet).
@@ -540,14 +605,4 @@ export async function getBackgroundFeatures(
 
     logMessage('debug', `Finished applying feature rules for character ${baseCharacter.id}.`);
     return derivedCharacter;
-}
-
-// Old function name - keeping for backward compatibility temporarily if needed
-// but should be removed once all calls are updated to applyFeatureRules.
-/**
- * @deprecated Use applyFeatureRules instead.
- */
-export async function applyFeatureEffects(baseCharacter: Character): Promise<Character> {
-    logMessage('warn', 'Deprecated function applyFeatureEffects called. Use applyFeatureRules instead.');
-    return applyFeatureRules(baseCharacter);
 }

@@ -1,4 +1,5 @@
 
+
 /**
  * Represents the core data structure for a D&D character.
  */
@@ -39,8 +40,11 @@ export interface Character {
     weapons: string[];
     tools: string[];
     savingThrows: string[]; // Stat names the character is proficient in
+    languages?: string[]; // Languages known
   };
   features: Feature[]; // Features from class and race (potentially including metadata for effects)
+  // Record of choices made for features that offer options (e.g., Fighting Style: 'Archery')
+  featureChoices?: Record<string, string | string[]>;
   backstory: string;
   appearance: string;
   createdAt?: Date; // Optional: Timestamp for creation
@@ -60,8 +64,8 @@ type StatBonusMetadata = {
 
 type ProficiencyGrantMetadata = {
   effectType: 'proficiencyGrant';
-  type: 'armor' | 'weapon' | 'tool' | 'skill' | 'savingThrow';
-  proficiencies: string[]; // List of specific proficiencies granted (e.g., ["Longsword", "Stealth"])
+  type: 'armor' | 'weapon' | 'tool' | 'skill' | 'savingThrow' | 'language';
+  proficiencies?: string[]; // Optional: List of specific proficiencies granted (e.g., ["Longsword", "Stealth"])
   choose?: number; // Optional: Number of choices allowed from the list
   options?: string[]; // Optional: List of options if 'choose' is present
   condition?: string;
@@ -92,6 +96,18 @@ type ResistanceGrantMetadata = {
     condition?: string;
 };
 
+// Feature that requires a choice from a list (e.g., Fighting Style, Expertise options)
+// This might overlap with ProficiencyGrantMetadata if the choice grants proficiency.
+// Use this for choices that AREN'T directly adding a proficiency from a specific list,
+// but rather select a sub-feature or option.
+type ChoiceGrantMetadata = {
+    effectType: 'choiceGrant';
+    choose: number;
+    options: string[]; // List of choices (e.g., ["Archery", "Defense", "Dueling"])
+    choiceKey: string; // Key to store the choice under in Character.featureChoices (e.g., "Fighting Style")
+    condition?: string;
+}
+
 // Add more effect types as needed (e.g., SpeedBonus, SpecialAction, etc.)
 
 // Union type for feature metadata
@@ -101,7 +117,8 @@ export type FeatureEffectMetadata =
   | ACBonusMetadata
   | ACCalculationMetadata // Added new type
   | AdvantageGrantMetadata
-  | ResistanceGrantMetadata;
+  | ResistanceGrantMetadata
+  | ChoiceGrantMetadata; // Added ChoiceGrant
 // | SpeedBonusMetadata
 // | SpecialActionMetadata;
 
@@ -110,7 +127,7 @@ export type FeatureEffectMetadata =
 * Represents a feature or trait gained by a character.
 */
 export interface Feature {
-  name: string;
+  name: string; // This might be the generic name like "Fighting Style" or specific like "Fighting Style: Archery"
   description: string;
   source: string; // e.g., "Human Race", "Fighter Class", "Feat: Tough"
   metadata?: FeatureEffectMetadata; // Optional metadata describing the game effect
@@ -130,7 +147,7 @@ export interface EquipmentItem {
     quantity?: number;
     weight?: number;
     cost?: string;
-    type?: 'Weapon' | 'Armor' | 'Adventuring Gear' | 'Tool' | 'Potion' | string;
+    type?: 'Weapon' | 'Armor' | 'Adventuring Gear' | 'Tool' | 'Potion' | 'Currency' | string; // Added Currency
     isEquipped?: boolean; // State managed within the Character object
     // Weapon specific
     weaponCategory?: string; // e.g., "Simple Melee", "Martial Ranged"
@@ -198,10 +215,10 @@ export interface CharacterRace {
 export interface BackgroundInfo {
     name: string;
     description: string;
-    skillProficiencies: string[];
+    skillProficiencies?: string[];
     toolProficiencies?: string[];
     languages?: { choose: number; options?: string[] }; // e.g., choose 2 from list
-    feature: { name: string; description: string }; // Core background feature
+    feature?: { name: string; description: string }; // Core background feature key/name
     equipment?: string[]; // List of starting equipment names/descriptions
     startingGold?: number;
     // Suggested personality traits are usually handled separately or embedded in description
@@ -340,7 +357,7 @@ export interface Monster {
         monsters?: Record<string, Omit<Monster, 'id'>>;
         npcs?: Record<string, Omit<NPC, 'id'>>;
         backgrounds?: Record<string, BackgroundInfo>; // Store full background info
-        features?: Record<string, Omit<Feature, 'name' | 'source'>>; // Allow storing standalone features, keyed by name
+        features?: Record<string, Omit<Feature, 'name'>>; // Keyed by unique feature name/key
     };
     createdAt: Date;
     updatedAt: Date;

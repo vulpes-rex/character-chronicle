@@ -1,11 +1,11 @@
-
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "outDir": "../../dist/out-tsc",
-    "module": "commonjs",
+    "module": "commonjs", // Ensure commonjs for NestJS backend build
     "types": ["node"]
+    // Paths are inherited from tsconfig.json / tsconfig.base.json
   },
-  "exclude": ["jest.config.ts", "**/*.spec.ts", "**/*.test.ts"],
-  "include": ["**/*.ts"]
+  "exclude": ["jest.config.ts", "**/*.spec.ts", "**/*.test.ts"], // Exclude test files
+  "include": ["**/*.ts"] // Include all .ts files in the app source
 }

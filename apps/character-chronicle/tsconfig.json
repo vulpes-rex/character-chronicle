@@ -15,27 +15,20 @@
       }
     ],
     "types": ["node"],
-    "strictNullChecks": false,
-    // Ensure paths from tsconfig.base.json are resolved correctly
+    "strictNullChecks": true, // Enforce strict null checks for better type safety
     "paths": {
-      "@/*": ["./apps/character-chronicle/src/*"],
-      "@/nestjs/*": ["./apps/api/src/*"], // Add path alias for NestJS modules
-      "@character-chronicle/shared/data": ["../../libs/shared/data/src/index.ts"],
-      "@character-chronicle/shared/firebase": ["../../libs/shared/firebase/src/index.ts"],
-      "@character-chronicle/shared/types": ["../../libs/shared/types/src/index.ts"],
-      "@character-chronicle/shared/utils": ["../../libs/shared/utils/src/index.ts"]
+      "@/*": ["./src/*"], // Keep app-specific alias
+      // Aliases for shared libs and nestjs app are inherited from tsconfig.base.json
     }
   },
   "include": [
+    "next-env.d.ts", // Include Next.js environment types
     "**/*.ts",
     "**/*.tsx",
     "**/*.js",
     "**/*.jsx",
-    "../../node_modules/next/dist/client/image-component.js",
-    ".next/types/**/*.ts",
-    "src/nestjs/**/*.ts" // Include NestJS source files for type checking if needed by frontend types
+    "../../node_modules/next/dist/client/image-component.js", // Keep for compatibility
+    ".next/types/**/*.ts" // Include Next.js generated types
   ],
-  "exclude": ["node_modules", "dist", ".next"]
+  "exclude": ["node_modules", "dist", ".next", "**/jest.config.ts", "**/*.spec.ts", "**/*.test.ts"] // Exclude test files and build outputs
 }
-
-    

@@ -1,3 +1,4 @@
+
 'use server';
 
 import type { Feature, FeatureEffectMetadata, SourcePack, CharacterClass, CharacterRace, BackgroundInfo, Character } from '@/lib/types';
@@ -20,7 +21,8 @@ interface FeatureRule {
 // --- Base/Placeholder Data (SRD or Core Rules) ---
 // This should contain the *definitions* of features referenced by key in source packs.
 // This is now primarily a FALLBACK or reference. Feature definitions should ideally come from source packs.
-export const BASE_FEATURE_DEFINITIONS: Record<string, Feature> = {
+// REMOVED export keyword from here
+const BASE_FEATURE_DEFINITIONS: Record<string, Feature> = {
     // Race Features
     "HumanASI": {
         name: "Ability Score Increase",

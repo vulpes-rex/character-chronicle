@@ -1,0 +1,26 @@
+
+{
+  "name": "shared-data",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/shared/data/src",
+  "projectType": "library",
+  "tags": ["scope:shared", "type:data"],
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "outputs": ["{options.outputPath}"],
+      "options": {
+        "outputPath": "dist/libs/shared/data",
+        "main": "libs/shared/data/src/index.ts",
+        "tsConfig": "libs/shared/data/tsconfig.lib.json",
+        "assets": ["libs/shared/data/*.md"]
+      }
+    },
+    "lint": {
+       "executor": "@nx/eslint:lint",
+       "options": {
+         "lintFilePatterns": ["libs/shared/data/**/*.{ts,tsx,js,jsx}"]
+       }
+    }
+  }
+}

@@ -1,0 +1,74 @@
+{
+  "name": "character-chronicle",
+  "$schema": "../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "apps/character-chronicle/src",
+  "projectType": "application",
+  "tags": [],
+  "targets": {
+    "build": {
+      "executor": "@nx/next:build",
+      "outputs": ["{options.outputPath}"],
+      "defaultConfiguration": "production",
+      "options": {
+        "outputPath": "dist/apps/character-chronicle"
+      },
+      "configurations": {
+        "development": {
+          "outputPath": "apps/character-chronicle"
+        },
+        "production": {}
+      }
+    },
+    "serve": {
+      "executor": "@nx/next:server",
+      "defaultConfiguration": "development",
+      "options": {
+        "buildTarget": "character-chronicle:build",
+        "dev": true,
+        "port": 9002
+      },
+      "configurations": {
+        "development": {
+          "buildTarget": "character-chronicle:build:development",
+          "dev": true
+        },
+        "production": {
+          "buildTarget": "character-chronicle:build:production",
+          "dev": false
+        }
+      }
+    },
+    "export": {
+      "executor": "@nx/next:export",
+      "options": {
+        "buildTarget": "character-chronicle:build:production"
+      }
+    },
+    "lint": {
+      "executor": "@nx/eslint:lint",
+       "options": {
+         "lintFilePatterns": ["apps/character-chronicle/**/*.{ts,tsx,js,jsx}"]
+       }
+    },
+    "typecheck": {
+       "executor": "nx:run-commands",
+       "options": {
+         "command": "tsc --noEmit --project apps/character-chronicle/tsconfig.json"
+       }
+    },
+    "genkit:dev": {
+       "executor": "nx:run-commands",
+       "options": {
+         "command": "genkit start -- tsx apps/character-chronicle/src/ai/dev.ts",
+         "cwd": "."
+       }
+    },
+    "genkit:watch": {
+        "executor": "nx:run-commands",
+        "options": {
+          "command": "genkit start -- tsx --watch apps/character-chronicle/src/ai/dev.ts",
+          "cwd": "."
+        }
+    }
+  }
+}

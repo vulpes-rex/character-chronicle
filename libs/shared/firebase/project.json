@@ -1,0 +1,26 @@
+
+{
+  "name": "shared-firebase",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "libs/shared/firebase/src",
+  "projectType": "library",
+  "tags": ["scope:shared", "type:util"],
+  "targets": {
+    "build": {
+      "executor": "@nx/js:tsc",
+      "outputs": ["{options.outputPath}"],
+      "options": {
+        "outputPath": "dist/libs/shared/firebase",
+        "main": "libs/shared/firebase/src/index.ts",
+        "tsConfig": "libs/shared/firebase/tsconfig.lib.json",
+        "assets": ["libs/shared/firebase/*.md"]
+      }
+    },
+    "lint": {
+       "executor": "@nx/eslint:lint",
+       "options": {
+         "lintFilePatterns": ["libs/shared/firebase/**/*.{ts,tsx,js,jsx}"]
+       }
+    }
+  }
+}

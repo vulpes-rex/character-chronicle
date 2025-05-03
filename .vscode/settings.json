@@ -1,5 +1,8 @@
 {
     "IDX.aI.enableInlineCompletion": true,
     "IDX.aI.enableCodebaseIndexing": true,
-    "git.ignoreLimitWarning": true
+    "git.ignoreLimitWarning": true,
+    "recommendations": [
+      "nrwl.angular-console" // Recommend Nx Console
+    ]
 }

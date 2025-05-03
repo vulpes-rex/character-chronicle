@@ -42,7 +42,7 @@ export default async function ViewCharacterPage({ params }: ViewCharacterPagePro
         // Pass the loaded character data to the CharacterSheet component
         // CharacterSheet is a Client Component and receives the data as props
         <CharacterSheet initialCharacter={characterData} />
-        
+
       ) : (
         !errorLoading && (
           <div className="p-4 md:p-6">

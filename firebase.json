@@ -1,17 +1,17 @@
 
 {
   "hosting": {
-    "public": ".next",
+    "public": "dist/apps/character-chronicle/.next",
     "ignore": [
       "firebase.json",
       "**/.*",
       "**/node_modules/**"
     ],
     "rewrites": [
-      {
-        "source": "/_next/static/**",
-        "destination": "/_next/static/**"
-      },
+       {
+         "source": "/_next/static/{app,chunks,css,media,pages,server}/**",
+         "destination": "/_next/static/{app,chunks,css,media,pages,server}/**"
+       },
       {
          "source": "/favicon.ico",
          "destination": "/favicon.ico"

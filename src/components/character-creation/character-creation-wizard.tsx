@@ -1,3 +1,4 @@
+
 'use client';
 
 import { useState, useCallback, useMemo, useEffect } from 'react';
@@ -409,7 +410,7 @@ export function CharacterCreationWizard({ initialData, editMode = false }: Chara
                 return <Step6Equipment data={characterData} updateData={updateCharacterData} setValidity={setValidityCallback} combinedContent={combinedContent} />;
             case 8: // Spells Step (Only if spellcaster)
                  if (!editMode && isSpellcaster) {
-                    return 
+                    return <Step8Spells
                                 data={characterData}
                                 updateData={updateCharacterData}
                                 setValidity={setValidityCallback}
@@ -420,15 +421,15 @@ export function CharacterCreationWizard({ initialData, editMode = false }: Chara
                  }
                  // Skip spell step in edit mode or if not a spellcaster
                  setCurrentStep(prev => prev + 1); // Auto-advance if skipped
-                 return Loading next step...; // Or handle finish button logic here
+                 return <div>Loading next step...</div>; // Or handle finish button logic here
             default:
                 // Should ideally handle final submission logic here if TOTAL_STEPS logic changes
                  if (currentStep > TOTAL_STEPS && !isLoading) {
                      // If somehow past the last step, allow submission
                      setValidityCallback(true); // Ensure final step is valid
-                     return Review your choices and finish creating your character.;
+                     return <div>Review your choices and finish creating your character.</div>;
                  }
-                return Invalid Step or Loading...;
+                return <div>Invalid Step or Loading...</div>;
         }
     };
 
@@ -476,7 +477,7 @@ export function CharacterCreationWizard({ initialData, editMode = false }: Chara
                     
                 ) : (
                     
-                        {isLoading && }
+                        {isLoading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                         {editMode ? 'Save Changes' : 'Finish & Create Character'}
                     
                 )}

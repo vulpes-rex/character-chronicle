@@ -501,4 +501,3 @@ export interface CharacterLevel {
     // spellcasting?: { ... }; // Optional spellcasting details
     // Add other level-specific changes like ASI options
 }
-```

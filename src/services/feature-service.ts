@@ -1,8 +1,8 @@
-
 'use server';
 
 import type { Feature, FeatureEffectMetadata, SourcePack, CharacterClass, CharacterRace, BackgroundInfo, Character } from '@/lib/types';
 import { logError, logMessage } from './logging-service';
+import { ALL_SKILLS } from '@/lib/types'; // Import ALL_SKILLS
 
 // --- Rule-Based System for Applying Feature Effects ---
 
@@ -19,7 +19,8 @@ interface FeatureRule {
 
 // --- Base/Placeholder Data (SRD or Core Rules) ---
 // This should contain the *definitions* of features referenced by key in source packs.
-const BASE_FEATURE_DEFINITIONS: Record<string, Feature> = {
+// This is now primarily a FALLBACK or reference. Feature definitions should ideally come from source packs.
+export const BASE_FEATURE_DEFINITIONS: Record<string, Feature> = {
     // Race Features
     "HumanASI": {
         name: "Ability Score Increase",
@@ -40,6 +41,7 @@ const BASE_FEATURE_DEFINITIONS: Record<string, Feature> = {
             choose: 1,
             // Options could be dynamically populated or hardcoded for SRD
             options: ["Common", "Dwarvish", "Elvish", "Giant", "Gnomish", "Goblin", "Halfling", "Orc"],
+            choiceKey: "ExtraLanguage", // Added choiceKey
         }
     },
     "Darkvision": {
@@ -120,6 +122,7 @@ const BASE_FEATURE_DEFINITIONS: Record<string, Feature> = {
         description: "You gain a +2 bonus to attack rolls you make with ranged weapons.",
         source: "Fighter Class (Base)",
         // Note: This bonus needs to be applied during attack roll calculation, not directly to stats. Informational metadata.
+        // Consider adding metadata like: { effectType: 'attackBonus', value: 2, condition: 'ranged weapon' }
     },
      "FightingStyleDefense": {
         name: "Fighting Style: Defense",
@@ -157,6 +160,7 @@ const BASE_FEATURE_DEFINITIONS: Record<string, Feature> = {
              type: 'skill', // Primary type is skill
              choose: 2, // Choose 2 skills OR 1 skill + 1 tool
              options: ALL_SKILLS, // Simplified: Allow choosing from all skills/tools (needs proper tool list)
+             choiceKey: "Expertise", // Added choiceKey
              // Needs a way to handle the 'or 1 tool' case - complex metadata required
          }
         // Requires player choice, metadata might indicate this. Expertise effect handled in skill calculation.
@@ -196,6 +200,12 @@ const BASE_FEATURE_DEFINITIONS: Record<string, Feature> = {
         description: "At 2nd level, you choose an arcane tradition, shaping your practice of magic through one of eight schools.",
         source: "Wizard Class (Base)",
         // Metadata might indicate a choice of sub-features/subclass
+         metadata: { // Example metadata for subclass choice
+             effectType: "choiceGrant",
+             choose: 1,
+             options: ["School of Abjuration", "School of Conjuration", "School of Divination", "School of Enchantment", "School of Evocation", "School of Illusion", "School of Necromancy", "School of Transmutation"], // Example SRD schools
+             choiceKey: "Arcane Tradition",
+         }
     },
     "UnarmoredDefenseBarbarian": {
         name: 'Unarmored Defense (Barbarian)',
@@ -257,8 +267,9 @@ export async function getFeatureDefinition(
         if (combinedContent?.features && combinedContent.features[featureKey]) {
              logMessage('debug', `Found feature "${featureKey}" in source pack content.`);
             const featureData = combinedContent.features[featureKey];
+            // Ensure name property exists on the returned object
             return {
-                 name: featureKey, // Ensure name is the key
+                 name: featureKey,
                  description: featureData.description || '',
                  source: featureData.source || 'Source Pack', // Use pack source or default
                  metadata: featureData.metadata,
@@ -272,7 +283,8 @@ export async function getFeatureDefinition(
         // 2. Fallback to base definitions
         if (BASE_FEATURE_DEFINITIONS[featureKey]) {
              logMessage('debug', `Found feature "${featureKey}" in base definitions.`);
-            return BASE_FEATURE_DEFINITIONS[featureKey];
+            // Ensure name property exists when returning from base definitions
+            return { ...BASE_FEATURE_DEFINITIONS[featureKey], name: featureKey };
         }
 
         // Feature not found
@@ -318,22 +330,29 @@ export async function getMultipleFeatureDefinitions(
  */
 export async function getRaceFeatures(
     raceName: string,
-    combinedContent: SourcePack['content']
+    combinedContent?: SourcePack['content'] // Make optional for flexibility
 ): Promise<Feature[]> {
-    if (!raceName || !combinedContent) {
-        logMessage('warn', 'getRaceFeatures called without raceName or combinedContent.');
+    if (!raceName) {
+        logMessage('warn', 'getRaceFeatures called without raceName.');
         return [];
     }
 
     let featureKeys: string[] = [];
-    const raceData = combinedContent.races?.[raceName];
+    const raceData = combinedContent?.races?.[raceName];
 
     if (raceData?.traits) {
         featureKeys = raceData.traits;
          logMessage('debug', `Found race "${raceName}" in source packs, fetching features: ${featureKeys.join(', ')}`);
     } else {
-         logMessage('warn', `Race "${raceName}" not found in source packs or has no traits defined.`);
-         featureKeys = []; // Do not fall back to hardcoded base features here
+         // Optional: Fallback to base definitions if race not in custom packs
+         const baseRaceData = BASE_FEATURE_DEFINITIONS[raceName]; // Simple lookup, needs refinement
+         if (baseRaceData && Array.isArray((baseRaceData as any).traits)) { // Needs better type check
+            logMessage('debug', `Race "${raceName}" not in source packs, falling back to base definitions. Traits: ${(baseRaceData as any).traits.join(', ')}`);
+            featureKeys = (baseRaceData as any).traits;
+         } else {
+             logMessage('warn', `Race "${raceName}" not found in source packs or base definitions, or has no traits defined.`);
+             featureKeys = [];
+         }
     }
 
     return getMultipleFeatureDefinitions(featureKeys, combinedContent);
@@ -341,44 +360,61 @@ export async function getRaceFeatures(
 
 
 /**
- * Retrieves cumulative features granted by a specific class up to a given level, **relying solely on source pack data**.
+ * Retrieves cumulative features granted by a specific class up to a given level.
+ * Prioritizes using `featuresByLevel` from source pack definitions if available,
+ * otherwise falls back to base definitions.
  * @param className - The name of the class.
  * @param level - The character's level in that class.
- * @param combinedContent - Combined content from active source packs.
- * @returns A promise resolving to an array of Feature objects for the class/level based *only* on `featuresByLevel` in the source pack.
+ * @param combinedContent - Optional combined content from active source packs.
+ * @returns A promise resolving to an array of Feature objects for the class/level.
  */
 export async function getClassFeatures(
     className: string,
     level: number,
-    combinedContent: SourcePack['content']
+    combinedContent?: SourcePack['content'] // Make optional
 ): Promise<Feature[]> {
-     if (!className || !combinedContent || level < 1) {
-        logMessage('warn', 'getClassFeatures called without className, combinedContent, or invalid level.');
+     if (!className || level < 1) {
+        logMessage('warn', 'getClassFeatures called without className or invalid level.');
         return [];
     }
 
-    const classData = combinedContent.classes?.[className];
-    let allFeatureKeys: string[] = [];
+    let classData: CharacterClass | undefined = combinedContent?.classes?.[className];
+    let usingSource = true;
 
-    if (classData?.featuresByLevel) {
-        logMessage('debug', `Found class "${className}" in source packs, accumulating features up to level ${level}.`);
+    if (!classData) {
+         logMessage('debug', `Class "${className}" not found in source packs, checking base definitions.`);
+         // Fallback to base definitions (if you have them)
+         // classData = BASE_CLASS_DEFINITIONS[className]; // Assuming BASE_CLASS_DEFINITIONS exists
+         usingSource = false;
+    }
+
+    if (!classData) {
+        logMessage('error', `Class definition not found for "${className}" in source packs or base definitions.`);
+        return [];
+    }
+
+    let allFeatureKeys: string[] = [];
+    logMessage('debug', `Accumulating features for ${className} up to level ${level} ${usingSource ? 'from source pack' : 'from base definitions'}.`);
+
+    if (classData.featuresByLevel) {
         for (let i = 1; i <= level; i++) {
              if (classData.featuresByLevel[i]) {
                 allFeatureKeys.push(...classData.featuresByLevel[i]);
              }
         }
     } else {
-        // No fallback to hardcoded features
-        logMessage('warn', `Class "${className}" not found in source packs or lacks 'featuresByLevel' definition.`);
-        allFeatureKeys = [];
+        logMessage('warn', `Class "${className}" lacks 'featuresByLevel' definition.`);
     }
 
      const uniqueFeatureKeys = [...new Set(allFeatureKeys)];
+     logMessage('debug', `Unique feature keys for ${className} level ${level}: ${uniqueFeatureKeys.join(', ')}`);
+
      if (uniqueFeatureKeys.length === 0) {
         return [];
      }
 
      try {
+        // Pass combinedContent to ensure feature definitions are checked there first
         return await getMultipleFeatureDefinitions(uniqueFeatureKeys, combinedContent);
      } catch (error) {
          const e = error instanceof Error ? error : new Error(String(error));
@@ -395,74 +431,90 @@ export async function getClassFeatures(
 
 
 /**
- * Retrieves features and proficiencies granted by a specific background name, considering source packs.
+ * Retrieves features and proficiencies granted by a specific background name.
+ * Prioritizes definitions from combinedContent, falls back to base definitions.
  * @param backgroundName - The name of the background.
- * @param combinedContent - Combined content from active source packs.
+ * @param combinedContent - Optional combined content from active source packs.
  * @returns A promise resolving to an array of Feature objects for the background.
  */
 export async function getBackgroundFeatures(
     backgroundName: string,
-    combinedContent: SourcePack['content']
+    combinedContent?: SourcePack['content']
 ): Promise<Feature[]> {
-     if (!backgroundName || !combinedContent) {
-        logMessage('warn', 'getBackgroundFeatures called without backgroundName or combinedContent.');
+     if (!backgroundName) {
+        logMessage('warn', 'getBackgroundFeatures called without backgroundName.');
         return [];
     }
 
-    const backgroundData = combinedContent.backgrounds?.[backgroundName];
+    let backgroundData: BackgroundInfo | null | undefined = combinedContent?.backgrounds?.[backgroundName];
+    let usingSource = true;
+
+    if (!backgroundData) {
+         logMessage('debug', `Background "${backgroundName}" not found in source packs, checking base definitions.`);
+         backgroundData = BASE_FEATURE_DEFINITIONS[backgroundName] as BackgroundInfo | undefined; // Adjust if base features are stored differently
+         usingSource = false;
+    }
+
+    if (!backgroundData) {
+        logMessage('warn', `Background "${backgroundName}" not found in source packs or base definitions.`);
+        return [];
+    }
+
+    logMessage('debug', `Found background "${backgroundName}" ${usingSource ? 'in source packs' : 'in base definitions'}.`);
     let features: Feature[] = [];
 
-    if (backgroundData) {
-        logMessage('debug', `Found background "${backgroundName}" in source packs.`);
-        if (backgroundData.feature?.name) { // Check if feature name exists
-             // Attempt to get the full definition, use stored info as fallback
-             const mainFeatureDef = await getFeatureDefinition(backgroundData.feature.name, combinedContent);
-             if (mainFeatureDef) {
-                 features.push({ ...mainFeatureDef, source: `${backgroundName} Background` });
-             } else {
-                 features.push({ // Fallback if full definition not found
-                    name: backgroundData.feature.name,
-                    description: backgroundData.feature.description || 'No description.',
-                    source: `${backgroundName} Background`,
-                 });
-             }
-        }
-        if (backgroundData.skillProficiencies && backgroundData.skillProficiencies.length > 0) {
+    // --- Add Main Background Feature ---
+    if (backgroundData.feature?.name) {
+        const mainFeatureDef = await getFeatureDefinition(backgroundData.feature.name, combinedContent);
+        if (mainFeatureDef) {
+            features.push({ ...mainFeatureDef, source: `${backgroundName} Background` });
+        } else {
+            // Fallback to basic info if full definition missing
             features.push({
-                name: `${backgroundName} Skill Proficiencies`,
-                description: `Gain proficiency in ${backgroundData.skillProficiencies.join(' and ')}.`,
+                name: backgroundData.feature.name,
+                description: backgroundData.feature.description || 'No description.',
                 source: `${backgroundName} Background`,
-                metadata: { effectType: 'proficiencyGrant', type: 'skill', proficiencies: backgroundData.skillProficiencies },
             });
         }
-         if (backgroundData.toolProficiencies && backgroundData.toolProficiencies.length > 0) {
-            features.push({
-                name: `${backgroundName} Tool Proficiencies`,
-                description: `Gain proficiency with ${backgroundData.toolProficiencies.join(' and ')}.`,
-                source: `${backgroundName} Background`,
-                metadata: { effectType: 'proficiencyGrant', type: 'tool', proficiencies: backgroundData.toolProficiencies },
-            });
-        }
-         if (backgroundData.languages && backgroundData.languages.choose > 0) {
-             features.push({
-                name: `${backgroundName} Languages`,
-                description: `Choose ${backgroundData.languages.choose} extra language(s)${backgroundData.languages.options ? ` from: ${backgroundData.languages.options.join(', ')}` : ''}.`,
-                source: `${backgroundName} Background`,
-                 metadata: { // Add metadata for choice
-                     effectType: "proficiencyGrant",
-                     type: "language",
-                     choose: backgroundData.languages.choose,
-                     options: backgroundData.languages.options || ["Common", "Dwarvish", "Elvish", "Giant", "Gnomish", "Goblin", "Halfling", "Orc"], // Fallback options
-                 }
-             });
-         }
-    } else {
-         logMessage('warn', `Background "${backgroundName}" not found in source packs.`);
-         // No fallback to hardcoded background features
     }
+
+    // --- Add Proficiency Features ---
+     if (backgroundData.skillProficiencies && backgroundData.skillProficiencies.length > 0) {
+        features.push({
+            name: `${backgroundName} Skill Proficiencies`,
+            description: `Gain proficiency in ${backgroundData.skillProficiencies.join(' and ')}.`,
+            source: `${backgroundName} Background`,
+            metadata: { effectType: 'proficiencyGrant', type: 'skill', proficiencies: backgroundData.skillProficiencies },
+        });
+    }
+     if (backgroundData.toolProficiencies && backgroundData.toolProficiencies.length > 0) {
+        features.push({
+            name: `${backgroundName} Tool Proficiencies`,
+            description: `Gain proficiency with ${backgroundData.toolProficiencies.join(' and ')}.`,
+            source: `${backgroundName} Background`,
+            metadata: { effectType: 'proficiencyGrant', type: 'tool', proficiencies: backgroundData.toolProficiencies },
+        });
+    }
+    if (backgroundData.languages && backgroundData.languages.choose > 0) {
+        const choiceKey = `${backgroundName}Languages`; // Construct a unique key
+         features.push({
+            name: `${backgroundName} Languages`,
+            description: `Choose ${backgroundData.languages.choose} extra language(s)${backgroundData.languages.options ? ` from: ${backgroundData.languages.options.join(', ')}` : ''}.`,
+            source: `${backgroundName} Background`,
+             metadata: {
+                 effectType: "proficiencyGrant",
+                 type: "language",
+                 choose: backgroundData.languages.choose,
+                 options: backgroundData.languages.options || ["Common", "Dwarvish", "Elvish", "Giant", "Gnomish", "Goblin", "Halfling", "Orc"], // Fallback options
+                 choiceKey: choiceKey, // Assign the key
+             }
+         });
+     }
 
     return features;
 }
+
+
 
 /**
  * Applies the effects of a character's features to their base stats and properties.
@@ -517,8 +569,7 @@ export async function getBackgroundFeatures(
                         });
                         break;
                     case 'proficiencyGrant':
-                        // Check if this grant depends on a choice
-                        const choiceKeyProf = feature.name; // Assume feature name is key for proficiency choice
+                        const choiceKeyProf = metadata.choiceKey || feature.name; // Use choiceKey or feature name
                         const chosenProficiencies = baseCharacter.featureChoices?.[choiceKeyProf];
 
                         let profsToGrant: string[] = [];
@@ -527,10 +578,17 @@ export async function getBackgroundFeatures(
                             if (chosenProficiencies && Array.isArray(chosenProficiencies)) {
                                 profsToGrant = chosenProficiencies.filter(choice => metadata.options?.includes(choice));
                                 if (profsToGrant.length !== metadata.choose) {
-                                    logMessage('warn', `Incorrect number of choices made for proficiency feature "${feature.name}". Expected ${metadata.choose}, got ${profsToGrant.length}.`);
+                                    logMessage('warn', `Incorrect number of choices made for proficiency feature "${feature.name}". Expected ${metadata.choose}, got ${profsToGrant.length}. Choices: ${chosenProficiencies.join(', ')}`);
+                                }
+                            } else if (chosenProficiencies && typeof chosenProficiencies === 'string' && metadata.choose === 1) {
+                                // Handle single choice stored as string
+                                if (metadata.options?.includes(chosenProficiencies)) {
+                                     profsToGrant = [chosenProficiencies];
+                                } else {
+                                     logMessage('warn', `Invalid choice "${chosenProficiencies}" for single proficiency feature "${feature.name}".`);
                                 }
                             } else {
-                                logMessage('warn', `No valid choices found for proficiency feature "${feature.name}" in character data.`);
+                                logMessage('warn', `No valid choices found for proficiency feature "${feature.name}" in character data (choiceKey: ${choiceKeyProf}). Choices data: ${JSON.stringify(baseCharacter.featureChoices)}`);
                             }
                         } else {
                             // Grant all listed proficiencies if no choice is needed
@@ -598,6 +656,13 @@ export async function getBackgroundFeatures(
     };
     derivedCharacter.skills = finalSkills; // Store final skill proficiency map
     // Feature choices are already part of the baseCharacter and thus derivedCharacter
+
+    // Ensure features array in derived character includes currentUses from base if available
+    derivedCharacter.features = baseCharacter.features.map(baseFeature => ({
+        ...baseFeature,
+        currentUses: baseFeature.currentUses, // Carry over current uses
+    }));
+
 
     // Note: HP, AC, Initiative, Speed, etc., are calculated dynamically based on the
     // final stats, features, and equipment in the component displaying the character (e.g., CharacterSheet).
